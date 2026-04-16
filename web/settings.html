@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Spider_XHS 设置</title>
+  <link rel="stylesheet" href="/ui/app.css">
+</head>
+<body data-page="settings">
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/">Spider_XHS</a>
+      <nav class="topnav" aria-label="主导航">
+        <a class="nav-link" href="/">采集台</a>
+        <a class="nav-link active" href="/settings" aria-current="page">设置</a>
+      </nav>
+      <div class="topbar-meta">System Settings</div>
+    </div>
+  </header>
+
+  <main class="page-shell">
+    <section class="surface hero reveal">
+      <div class="hero-copy">
+        <p class="eyebrow eyebrow-muted">Spider_XHS Settings</p>
+        <h1>系统设置页</h1>
+        <p class="hero-lead">登录状态、搜索拉取倍率、分页与详情拉取间隔、自动化调度都统一在这里维护。保存后的设置会作为首页采集时使用的系统参数。</p>
+      </div>
+      <div class="hero-actions">
+        <a class="btn btn-ghost" href="/">返回采集台</a>
+        <button id="saveConfigBtn" class="btn btn-primary" type="button">保存设置</button>
+      </div>
+    </section>
+
+    <section class="grid two-columns">
+      <article class="surface surface-dark reveal">
+        <div class="section-title">
+          <span class="section-index">01</span>
+          <div>
+            <h2>账号与登录</h2>
+            <p class="muted">采集接口依赖登录 Cookie。系统会自动读取并保存登录后的浏览器 Cookie。</p>
+          </div>
+        </div>
+
+        <div id="cookieStatus" class="status-panel muted">正在读取配置...</div>
+
+        <div class="button-pair">
+          <button id="openLoginBrowserBtn" class="btn btn-primary" type="button">打开浏览器登录</button>
+          <button id="checkLoginBtn" class="btn btn-secondary" type="button">检查登录</button>
+        </div>
+      </article>
+
+      <article class="surface reveal">
+        <div class="section-title">
+          <span class="section-index">02</span>
+          <div>
+            <h2>拉取节奏</h2>
+            <p class="muted">控制搜索分页和详情抓取的节奏区间，系统会在设定范围内随机等待。</p>
+          </div>
+        </div>
+
+        <div class="field-grid field-grid-2">
+          <label class="field full-width">
+            <span>搜索拉取倍率</span>
+            <input id="requestMultiplierInput" type="number" min="1" max="10" value="3">
+          </label>
+          <label class="field">
+            <span>搜索分页最小间隔（秒）</span>
+            <input id="searchDelayMinInput" type="number" min="0" max="30" step="0.5" value="2">
+          </label>
+          <label class="field">
+            <span>搜索分页最大间隔（秒）</span>
+            <input id="searchDelayMaxInput" type="number" min="0" max="30" step="0.5" value="4">
+          </label>
+          <label class="field">
+            <span>详情拉取最小间隔（秒）</span>
+            <input id="detailDelayMinInput" type="number" min="0" max="30" step="0.5" value="1">
+          </label>
+          <label class="field">
+            <span>详情拉取最大间隔（秒）</span>
+            <input id="detailDelayMaxInput" type="number" min="0" max="30" step="0.5" value="3">
+          </label>
+        </div>
+
+        <p class="muted">最大值小于最小值时，后端会自动按最小值处理。</p>
+      </article>
+    </section>
+
+    <section class="surface reveal">
+      <div class="section-title">
+        <span class="section-index">03</span>
+        <div>
+          <h2>自动化调度</h2>
+          <p class="muted">服务运行期间按配置触发，任务不会并发重叠。每日执行次数与执行时间会交由后端统一校验。</p>
+        </div>
+      </div>
+
+      <div class="row spread switch-row">
+        <div>
+          <strong>启用自动采集</strong>
+          <p class="muted">关闭后会保留设置值，但不会自动触发调度任务。</p>
+        </div>
+        <label class="switch">
+          <input id="scheduleEnabledInput" type="checkbox">
+          <span></span>
+        </label>
+      </div>
+
+      <div class="field-grid field-grid-2">
+        <label class="field">
+          <span>执行周期</span>
+          <select id="cycleInput">
+            <option value="daily">每天</option>
+            <option value="weekly">每周</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>每天执行次数</span>
+          <input id="dailyRunsInput" type="number" min="1" max="24" value="1">
+        </label>
+        <label class="field full-width">
+          <span>执行时间（HH:MM，逗号分隔）</span>
+          <input id="runTimesInput" type="text" value="09:00" placeholder="09:00, 21:00">
+        </label>
+      </div>
+
+      <div id="weekdaySection" class="choice-section">
+        <h3>每周执行日</h3>
+        <div id="weekdayChoices" class="choice-grid compact"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" aria-live="polite"></div>
+  <script src="/ui/app.js"></script>
+</body>
+</html>

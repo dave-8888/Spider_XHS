@@ -2,6 +2,7 @@
 import json
 import re
 import urllib
+from typing import Callable, Optional
 import requests
 from xhs_utils.xhs_util import splice_str, generate_request_params, generate_x_b3_traceid, get_common_headers
 from loguru import logger
@@ -519,7 +520,20 @@ class XHS_Apis():
             msg = str(e)
         return success, msg, res_json
 
-    def search_some_note(self, query: str, require_num: int, cookies_str: str, sort_type_choice=0, note_type=0, note_time=0, note_range=0, pos_distance=0, geo="", proxies: dict = None):
+    def search_some_note(
+        self,
+        query: str,
+        require_num: int,
+        cookies_str: str,
+        sort_type_choice=0,
+        note_type=0,
+        note_time=0,
+        note_range=0,
+        pos_distance=0,
+        geo="",
+        proxies: dict = None,
+        page_delay_callback: Optional[Callable[[int], None]] = None,
+    ):
         """
             指定数量搜索笔记，设置排序方式和笔记类型和笔记数量
             :param query 搜索的关键词
@@ -544,9 +558,11 @@ class XHS_Apis():
                     break
                 notes = res_json["data"]["items"]
                 note_list.extend(notes)
-                page += 1
                 if len(note_list) >= require_num or not res_json["data"]["has_more"]:
                     break
+                page += 1
+                if page_delay_callback:
+                    page_delay_callback(page)
         except Exception as e:
             success = False
             msg = str(e)
@@ -1008,7 +1024,6 @@ if __name__ == '__main__':
     note_url = r'https://www.xiaohongshu.com/explore/67d7c713000000000900e391?xsec_token=AB1ACxbo5cevHxV_bWibTmK8R1DDz0NnAW1PbFZLABXtE=&xsec_source=pc_user'
     success, msg, note_all_comment = xhs_apis.get_note_all_comment(note_url, cookies_str)
     logger.info(f'获取笔记评论结果 {json.dumps(note_all_comment, ensure_ascii=False)}: {success}, msg: {msg}')
-
 
 
 

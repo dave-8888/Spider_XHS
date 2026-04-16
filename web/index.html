@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Spider_XHS 采集台</title>
+  <link rel="stylesheet" href="/ui/app.css">
+</head>
+<body data-page="home">
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/">Spider_XHS</a>
+      <nav class="topnav" aria-label="主导航">
+        <a class="nav-link active" href="/" aria-current="page">采集台</a>
+        <a class="nav-link" href="/settings">设置</a>
+      </nav>
+      <div class="topbar-meta">Local Console</div>
+    </div>
+  </header>
+
+  <main class="page-shell">
+    <section class="surface surface-dark hero reveal">
+      <div class="hero-copy">
+        <p class="eyebrow">Spider_XHS Local Console</p>
+        <h1>小红书内容采集台</h1>
+        <p class="hero-lead">在更清爽的界面里管理关键词、筛选条件和本地结果。登录状态、拉取节奏与自动化调度已经集中到独立设置页。</p>
+      </div>
+      <div class="hero-actions">
+        <a class="btn btn-secondary" href="/settings">打开设置页</a>
+        <button id="collectBtn" class="btn btn-primary" type="button">立即采集</button>
+      </div>
+    </section>
+
+    <section class="grid two-columns">
+      <article class="surface reveal">
+        <div class="section-title">
+          <span class="section-index">01</span>
+          <div>
+            <h2>关键词</h2>
+            <p class="muted">一行一个关键词，采集任务会按顺序执行。</p>
+          </div>
+        </div>
+        <label class="field">
+          <span>关键词列表</span>
+          <textarea id="keywordsInput" rows="8" placeholder="男士穿搭"></textarea>
+        </label>
+      </article>
+
+      <article class="surface reveal">
+        <div class="section-title">
+          <span class="section-index">02</span>
+          <div>
+            <h2>采集参数</h2>
+            <p class="muted">这里保留首页即时可调的采集项，系统级设置请前往设置页。</p>
+          </div>
+        </div>
+        <div class="field-grid field-grid-2">
+          <label class="field full-width">
+            <span>采集存放目录</span>
+            <input id="outputDirInput" type="text" placeholder="留空则使用默认目录 datas/markdown_datas">
+          </label>
+          <label class="field">
+            <span>每个关键词采集篇数</span>
+            <input id="countInput" type="number" min="1" max="200" value="10">
+          </label>
+          <label class="field">
+            <span>点赞 Top N</span>
+            <input id="likeTopInput" type="number" min="1" max="200" value="10">
+          </label>
+          <label class="field full-width">
+            <span>自定义发布时间天数</span>
+            <input id="publishDaysInput" type="number" min="0" max="3650" value="7">
+          </label>
+        </div>
+        <p class="muted">支持绝对路径和相对路径。相对路径会按当前项目根目录解析，例如 <code>exports/xhs</code>。</p>
+      </article>
+    </section>
+
+    <section class="surface reveal">
+      <div class="section-title">
+        <span class="section-index">03</span>
+        <div>
+          <h2>筛选条件</h2>
+          <p class="muted">搜索排序、内容类型、发布时间和位置筛选都在这里完成。</p>
+        </div>
+      </div>
+
+      <div class="choice-section">
+        <h3>排序依据</h3>
+        <div id="sortTypeChoices" class="choice-grid"></div>
+      </div>
+
+      <div class="choice-section">
+        <h3>笔记类型</h3>
+        <div id="contentTypeChoices" class="choice-grid compact"></div>
+      </div>
+
+      <div class="choice-section">
+        <h3>发布时间</h3>
+        <div id="publishTimeChoices" class="choice-grid"></div>
+      </div>
+
+      <div class="choice-section">
+        <h3>搜索范围</h3>
+        <div id="noteRangeChoices" class="choice-grid compact"></div>
+      </div>
+
+      <div class="choice-section">
+        <h3>位置距离</h3>
+        <div id="posDistanceChoices" class="choice-grid compact"></div>
+      </div>
+
+      <div class="field-grid field-grid-2">
+        <label class="field">
+          <span>纬度（同城 / 附近时可填）</span>
+          <input id="latitudeInput" type="text" placeholder="39.9725">
+        </label>
+        <label class="field">
+          <span>经度（同城 / 附近时可填）</span>
+          <input id="longitudeInput" type="text" placeholder="116.4207">
+        </label>
+        <label class="field full-width">
+          <span>扩展筛选 JSON</span>
+          <textarea id="extraFiltersInput" rows="5" placeholder='{"brand":"可选"}'></textarea>
+        </label>
+      </div>
+    </section>
+
+    <section class="surface reveal">
+      <div class="section-title">
+        <span class="section-index">04</span>
+        <div>
+          <h2>任务状态</h2>
+          <p class="muted">查看最近任务的执行状态、来源和日志。</p>
+        </div>
+      </div>
+      <div id="jobList" class="job-list muted">暂无任务</div>
+    </section>
+
+    <section class="surface reveal">
+      <div class="section-title">
+        <span class="section-index">05</span>
+        <div>
+          <h2>本地文件</h2>
+          <p class="muted">浏览最近采集的 Markdown、JSON、TXT 和日志文件。</p>
+        </div>
+      </div>
+
+      <div class="row spread file-toolbar">
+        <div>
+          <div class="muted">采集根目录：<code id="dataRootText">datas/markdown_datas</code></div>
+          <div id="breadcrumb" class="breadcrumb"></div>
+        </div>
+        <div class="button-pair">
+          <button id="openCurrentFolderBtn" class="btn btn-ghost" type="button">打开当前文件夹</button>
+          <button id="refreshFilesBtn" class="btn btn-ghost" type="button">刷新列表</button>
+        </div>
+      </div>
+
+      <div class="file-layout">
+        <div id="fileList" class="file-list"></div>
+        <div class="file-preview-panel">
+          <div class="preview-toolbar">
+            <div id="filePreviewMeta" class="preview-meta">选择 Markdown / JSON / TXT 文件可预览。</div>
+            <button id="openFileFolderBtn" class="btn btn-ghost" type="button" disabled>打开所在文件夹</button>
+          </div>
+          <pre id="filePreview" class="file-preview">选择 Markdown / JSON / TXT 文件可预览。</pre>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" aria-live="polite"></div>
+  <script src="/ui/app.js"></script>
+</body>
+</html>

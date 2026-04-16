@@ -1,0 +1,50 @@
+{
+  "login": {
+    "cookies": ""
+  },
+  "keywords": [
+    "男士穿搭"
+  ],
+  "collect": {
+    "count": 10,
+    "like_top_n": 10,
+    "request_multiplier": 3,
+    "search_delay_min_sec": 2.0,
+    "search_delay_max_sec": 4.0,
+    "detail_delay_min_sec": 1.0,
+    "detail_delay_max_sec": 3.0
+  },
+  "filters": {
+    "sort_type": 2,
+    "content_type": 2,
+    "publish_time": 2,
+    "publish_days": 7,
+    "note_range": 0,
+    "pos_distance": 0,
+    "geo": {
+      "latitude": "",
+      "longitude": ""
+    },
+    "extra": {}
+  },
+  "storage": {
+    "output_dir": ""
+  },
+  "schedule": {
+    "enabled": false,
+    "cycle": "daily",
+    "daily_runs": 1,
+    "run_times": [
+      "09:00"
+    ],
+    "weekdays": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ]
+  }
+}
