@@ -4,17 +4,40 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Spider_XHS 设置</title>
+  <script>
+    (() => {
+      const key = 'spider_xhs_theme';
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      let mode = 'system';
+      try {
+        const stored = localStorage.getItem(key);
+        mode = ['light', 'dark', 'system'].includes(stored) ? stored : 'system';
+      } catch (_error) {
+        mode = 'system';
+      }
+      document.documentElement.dataset.themeMode = mode;
+      document.documentElement.dataset.theme = mode === 'system'
+        ? (prefersDark ? 'dark' : 'light')
+        : mode;
+    })();
+  </script>
   <link rel="stylesheet" href="/ui/app.css">
 </head>
 <body data-page="settings">
   <header class="topbar">
     <div class="topbar-inner">
       <a class="brand" href="/">Spider_XHS</a>
-      <nav class="topnav" aria-label="主导航">
-        <a class="nav-link" href="/">采集台</a>
-        <a class="nav-link active" href="/settings" aria-current="page">设置</a>
-      </nav>
-      <div class="topbar-meta">System Settings</div>
+      <div class="topbar-actions">
+        <nav class="topnav" aria-label="主导航">
+          <a class="nav-link" href="/">采集台</a>
+          <a class="nav-link active" href="/settings" aria-current="page">设置</a>
+        </nav>
+        <div class="theme-switch" role="group" aria-label="主题模式">
+          <button class="theme-option" data-theme-option="light" type="button">浅色</button>
+          <button class="theme-option" data-theme-option="dark" type="button">深色</button>
+          <button class="theme-option" data-theme-option="system" type="button">系统</button>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -23,7 +46,7 @@
       <div class="hero-copy">
         <p class="eyebrow eyebrow-muted">Spider_XHS Settings</p>
         <h1>系统设置页</h1>
-        <p class="hero-lead">登录状态、搜索拉取倍率、分页与详情拉取间隔、自动化调度都统一在这里维护。保存后的设置会作为首页采集时使用的系统参数。</p>
+        <p class="hero-lead">登录、拉取节奏和自动调度统一在这里维护。</p>
       </div>
       <div class="hero-actions">
         <a class="btn btn-ghost" href="/">返回采集台</a>
@@ -37,7 +60,7 @@
           <span class="section-index">01</span>
           <div>
             <h2>账号与登录</h2>
-            <p class="muted">采集接口依赖登录 Cookie。系统会自动读取并保存登录后的浏览器 Cookie。</p>
+            <p class="muted">采集依赖登录 Cookie。</p>
           </div>
         </div>
 
@@ -54,7 +77,7 @@
           <span class="section-index">02</span>
           <div>
             <h2>拉取节奏</h2>
-            <p class="muted">控制搜索分页和详情抓取的节奏区间，系统会在设定范围内随机等待。</p>
+            <p class="muted">控制搜索和详情请求间隔。</p>
           </div>
         </div>
 
@@ -81,7 +104,7 @@
           </label>
         </div>
 
-        <p class="muted">最大值小于最小值时，后端会自动按最小值处理。</p>
+        <p class="muted">最大值小于最小值时，会按最小值处理。</p>
       </article>
     </section>
 
@@ -90,14 +113,14 @@
         <span class="section-index">03</span>
         <div>
           <h2>自动化调度</h2>
-          <p class="muted">服务运行期间按配置触发，任务不会并发重叠。每日执行次数与执行时间会交由后端统一校验。</p>
+          <p class="muted">服务运行时按配置触发，不会并发重叠。</p>
         </div>
       </div>
 
       <div class="row spread switch-row">
         <div>
           <strong>启用自动采集</strong>
-          <p class="muted">关闭后会保留设置值，但不会自动触发调度任务。</p>
+          <p class="muted">关闭后保留设置值，但不会自动触发。</p>
         </div>
         <label class="switch">
           <input id="scheduleEnabledInput" type="checkbox">

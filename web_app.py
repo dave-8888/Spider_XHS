@@ -13,7 +13,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 from urllib import request as urlrequest
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -373,6 +373,101 @@ def open_data_folder(relative_path: str = "") -> Dict[str, Any]:
     }
 
 
+def folder_picker_start_path(current_path: str = "") -> Path:
+    raw = str(current_path or "").strip()
+    if raw:
+        expanded = os.path.expandvars(os.path.expanduser(raw))
+        candidate = Path(expanded)
+        if not candidate.is_absolute():
+            candidate = ROOT_DIR / candidate
+    else:
+        candidate = resolve_output_root(config_store.load())
+
+    candidate = candidate.resolve()
+    if candidate.is_file():
+        candidate = candidate.parent
+
+    while not candidate.exists() and candidate != candidate.parent:
+        candidate = candidate.parent
+
+    return candidate if candidate.exists() else ROOT_DIR
+
+
+def run_folder_picker(command: List[str]) -> Optional[str]:
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode == 0:
+        selected = result.stdout.strip()
+        return selected or None
+    if result.returncode == 1:
+        return None
+    raise RuntimeError(result.stderr.strip() or "目录选择器执行失败")
+
+
+def pick_output_folder(current_path: str = "") -> Dict[str, Any]:
+    start_path = folder_picker_start_path(current_path)
+
+    if sys.platform == "darwin":
+        escaped = str(start_path).replace("\\", "\\\\").replace('"', '\\"')
+        script = [
+            f'set startFolder to POSIX file "{escaped}"',
+            'try',
+            'set chosenFolder to choose folder with prompt "选择采集存放目录" default location startFolder',
+            'return POSIX path of chosenFolder',
+            'on error number -128',
+            'return ""',
+            'end try',
+        ]
+        selected = run_folder_picker(["osascript", *sum([["-e", line] for line in script], [])])
+    elif os.name == "nt":
+        escaped = str(start_path).replace("'", "''")
+        command = (
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; "
+            "$dialog.Description = '选择采集存放目录'; "
+            "$dialog.ShowNewFolderButton = $true; "
+            f"$dialog.SelectedPath = '{escaped}'; "
+            "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { "
+            "Write-Output $dialog.SelectedPath "
+            "}"
+        )
+        selected = run_folder_picker(["powershell", "-NoProfile", "-STA", "-Command", command])
+    else:
+        zenity = shutil.which("zenity")
+        kdialog = shutil.which("kdialog")
+        if zenity:
+            selected = run_folder_picker([
+                zenity,
+                "--file-selection",
+                "--directory",
+                f"--filename={start_path}{os.sep}",
+                "--title=选择采集存放目录",
+            ])
+        elif kdialog:
+            selected = run_folder_picker([
+                kdialog,
+                "--title=选择采集存放目录",
+                "--getexistingdirectory",
+                str(start_path),
+            ])
+        else:
+            raise RuntimeError("当前系统未找到可用的目录选择器（需要 zenity 或 kdialog）")
+
+    if not selected:
+        return {"canceled": True}
+
+    folder = Path(os.path.expandvars(os.path.expanduser(selected))).resolve()
+    if not folder.exists() or not folder.is_dir():
+        raise RuntimeError("所选目录无效")
+
+    return {
+        "canceled": False,
+        "folder": {
+            "path": str(folder),
+            "name": folder.name,
+        },
+    }
+
+
 class AppHandler(BaseHTTPRequestHandler):
     server_version = "SpiderXHSWeb/1.0"
 
@@ -438,6 +533,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 json_response(self, {"success": True, "login": browser_login_manager.status()})
             elif path == "/api/files/open":
                 json_response(self, {"success": True, "folder": open_data_folder(str(payload.get("path") or ""))})
+            elif path == "/api/storage/pick-folder":
+                json_response(self, {"success": True, **pick_output_folder(str(payload.get("current_path") or ""))})
             else:
                 error_response(self, "接口不存在", status=404)
         except json.JSONDecodeError:

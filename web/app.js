@@ -1,12 +1,18 @@
 const page = document.body.dataset.page || 'home';
+const THEME_STORAGE_KEY = 'spider_xhs_theme';
+const themeMedia = window.matchMedia('(prefers-color-scheme: dark)');
 
 const sharedEls = {
   toast: document.querySelector('#toast'),
+  themeButtons: Array.from(document.querySelectorAll('[data-theme-option]')),
 };
 
 const homeEls = {
-  keywordsInput: document.querySelector('#keywordsInput'),
-  outputDirInput: document.querySelector('#outputDirInput'),
+  keywordList: document.querySelector('#keywordList'),
+  addKeywordBtn: document.querySelector('#addKeywordBtn'),
+  outputDirText: document.querySelector('#outputDirText'),
+  pickOutputDirBtn: document.querySelector('#pickOutputDirBtn'),
+  resetOutputDirBtn: document.querySelector('#resetOutputDirBtn'),
   countInput: document.querySelector('#countInput'),
   likeTopInput: document.querySelector('#likeTopInput'),
   publishDaysInput: document.querySelector('#publishDaysInput'),
@@ -14,7 +20,13 @@ const homeEls = {
   longitudeInput: document.querySelector('#longitudeInput'),
   extraFiltersInput: document.querySelector('#extraFiltersInput'),
   collectBtn: document.querySelector('#collectBtn'),
+  collectOverlay: document.querySelector('#collectOverlay'),
+  collectOverlayTitle: document.querySelector('#collectOverlayTitle'),
+  collectOverlayDetail: document.querySelector('#collectOverlayDetail'),
+  collectOverlaySteps: document.querySelector('#collectOverlaySteps'),
+  collectOverlayCloseBtn: document.querySelector('#collectOverlayCloseBtn'),
   jobList: document.querySelector('#jobList'),
+  jobSection: document.querySelector('#jobSection'),
   openCurrentFolderBtn: document.querySelector('#openCurrentFolderBtn'),
   openFileFolderBtn: document.querySelector('#openFileFolderBtn'),
   refreshFilesBtn: document.querySelector('#refreshFilesBtn'),
@@ -63,9 +75,403 @@ const state = {
     note_range: 0,
     pos_distance: 0,
   },
+  keywordItems: [],
+  nextKeywordId: 0,
+  draggedKeywordId: '',
+  selectedOutputDir: '',
+  defaultOutputRoot: 'datas/markdown_datas',
+  outputDirDisplay: 'datas/markdown_datas',
   settingsWeekdays: [1, 2, 3, 4, 5, 6, 7],
   jobLogScrollState: new Map(),
+  collectBusy: false,
+  collectOverlayState: {
+    status: 'idle',
+    title: '',
+    detail: '',
+    open: false,
+    dismissible: false,
+  },
+  collectProgressStatus: 'validating',
+  highlightedJobId: '',
+  highlightTimer: null,
+  themeMode: document.documentElement.dataset.themeMode || 'system',
 };
+
+function getThemeMode() {
+  return ['light', 'dark', 'system'].includes(state.themeMode) ? state.themeMode : 'system';
+}
+
+function resolveTheme(mode) {
+  if (mode === 'light' || mode === 'dark') return mode;
+  return themeMedia.matches ? 'dark' : 'light';
+}
+
+function updateThemeControls() {
+  const activeMode = getThemeMode();
+  sharedEls.themeButtons.forEach((button) => {
+    const isActive = button.dataset.themeOption === activeMode;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+  });
+}
+
+function applyTheme(mode, { persist = false } = {}) {
+  const normalizedMode = ['light', 'dark', 'system'].includes(mode) ? mode : 'system';
+  state.themeMode = normalizedMode;
+  document.documentElement.dataset.themeMode = normalizedMode;
+  document.documentElement.dataset.theme = resolveTheme(normalizedMode);
+
+  if (persist) {
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, normalizedMode);
+    } catch (_error) {
+      // Ignore storage failures and keep the in-memory selection.
+    }
+  }
+
+  updateThemeControls();
+}
+
+function bindThemeEvents() {
+  updateThemeControls();
+
+  sharedEls.themeButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      applyTheme(button.dataset.themeOption, { persist: true });
+      toast(`已切换为${button.textContent}模式`);
+    });
+  });
+
+  const syncTheme = () => {
+    if (getThemeMode() === 'system') {
+      applyTheme('system');
+    }
+  };
+
+  if (typeof themeMedia.addEventListener === 'function') {
+    themeMedia.addEventListener('change', syncTheme);
+    return;
+  }
+
+  if (typeof themeMedia.addListener === 'function') {
+    themeMedia.addListener(syncTheme);
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function createKeywordItem(value = '') {
+  state.nextKeywordId += 1;
+  return {
+    id: `keyword-${state.nextKeywordId}`,
+    value: String(value ?? ''),
+  };
+}
+
+function ensureKeywordItems() {
+  if (!state.keywordItems.length) {
+    state.keywordItems = [createKeywordItem('')];
+  }
+}
+
+function setKeywordItems(values) {
+  const normalized = Array.isArray(values) ? values : [];
+  state.keywordItems = (normalized.length ? normalized : ['']).map((value) => createKeywordItem(value));
+}
+
+function updateKeywordValue(id, value) {
+  const item = state.keywordItems.find((entry) => entry.id === id);
+  if (item) {
+    item.value = value;
+  }
+}
+
+function insertKeywordItemAfter(id) {
+  const index = state.keywordItems.findIndex((entry) => entry.id === id);
+  const nextItem = createKeywordItem('');
+  const insertIndex = index >= 0 ? index + 1 : state.keywordItems.length;
+  state.keywordItems.splice(insertIndex, 0, nextItem);
+  renderKeywordList({ focusId: nextItem.id });
+}
+
+function removeKeywordItem(id) {
+  if (state.keywordItems.length <= 1) {
+    state.keywordItems[0].value = '';
+    renderKeywordList({ focusId: state.keywordItems[0].id });
+    return;
+  }
+  const index = state.keywordItems.findIndex((entry) => entry.id === id);
+  if (index === -1) return;
+  const fallback = state.keywordItems[Math.max(0, index - 1)]?.id || '';
+  state.keywordItems.splice(index, 1);
+  ensureKeywordItems();
+  renderKeywordList({ focusId: fallback || state.keywordItems[0].id });
+}
+
+function moveKeywordItem(sourceId, targetId, { after = false } = {}) {
+  if (!sourceId || !targetId || sourceId === targetId) return;
+  const fromIndex = state.keywordItems.findIndex((entry) => entry.id === sourceId);
+  const toIndex = state.keywordItems.findIndex((entry) => entry.id === targetId);
+  if (fromIndex === -1 || toIndex === -1) return;
+
+  const [movedItem] = state.keywordItems.splice(fromIndex, 1);
+  const baseIndex = fromIndex < toIndex ? toIndex - 1 : toIndex;
+  const insertIndex = after ? baseIndex + 1 : baseIndex;
+  state.keywordItems.splice(insertIndex, 0, movedItem);
+  renderKeywordList({ focusId: sourceId });
+}
+
+function keywordValues() {
+  return state.keywordItems
+    .map((item) => item.value.trim())
+    .filter(Boolean);
+}
+
+function renderKeywordList({ focusId = '' } = {}) {
+  if (!homeEls.keywordList) return;
+  ensureKeywordItems();
+
+  homeEls.keywordList.innerHTML = state.keywordItems.map((item, index) => `
+    <div class="keyword-row" data-keyword-id="${item.id}" draggable="${state.collectBusy ? 'false' : 'true'}">
+      <span class="keyword-drag" aria-hidden="true">⋮⋮</span>
+      <span class="keyword-index">${String(index + 1).padStart(2, '0')}</span>
+      <input class="keyword-input" type="text" value="${escapeHtml(item.value)}" placeholder="输入关键词" ${state.collectBusy ? 'disabled' : ''}>
+      <button class="btn btn-ghost keyword-remove-btn" data-keyword-remove="${item.id}" type="button" ${state.collectBusy ? 'disabled' : ''}>删除</button>
+    </div>
+  `).join('');
+
+  homeEls.keywordList.querySelectorAll('.keyword-row').forEach((row) => {
+    const keywordId = row.dataset.keywordId || '';
+    const input = row.querySelector('.keyword-input');
+
+    if (input) {
+      input.addEventListener('input', (event) => {
+        updateKeywordValue(keywordId, event.target.value);
+      });
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          insertKeywordItemAfter(keywordId);
+        }
+      });
+    }
+
+    if (!state.collectBusy) {
+      row.addEventListener('dragstart', (event) => {
+        state.draggedKeywordId = keywordId;
+        row.classList.add('is-dragging');
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', keywordId);
+      });
+
+      row.addEventListener('dragover', (event) => {
+        event.preventDefault();
+        const rect = row.getBoundingClientRect();
+        const dropAfter = event.clientY > rect.top + rect.height / 2;
+        row.dataset.dropAfter = dropAfter ? 'true' : 'false';
+        row.classList.toggle('is-drag-target', !dropAfter);
+        row.classList.toggle('is-drop-after', dropAfter);
+      });
+
+      row.addEventListener('dragleave', () => {
+        row.classList.remove('is-drag-target');
+        row.classList.remove('is-drop-after');
+      });
+
+      row.addEventListener('drop', (event) => {
+        event.preventDefault();
+        row.classList.remove('is-drag-target');
+        row.classList.remove('is-drop-after');
+        moveKeywordItem(state.draggedKeywordId, keywordId, {
+          after: row.dataset.dropAfter === 'true',
+        });
+        delete row.dataset.dropAfter;
+      });
+
+      row.addEventListener('dragend', () => {
+        state.draggedKeywordId = '';
+        row.classList.remove('is-dragging');
+        homeEls.keywordList.querySelectorAll('.keyword-row').forEach((itemRow) => {
+          itemRow.classList.remove('is-drag-target');
+          itemRow.classList.remove('is-drop-after');
+          itemRow.classList.remove('is-dragging');
+          delete itemRow.dataset.dropAfter;
+        });
+      });
+    }
+  });
+
+  homeEls.keywordList.querySelectorAll('[data-keyword-remove]').forEach((button) => {
+    button.addEventListener('click', () => removeKeywordItem(button.dataset.keywordRemove || ''));
+  });
+
+  if (homeEls.addKeywordBtn) {
+    homeEls.addKeywordBtn.disabled = state.collectBusy;
+  }
+
+  if (focusId) {
+    window.requestAnimationFrame(() => {
+      const input = homeEls.keywordList.querySelector(`[data-keyword-id="${focusId}"] .keyword-input`);
+      if (input) {
+        input.focus();
+        const end = input.value.length;
+        input.setSelectionRange(end, end);
+      }
+    });
+  }
+}
+
+function renderOutputDirSelection() {
+  if (homeEls.outputDirText) {
+    homeEls.outputDirText.textContent = state.outputDirDisplay || state.defaultOutputRoot;
+    homeEls.outputDirText.classList.toggle('is-default', !state.selectedOutputDir);
+  }
+  if (homeEls.pickOutputDirBtn) {
+    homeEls.pickOutputDirBtn.disabled = state.collectBusy;
+  }
+  if (homeEls.resetOutputDirBtn) {
+    homeEls.resetOutputDirBtn.disabled = state.collectBusy || !state.selectedOutputDir;
+  }
+}
+
+const collectStepOrder = ['validating', 'starting', 'waiting_job_render', 'success'];
+const collectStepLabels = {
+  validating: '校验配置',
+  starting: '创建任务',
+  waiting_job_render: '同步任务面板',
+  success: '准备完成',
+};
+
+function renderCollectOverlaySteps(status) {
+  if (!homeEls.collectOverlaySteps) return;
+  const progressStatus = status === 'error' ? state.collectProgressStatus : status;
+  const activeIndex = collectStepOrder.indexOf(progressStatus);
+  homeEls.collectOverlaySteps.innerHTML = collectStepOrder.map((step, index) => {
+    let tone = 'pending';
+    if (status === 'error') {
+      tone = index < activeIndex ? 'done' : (index === activeIndex ? 'error' : 'pending');
+    } else if (activeIndex >= 0) {
+      tone = index < activeIndex ? 'done' : (index === activeIndex ? 'active' : 'pending');
+    }
+    return `<div class="collect-step collect-step-${tone}">${collectStepLabels[step]}</div>`;
+  }).join('');
+}
+
+function setCollectOverlay({
+  open = true,
+  status = 'validating',
+  title = '',
+  detail = '',
+  dismissible = false,
+} = {}) {
+  state.collectOverlayState = {
+    open,
+    status,
+    title,
+    detail,
+    dismissible,
+  };
+  if (status !== 'error' && open) {
+    state.collectProgressStatus = status;
+  }
+
+  if (!homeEls.collectOverlay) return;
+
+  homeEls.collectOverlay.classList.toggle('is-hidden', !open);
+  homeEls.collectOverlay.classList.toggle('is-dismissible', dismissible);
+  homeEls.collectOverlay.setAttribute('aria-hidden', open ? 'false' : 'true');
+  document.body.classList.toggle('has-collect-overlay', open);
+
+  if (homeEls.collectOverlayTitle) {
+    homeEls.collectOverlayTitle.textContent = title;
+  }
+  if (homeEls.collectOverlayDetail) {
+    homeEls.collectOverlayDetail.textContent = detail;
+  }
+  if (homeEls.collectOverlayCloseBtn) {
+    homeEls.collectOverlayCloseBtn.classList.toggle('is-hidden', !dismissible);
+  }
+  renderCollectOverlaySteps(status);
+}
+
+function closeCollectOverlay() {
+  setCollectOverlay({
+    open: false,
+    status: 'idle',
+    title: '',
+    detail: '',
+    dismissible: false,
+  });
+}
+
+function setHomeBusy(isBusy) {
+  state.collectBusy = isBusy;
+  [
+    homeEls.collectBtn,
+    homeEls.countInput,
+    homeEls.likeTopInput,
+    homeEls.publishDaysInput,
+    homeEls.latitudeInput,
+    homeEls.longitudeInput,
+    homeEls.extraFiltersInput,
+    homeEls.openCurrentFolderBtn,
+    homeEls.openFileFolderBtn,
+    homeEls.refreshFilesBtn,
+  ].forEach((element) => {
+    if (element) {
+      element.disabled = isBusy;
+    }
+  });
+
+  renderKeywordList();
+  renderOutputDirSelection();
+  renderHomeChoices();
+}
+
+function findJobCard(jobId) {
+  if (!jobId || !homeEls.jobList) return null;
+  return homeEls.jobList.querySelector(`[data-job-card-id="${jobId}"]`);
+}
+
+function highlightJobCard(jobId) {
+  if (!jobId) return;
+  state.highlightedJobId = jobId;
+  if (state.highlightTimer) {
+    window.clearTimeout(state.highlightTimer);
+  }
+  state.highlightTimer = window.setTimeout(() => {
+    state.highlightedJobId = '';
+    const card = findJobCard(jobId);
+    if (card) {
+      card.classList.remove('job-card-highlight');
+    }
+  }, 4000);
+}
+
+function scrollToJobCard(jobId) {
+  const card = findJobCard(jobId);
+  if (card) {
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+  if (homeEls.jobSection) {
+    homeEls.jobSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+async function waitForJobCard(jobId, attempts = 8) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    await loadJobs();
+    const card = findJobCard(jobId);
+    if (card) {
+      return card;
+    }
+    await sleep(350);
+  }
+  return null;
+}
 
 function toast(message) {
   if (!sharedEls.toast) return;
@@ -143,16 +549,17 @@ function updateOutputRoot(config) {
   }
 }
 
-function renderChoiceButtons(container, choiceMap, value, onSelect, { multi = false } = {}) {
+function renderChoiceButtons(container, choiceMap, value, onSelect, { multi = false, disabled = false } = {}) {
   if (!container) return;
   const entries = Object.entries(choiceMap || {}).sort((a, b) => Number(a[0]) - Number(b[0]));
   container.innerHTML = entries.map(([key, label]) => {
     const numericKey = Number(key);
     const active = multi ? value.includes(numericKey) : Number(value) === numericKey;
-    return `<button class="choice ${active ? 'active' : ''}" data-value="${numericKey}" type="button">${escapeHtml(label)}</button>`;
+    return `<button class="choice ${active ? 'active' : ''}" data-value="${numericKey}" type="button" ${disabled ? 'disabled' : ''}>${escapeHtml(label)}</button>`;
   }).join('');
 
   container.querySelectorAll('.choice').forEach((button) => {
+    if (disabled) return;
     button.addEventListener('click', () => {
       const selected = Number(button.dataset.value);
       if (multi) {
@@ -174,23 +581,23 @@ function renderHomeChoices() {
   renderChoiceButtons(homeEls.sortTypeChoices, state.choices.sort_type, state.homeFilters.sort_type, (selected) => {
     state.homeFilters.sort_type = selected;
     renderHomeChoices();
-  });
+  }, { disabled: state.collectBusy });
   renderChoiceButtons(homeEls.contentTypeChoices, state.choices.content_type, state.homeFilters.content_type, (selected) => {
     state.homeFilters.content_type = selected;
     renderHomeChoices();
-  });
+  }, { disabled: state.collectBusy });
   renderChoiceButtons(homeEls.publishTimeChoices, state.choices.publish_time, state.homeFilters.publish_time, (selected) => {
     state.homeFilters.publish_time = selected;
     renderHomeChoices();
-  });
+  }, { disabled: state.collectBusy });
   renderChoiceButtons(homeEls.noteRangeChoices, state.choices.note_range, state.homeFilters.note_range, (selected) => {
     state.homeFilters.note_range = selected;
     renderHomeChoices();
-  });
+  }, { disabled: state.collectBusy });
   renderChoiceButtons(homeEls.posDistanceChoices, state.choices.pos_distance, state.homeFilters.pos_distance, (selected) => {
     state.homeFilters.pos_distance = selected;
     renderHomeChoices();
-  });
+  }, { disabled: state.collectBusy });
 }
 
 function renderSettingsWeekdays() {
@@ -206,7 +613,7 @@ function updateScheduleView() {
 }
 
 function applyHomeConfig(config) {
-  if (!homeEls.keywordsInput) return;
+  if (!homeEls.keywordList) return;
   const filters = config.filters || {};
   const collect = config.collect || {};
 
@@ -215,9 +622,11 @@ function applyHomeConfig(config) {
   state.homeFilters.publish_time = Number(filters.publish_time ?? 2);
   state.homeFilters.note_range = Number(filters.note_range ?? 0);
   state.homeFilters.pos_distance = Number(filters.pos_distance ?? 0);
+  state.selectedOutputDir = config.storage?.output_dir ?? '';
+  state.defaultOutputRoot = config.paths?.markdown_root || 'datas/markdown_datas';
+  state.outputDirDisplay = config.paths?.output_root || state.defaultOutputRoot;
 
-  homeEls.keywordsInput.value = (config.keywords || ['男士穿搭']).join('\n');
-  homeEls.outputDirInput.value = config.storage?.output_dir ?? '';
+  setKeywordItems(config.keywords || ['男士穿搭']);
   homeEls.countInput.value = collect.count ?? 10;
   homeEls.likeTopInput.value = collect.like_top_n ?? 10;
   homeEls.publishDaysInput.value = filters.publish_days ?? 7;
@@ -226,6 +635,8 @@ function applyHomeConfig(config) {
   homeEls.extraFiltersInput.value = JSON.stringify(filters.extra || {}, null, 2);
 
   updateOutputRoot(config);
+  renderKeywordList();
+  renderOutputDirSelection();
   renderHomeChoices();
 }
 
@@ -277,13 +688,6 @@ async function loadSettingsConfig() {
   return config;
 }
 
-function readKeywords() {
-  return (homeEls.keywordsInput?.value || '')
-    .split(/[\n,，]+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
 function readRunTimes() {
   return (settingsEls.runTimesInput?.value || '')
     .split(/[,，\s]+/)
@@ -299,7 +703,7 @@ function readExtraFilters() {
 
 function readHomeDraft() {
   return {
-    keywords: readKeywords(),
+    keywords: keywordValues(),
     collect: {
       count: toNumber(homeEls.countInput?.value, 10),
       like_top_n: toNumber(homeEls.likeTopInput?.value, 10),
@@ -318,7 +722,7 @@ function readHomeDraft() {
       extra: readExtraFilters(),
     },
     storage: {
-      output_dir: homeEls.outputDirInput?.value.trim() || '',
+      output_dir: state.selectedOutputDir.trim() || '',
     },
   };
 }
@@ -354,17 +758,61 @@ async function saveSettings() {
   toast('设置已保存');
 }
 
+async function pickOutputFolder() {
+  const currentPath = state.selectedOutputDir || state.outputDirDisplay || state.currentOutputRoot || state.defaultOutputRoot;
+  const data = await api('/api/storage/pick-folder', {
+    method: 'POST',
+    body: JSON.stringify({ current_path: currentPath }),
+  });
+  if (data.canceled) return;
+  state.selectedOutputDir = data.folder?.path || '';
+  state.outputDirDisplay = data.folder?.path || state.outputDirDisplay;
+  renderOutputDirSelection();
+  toast(`已选择目录：${state.outputDirDisplay}`);
+}
+
+function resetOutputFolder() {
+  state.selectedOutputDir = '';
+  state.outputDirDisplay = state.defaultOutputRoot;
+  renderOutputDirSelection();
+  toast('已恢复默认目录');
+}
+
 async function startCollect() {
-  if (!homeEls.collectBtn) return;
+  if (!homeEls.collectBtn || state.collectBusy) return;
   const previousRoot = state.currentOutputRoot;
-  homeEls.collectBtn.disabled = true;
+  setCollectOverlay({
+    open: true,
+    status: 'validating',
+    title: '正在校验采集配置',
+    detail: '检查关键词、筛选条件和目录设置。',
+  });
+  setHomeBusy(true);
 
   try {
+    const draft = readHomeDraft();
+    if (!draft.keywords.length) {
+      throw new Error('请至少填写一个关键词');
+    }
+
+    setCollectOverlay({
+      open: true,
+      status: 'starting',
+      title: '正在创建采集任务',
+      detail: '配置校验通过，正在提交采集请求。',
+    });
+
     const savedConfig = await getConfigRaw();
-    const mergedConfig = deepMerge(savedConfig, readHomeDraft());
+    const mergedConfig = deepMerge(savedConfig, draft);
     const data = await api('/api/collect', {
       method: 'POST',
       body: JSON.stringify({ config: mergedConfig }),
+    });
+    setCollectOverlay({
+      open: true,
+      status: 'waiting_job_render',
+      title: '任务已启动',
+      detail: `任务 ${data.job.id} 已创建，正在同步任务面板。`,
     });
 
     await loadHomeConfig();
@@ -372,14 +820,35 @@ async function startCollect() {
       state.currentPath = '';
       setPreviewState({
         meta: `当前目录：${dataPathText('')}`,
-        content: `已切换到 ${dataPathText('')}\n\n继续选择文件可在这里预览内容。`,
+        content: `已切换到 ${dataPathText('')}\n\n继续选择文件进行预览。`,
       });
       await loadFiles('');
     }
-    toast(`采集任务已启动：${data.job.id}`);
+
+    await waitForJobCard(data.job.id);
+    highlightJobCard(data.job.id);
     await loadJobs();
-  } finally {
-    homeEls.collectBtn.disabled = false;
+    scrollToJobCard(data.job.id);
+
+    setCollectOverlay({
+      open: true,
+      status: 'success',
+      title: '采集任务已启动',
+      detail: `任务 ${data.job.id} 已进入任务面板，正在继续采集。`,
+    });
+    await sleep(800);
+    closeCollectOverlay();
+    setHomeBusy(false);
+    toast(`采集任务已启动：${data.job.id}`);
+  } catch (error) {
+    setCollectOverlay({
+      open: true,
+      status: 'error',
+      title: '启动采集失败',
+      detail: error.message || '启动采集时发生错误，请稍后重试。',
+      dismissible: true,
+    });
+    setHomeBusy(false);
   }
 }
 
@@ -414,7 +883,7 @@ function stopLoginPolling() {
 
 function applyBrowserLoginState(login) {
   const nickname = login.user?.nickname ? `，账号：${login.user.nickname}` : '';
-  const message = `${login.message || '等待浏览器登录中...'}${nickname}`;
+  const message = `${login.message || '等待浏览器登录...'}${nickname}`;
   const tone = login.status === 'saved'
     ? 'good'
     : (login.status === 'closed' ? 'bad' : 'muted');
@@ -552,8 +1021,9 @@ function renderJobs(jobs) {
     const countText = job.status === 'success'
       ? `保存 ${result.saved_count || 0} 篇，失败 ${result.failed_count || 0} 条`
       : (job.error || '运行中');
+    const highlight = job.id === state.highlightedJobId ? ' job-card-highlight' : '';
     return `
-      <div class="job-card">
+      <div class="job-card${highlight}" data-job-card-id="${escapeHtml(job.id)}">
         <div class="job-head">
           <strong>${escapeHtml(job.id)}</strong>
           <span class="badge ${escapeHtml(job.status)}">${escapeHtml(job.status)}</span>
@@ -584,8 +1054,8 @@ function dataPathText(path = '') {
 
 function setPreviewState({
   path = '',
-  meta = '选择 Markdown / JSON / TXT 文件可预览。',
-  content = '选择 Markdown / JSON / TXT 文件可预览。',
+  meta = '选择可预览文件。',
+  content = '选择 Markdown / JSON / TXT 文件。',
 } = {}) {
   if (!homeEls.filePreviewMeta || !homeEls.filePreview) return;
   state.currentPreviewPath = path;
@@ -632,7 +1102,7 @@ function renderFiles(files) {
         state.currentPath = path;
         setPreviewState({
           meta: `当前目录：${dataPathText(path)}`,
-          content: `已进入 ${dataPathText(path)}\n\n继续选择文件可在这里预览内容。`,
+          content: `已进入 ${dataPathText(path)}\n\n继续选择文件进行预览。`,
         });
         await loadFiles(path);
         return;
@@ -673,8 +1143,35 @@ async function previewFile(path) {
 function bindHomeEvents() {
   if (homeEls.collectBtn) {
     homeEls.collectBtn.addEventListener('click', () => {
-      startCollect().catch((error) => toast(error.message));
+      startCollect().catch((error) => {
+        setCollectOverlay({
+          open: true,
+          status: 'error',
+          title: '启动采集失败',
+          detail: error.message || '启动采集时发生错误，请稍后重试。',
+          dismissible: true,
+        });
+        setHomeBusy(false);
+      });
     });
+  }
+  if (homeEls.addKeywordBtn) {
+    homeEls.addKeywordBtn.addEventListener('click', () => {
+      const keyword = createKeywordItem('');
+      state.keywordItems.push(keyword);
+      renderKeywordList({ focusId: keyword.id });
+    });
+  }
+  if (homeEls.pickOutputDirBtn) {
+    homeEls.pickOutputDirBtn.addEventListener('click', () => {
+      pickOutputFolder().catch((error) => toast(error.message));
+    });
+  }
+  if (homeEls.resetOutputDirBtn) {
+    homeEls.resetOutputDirBtn.addEventListener('click', resetOutputFolder);
+  }
+  if (homeEls.collectOverlayCloseBtn) {
+    homeEls.collectOverlayCloseBtn.addEventListener('click', closeCollectOverlay);
   }
   if (homeEls.openCurrentFolderBtn) {
     homeEls.openCurrentFolderBtn.addEventListener('click', () => {
@@ -720,7 +1217,7 @@ async function bootHome() {
   await loadHomeConfig();
   setPreviewState({
     meta: `当前目录：${dataPathText('')}`,
-    content: `当前预览目录：${dataPathText('')}\n\n选择 Markdown / JSON / TXT 文件可在这里预览内容。`,
+    content: `当前目录：${dataPathText('')}\n\n选择 Markdown / JSON / TXT 文件进行预览。`,
   });
   await loadJobs();
   await loadFiles('');
@@ -743,6 +1240,7 @@ function cleanup() {
 }
 
 async function boot() {
+  bindThemeEvents();
   if (page === 'settings') {
     await bootSettings();
     return;
