@@ -1,18 +1,16 @@
 import json
 import math
 import random
+
+from runtime_paths import RESOURCE_ROOT, apply_node_runtime_env, resolve_static_path
+
+apply_node_runtime_env()
+
 import execjs
 from xhs_utils.cookie_util import trans_cookies
 
-try:
-    js = execjs.compile(open(r'../static/xhs_main_260411.js', 'r', encoding='utf-8').read())
-except:
-    js = execjs.compile(open(r'static/xhs_main_260411.js', 'r', encoding='utf-8').read())
-
-try:
-    xray_js = execjs.compile(open(r'../static/xhs_xray.js', 'r', encoding='utf-8').read())
-except:
-    xray_js = execjs.compile(open(r'static/xhs_xray.js', 'r', encoding='utf-8').read())
+js = execjs.compile(resolve_static_path('xhs_main_260411.js').read_text(encoding='utf-8'), cwd=str(RESOURCE_ROOT))
+xray_js = execjs.compile(resolve_static_path('xhs_xray.js').read_text(encoding='utf-8'), cwd=str(RESOURCE_ROOT))
 
 def generate_x_b3_traceid(len=16):
     x_b3_traceid = ""
@@ -100,4 +98,3 @@ def splice_str(api, params):
             value = ''
         url += key + '=' + value + '&'
     return url[:-1]
-

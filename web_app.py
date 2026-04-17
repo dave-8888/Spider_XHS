@@ -31,11 +31,14 @@ from collector_service import (
     resolve_output_root,
     safe_output_path,
 )
+from runtime_paths import DATA_ROOT, RESOURCE_ROOT, WEB_ROOT, is_desktop_mode
 
-ROOT_DIR = Path(__file__).resolve().parent
-WEB_ROOT = ROOT_DIR / "web"
 HOST = "127.0.0.1"
-PORT = 8765
+PORT = int(str(os.getenv("SPIDER_XHS_PORT") or os.getenv("PORT") or 8765).strip())
+LOGIN_URL = "https://www.xiaohongshu.com/explore"
+BROWSER_READY_TIMEOUT_SECONDS = 10.0
+BROWSER_READY_POLL_SECONDS = 0.25
+RELATIVE_STORAGE_ROOT = DATA_ROOT if is_desktop_mode() else RESOURCE_ROOT
 
 config_store = ConfigStore()
 job_manager = JobManager(config_store)
@@ -147,6 +150,22 @@ def cdp_call(ws_url: str, method: str, params: Dict[str, Any] = None, timeout: i
                 return message
 
 
+def wait_for_browser_ws_url(port: int, timeout: float = BROWSER_READY_TIMEOUT_SECONDS) -> str:
+    deadline = time.time() + max(timeout, BROWSER_READY_POLL_SECONDS)
+    last_error: Optional[Exception] = None
+    while time.time() < deadline:
+        try:
+            version = fetch_json(f"http://127.0.0.1:{port}/json/version")
+            ws_url = str(version.get("webSocketDebuggerUrl") or "").strip()
+            if ws_url:
+                return ws_url
+            last_error = RuntimeError("未获取到浏览器调试地址")
+        except Exception as exc:
+            last_error = exc
+        time.sleep(BROWSER_READY_POLL_SECONDS)
+    raise RuntimeError(f"浏览器调试端口未就绪：{last_error or '未知错误'}")
+
+
 class BrowserLoginManager:
     def __init__(self) -> None:
         self.lock = threading.Lock()
@@ -157,11 +176,27 @@ class BrowserLoginManager:
     def start(self) -> Dict[str, Any]:
         with self.lock:
             if self.process and self.process.poll() is None and self.port:
-                return {
-                    "status": "running",
-                    "message": "登录浏览器已打开，请在浏览器中完成小红书登录",
-                    "port": self.port,
-                }
+                if self._browser_ready(timeout=2):
+                    try:
+                        self._open_login_window()
+                    except Exception as exc:
+                        logger.warning(f"复用登录浏览器失败，准备重新拉起：{exc}")
+                        self._stop_process()
+                        self.process = None
+                        self.port = None
+                        self.started_at = None
+                    else:
+                        return {
+                            "status": "running",
+                            "message": "登录浏览器已在运行，已重新打开小红书登录窗口",
+                            "port": self.port,
+                        }
+                else:
+                    logger.warning("登录浏览器进程仍在，但调试端口不可用，准备重新拉起")
+                    self._stop_process()
+                    self.process = None
+                    self.port = None
+                    self.started_at = None
 
             browser = find_browser_executable()
             self.port = find_free_port()
@@ -175,11 +210,19 @@ class BrowserLoginManager:
                     f"--user-data-dir={profile_dir}",
                     "--no-first-run",
                     "--no-default-browser-check",
-                    "https://www.xiaohongshu.com/explore",
+                    LOGIN_URL,
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+            try:
+                wait_for_browser_ws_url(self.port)
+            except Exception as exc:
+                self._stop_process()
+                self.process = None
+                self.port = None
+                self.started_at = None
+                raise RuntimeError(f"未能成功拉起登录浏览器，请确认系统允许打开浏览器：{exc}") from exc
             return {
                 "status": "started",
                 "message": "已打开登录浏览器，请在弹出的浏览器中登录小红书；登录完成后页面会自动保存 Cookie",
@@ -217,10 +260,7 @@ class BrowserLoginManager:
         }
 
     def _read_xhs_cookie_string(self) -> str:
-        version = fetch_json(f"http://127.0.0.1:{self.port}/json/version")
-        ws_url = version.get("webSocketDebuggerUrl")
-        if not ws_url:
-            raise RuntimeError("未获取到浏览器调试地址")
+        ws_url = wait_for_browser_ws_url(self.port, timeout=3)
         try:
             message = cdp_call(ws_url, "Storage.getCookies")
             cookies = message.get("result", {}).get("cookies", [])
@@ -228,6 +268,40 @@ class BrowserLoginManager:
             message = cdp_call(ws_url, "Network.getAllCookies")
             cookies = message.get("result", {}).get("cookies", [])
         return xhs_cookie_string(cookies)
+
+    def _browser_ready(self, timeout: float = 1.5) -> bool:
+        if not self.port:
+            return False
+        try:
+            wait_for_browser_ws_url(self.port, timeout=timeout)
+            return True
+        except Exception:
+            return False
+
+    def _open_login_window(self) -> None:
+        if not self.port:
+            raise RuntimeError("登录浏览器尚未启动")
+        ws_url = wait_for_browser_ws_url(self.port, timeout=3)
+        try:
+            response = cdp_call(ws_url, "Target.createTarget", {"url": LOGIN_URL, "newWindow": True})
+        except Exception:
+            response = cdp_call(ws_url, "Target.createTarget", {"url": LOGIN_URL})
+        target_id = str(response.get("result", {}).get("targetId") or "").strip()
+        if target_id:
+            try:
+                cdp_call(ws_url, "Target.activateTarget", {"targetId": target_id})
+            except Exception:
+                pass
+
+    def _stop_process(self) -> None:
+        if not self.process or self.process.poll() is not None:
+            return
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait(timeout=5)
 
 
 def xhs_cookie_string(cookies: Any) -> str:
@@ -379,7 +453,7 @@ def folder_picker_start_path(current_path: str = "") -> Path:
         expanded = os.path.expandvars(os.path.expanduser(raw))
         candidate = Path(expanded)
         if not candidate.is_absolute():
-            candidate = ROOT_DIR / candidate
+            candidate = RELATIVE_STORAGE_ROOT / candidate
     else:
         candidate = resolve_output_root(config_store.load())
 
@@ -390,7 +464,7 @@ def folder_picker_start_path(current_path: str = "") -> Path:
     while not candidate.exists() and candidate != candidate.parent:
         candidate = candidate.parent
 
-    return candidate if candidate.exists() else ROOT_DIR
+    return candidate if candidate.exists() else RELATIVE_STORAGE_ROOT
 
 
 def run_folder_picker(command: List[str]) -> Optional[str]:
@@ -486,7 +560,16 @@ class AppHandler(BaseHTTPRequestHandler):
         path = parsed.path
         query = parse_qs(parsed.query)
         try:
-            if path == "/api/config":
+            if path == "/api/health":
+                server_port = 0
+                if getattr(self, "server", None) and getattr(self.server, "server_address", None):
+                    server_port = int(self.server.server_address[1])
+                json_response(self, {
+                    "success": True,
+                    "port": server_port,
+                    "desktop": is_desktop_mode(),
+                })
+            elif path == "/api/config":
                 json_response(self, {"success": True, "config": config_store.public()})
             elif path == "/api/jobs":
                 json_response(self, {"success": True, "jobs": job_manager.list_jobs()})
@@ -603,7 +686,7 @@ def run_server(host: str = HOST, port: int = PORT) -> None:
 
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
-    logger.info(f"Spider_XHS Web 控制台已启动：http://{host}:{port}")
+    logger.info(f"Spider_XHS Web 控制台已启动：http://{host}:{port}，desktop={is_desktop_mode()}")
     try:
         httpd.serve_forever()
     finally:

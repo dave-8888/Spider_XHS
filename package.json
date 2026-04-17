@@ -1,6 +1,73 @@
 {
+  "name": "spider-xhs-desktop",
+  "version": "1.0.0",
+  "description": "Spider_XHS desktop app",
+  "author": "Spider_XHS",
+  "main": "desktop/main.js",
+  "scripts": {
+    "desktop:dev": "electron .",
+    "prepare:js-runtime": "node scripts/prepare_js_runtime.mjs",
+    "prepare:node-runtime": "node scripts/prepare_node_runtime.mjs arm64 x64",
+    "build:backend:arm64": "python3 scripts/build_backend.py arm64",
+    "build:backend:x64": "python3 scripts/build_backend.py x64",
+    "build:desktop": "node scripts/build_desktop.mjs",
+    "build:desktop:arm64": "SPIDER_XHS_DESKTOP_ARCH=arm64 node scripts/build_desktop.mjs"
+  },
   "dependencies": {
     "crypto-js": "^4.2.0",
     "jsdom": "^26.0.0"
+  },
+  "devDependencies": {
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.spiderxhs.desktop",
+    "productName": "Spider_XHS",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "desktop/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "extraResources": [
+      {
+        "from": "web",
+        "to": "resources_bundle/web"
+      },
+      {
+        "from": "static",
+        "to": "resources_bundle/static"
+      },
+      {
+        "from": "config",
+        "to": "resources_bundle/config"
+      },
+      {
+        "from": "build/backend",
+        "to": "backend"
+      },
+      {
+        "from": "build/node-runtime",
+        "to": "node-runtime"
+      },
+      {
+        "from": "build/js-runtime/node_modules",
+        "to": "js-runtime/node_modules"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "universal"
+          ]
+        }
+      ]
+    }
   }
 }

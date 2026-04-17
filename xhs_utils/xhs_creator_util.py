@@ -2,21 +2,15 @@ import json
 import math
 import random
 
+from runtime_paths import RESOURCE_ROOT, apply_node_runtime_env, resolve_static_path
+
+apply_node_runtime_env()
+
 import execjs
 
-try:
-    js = execjs.compile(open(r'../static/xhs_creator_260411.js', 'r', encoding='utf-8').read())
-except:
-    js = execjs.compile(open(r'static/xhs_creator_260411.js', 'r', encoding='utf-8').read())
-try:
-    signature_js = execjs.compile(open(r'static/xhs_creator_signature.js', 'r', encoding='utf-8').read())
-except:
-    signature_js = execjs.compile(open(r'../static/xhs_creator_signature.js', 'r', encoding='utf-8').read())
-
-try:
-    sign_js = execjs.compile(open(r'../static/xhs_creator_sign.js', 'r', encoding='utf-8').read())
-except:
-    sign_js = execjs.compile(open(r'static/xhs_creator_sign.js', 'r', encoding='utf-8').read())
+js = execjs.compile(resolve_static_path('xhs_creator_260411.js').read_text(encoding='utf-8'), cwd=str(RESOURCE_ROOT))
+signature_js = execjs.compile(resolve_static_path('xhs_creator_signature.js').read_text(encoding='utf-8'), cwd=str(RESOURCE_ROOT))
+sign_js = execjs.compile(resolve_static_path('xhs_creator_sign.js').read_text(encoding='utf-8'), cwd=str(RESOURCE_ROOT))
 
 def generate_xs(a1, api, data=''):
     ret = js.call('get_request_headers_params', api, data, a1)

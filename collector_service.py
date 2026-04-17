@@ -15,14 +15,20 @@ import requests
 from loguru import logger
 
 from apis.xhs_pc_apis import XHS_Apis
+from runtime_paths import (
+    DATA_ROOT,
+    DEFAULT_CONFIG_PATH,
+    PROJECT_ROOT,
+    RESOURCE_ROOT,
+    is_desktop_mode,
+)
 from xhs_utils.common_util import load_env
 from xhs_utils.data_util import handle_note_info, norm_str
 
-ROOT_DIR = Path(__file__).resolve().parent
-DATA_ROOT = ROOT_DIR / "datas"
+ROOT_DIR = PROJECT_ROOT
+RELATIVE_STORAGE_ROOT = DATA_ROOT if is_desktop_mode() else ROOT_DIR
 DEFAULT_MARKDOWN_ROOT = DATA_ROOT / "markdown_datas"
 CONFIG_PATH = DATA_ROOT / "collector_config.json"
-DEFAULT_CONFIG_PATH = ROOT_DIR / "config" / "default_config.json"
 JOB_HISTORY_PATH = DATA_ROOT / "collector_jobs.json"
 SCHEDULER_STATE_PATH = DATA_ROOT / "scheduler_state.json"
 INTERNAL_DATA_FILES = {
@@ -176,7 +182,7 @@ def resolve_output_root(config: Optional[Dict[str, Any]] = None) -> Path:
     expanded = os.path.expandvars(os.path.expanduser(configured))
     output_root = Path(expanded)
     if not output_root.is_absolute():
-        output_root = ROOT_DIR / output_root
+        output_root = RELATIVE_STORAGE_ROOT / output_root
     return output_root.resolve()
 
 
@@ -414,21 +420,6 @@ def within_publish_days(note: Dict[str, Any], days: int) -> bool:
     return note_dt >= datetime.now() - timedelta(days=days)
 
 
-def build_geo(filters: Dict[str, Any]) -> Any:
-    geo = filters.get("geo") or {}
-    lat = str(geo.get("latitude", "")).strip()
-    lng = str(geo.get("longitude", "")).strip()
-    if not lat or not lng:
-        return ""
-    try:
-        return {
-            "latitude": float(lat),
-            "longitude": float(lng),
-        }
-    except ValueError:
-        return ""
-
-
 def content_type_matches(note: Dict[str, Any], content_type: int) -> bool:
     if content_type == 0:
         return True
@@ -490,8 +481,6 @@ class ConfigStore:
                 "publish_days": 7,
                 "note_range": 0,
                 "pos_distance": 0,
-                "geo": {"latitude": "", "longitude": ""},
-                "extra": {},
             },
             "storage": {
                 "output_dir": "",
@@ -541,6 +530,8 @@ class ConfigStore:
             "data_root": str(DATA_ROOT),
             "markdown_root": str(DEFAULT_MARKDOWN_ROOT),
             "output_root": str(resolve_output_root(config)),
+            "resource_root": str(RESOURCE_ROOT),
+            "desktop_mode": is_desktop_mode(),
         }
         public_config["choices"] = {
             "sort_type": SORT_LABELS,
@@ -593,8 +584,8 @@ class ConfigStore:
         filters["publish_days"] = to_int(filters.get("publish_days"), 7, 0, 3650)
         filters["note_range"] = to_int(filters.get("note_range"), 0, 0, 3)
         filters["pos_distance"] = to_int(filters.get("pos_distance"), 0, 0, 2)
-        filters.setdefault("geo", {"latitude": "", "longitude": ""})
-        filters.setdefault("extra", {})
+        filters.pop("geo", None)
+        filters.pop("extra", None)
 
         storage = sanitized.setdefault("storage", {})
         storage["output_dir"] = str(storage.get("output_dir") or "").strip().strip("'").strip('"')
@@ -746,7 +737,6 @@ class ContentCollector:
             note_time=publish_api_filter(filters),
             note_range=to_int(filters.get("note_range"), 0, 0, 3),
             pos_distance=to_int(filters.get("pos_distance"), 0, 0, 2),
-            geo=build_geo(filters),
             page_delay_callback=lambda _page: self._sleep_between_requests(delay_min, delay_max),
         )
         if not success:

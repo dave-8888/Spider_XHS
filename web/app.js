@@ -16,9 +16,6 @@ const homeEls = {
   countInput: document.querySelector('#countInput'),
   likeTopInput: document.querySelector('#likeTopInput'),
   publishDaysInput: document.querySelector('#publishDaysInput'),
-  latitudeInput: document.querySelector('#latitudeInput'),
-  longitudeInput: document.querySelector('#longitudeInput'),
-  extraFiltersInput: document.querySelector('#extraFiltersInput'),
   collectBtn: document.querySelector('#collectBtn'),
   collectOverlay: document.querySelector('#collectOverlay'),
   collectOverlayTitle: document.querySelector('#collectOverlayTitle'),
@@ -58,7 +55,12 @@ const settingsEls = {
   saveConfigBtn: document.querySelector('#saveConfigBtn'),
   checkLoginBtn: document.querySelector('#checkLoginBtn'),
   openLoginBrowserBtn: document.querySelector('#openLoginBrowserBtn'),
+  openExternalLoginBrowserBtn: document.querySelector('#openExternalLoginBrowserBtn'),
 };
+
+const desktopBridge = window.spiderDesktop && typeof window.spiderDesktop.isDesktop === 'function'
+  ? window.spiderDesktop
+  : null;
 
 const state = {
   config: null,
@@ -95,6 +97,7 @@ const state = {
   highlightedJobId: '',
   highlightTimer: null,
   themeMode: document.documentElement.dataset.themeMode || 'system',
+  desktopMode: false,
 };
 
 function getThemeMode() {
@@ -413,9 +416,6 @@ function setHomeBusy(isBusy) {
     homeEls.countInput,
     homeEls.likeTopInput,
     homeEls.publishDaysInput,
-    homeEls.latitudeInput,
-    homeEls.longitudeInput,
-    homeEls.extraFiltersInput,
     homeEls.openCurrentFolderBtn,
     homeEls.openFileFolderBtn,
     homeEls.refreshFilesBtn,
@@ -535,10 +535,28 @@ async function api(url, options = {}) {
   return data;
 }
 
+function detectDesktopMode(config = state.config) {
+  const bridgeDesktop = Boolean(desktopBridge && desktopBridge.isDesktop());
+  return bridgeDesktop || Boolean(config?.paths?.desktop_mode);
+}
+
+function applyDesktopMode(config = state.config) {
+  state.desktopMode = detectDesktopMode(config);
+
+  if (settingsEls.openLoginBrowserBtn) {
+    settingsEls.openLoginBrowserBtn.textContent = state.desktopMode ? '打开登录窗口' : '打开浏览器登录';
+  }
+
+  if (settingsEls.openExternalLoginBrowserBtn) {
+    settingsEls.openExternalLoginBrowserBtn.classList.toggle('is-hidden', !state.desktopMode);
+  }
+}
+
 async function getConfigRaw() {
   const data = await api('/api/config');
   state.config = data.config;
   state.choices = data.config?.choices || {};
+  applyDesktopMode(data.config);
   return data.config;
 }
 
@@ -630,9 +648,6 @@ function applyHomeConfig(config) {
   homeEls.countInput.value = collect.count ?? 10;
   homeEls.likeTopInput.value = collect.like_top_n ?? 10;
   homeEls.publishDaysInput.value = filters.publish_days ?? 7;
-  homeEls.latitudeInput.value = filters.geo?.latitude ?? '';
-  homeEls.longitudeInput.value = filters.geo?.longitude ?? '';
-  homeEls.extraFiltersInput.value = JSON.stringify(filters.extra || {}, null, 2);
 
   updateOutputRoot(config);
   renderKeywordList();
@@ -695,12 +710,6 @@ function readRunTimes() {
     .filter(Boolean);
 }
 
-function readExtraFilters() {
-  const extraText = homeEls.extraFiltersInput?.value.trim() || '';
-  if (!extraText) return {};
-  return JSON.parse(extraText);
-}
-
 function readHomeDraft() {
   return {
     keywords: keywordValues(),
@@ -715,11 +724,6 @@ function readHomeDraft() {
       publish_days: toNumber(homeEls.publishDaysInput?.value, 7),
       note_range: state.homeFilters.note_range,
       pos_distance: state.homeFilters.pos_distance,
-      geo: {
-        latitude: homeEls.latitudeInput?.value.trim() || '',
-        longitude: homeEls.longitudeInput?.value.trim() || '',
-      },
-      extra: readExtraFilters(),
     },
     storage: {
       output_dir: state.selectedOutputDir.trim() || '',
@@ -874,6 +878,36 @@ async function checkLogin({ silent = false } = {}) {
   }
 }
 
+async function fetchLoginStatus() {
+  if (state.desktopMode && desktopBridge) {
+    return { login: await desktopBridge.getLoginStatus() };
+  }
+  return api('/api/login/browser/status', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+async function triggerLoginStart() {
+  if (state.desktopMode && desktopBridge) {
+    return { login: await desktopBridge.startLogin() };
+  }
+  return api('/api/login/browser/start', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+async function startExternalBrowserLogin() {
+  const data = await api('/api/login/browser/start', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  applyBrowserLoginState(data.login || {});
+  startLoginPolling();
+  await pollBrowserLogin();
+}
+
 function stopLoginPolling() {
   if (state.loginPoller) {
     window.clearInterval(state.loginPoller);
@@ -891,10 +925,7 @@ function applyBrowserLoginState(login) {
 }
 
 async function pollBrowserLogin() {
-  const data = await api('/api/login/browser/status', {
-    method: 'POST',
-    body: JSON.stringify({}),
-  });
+  const data = await fetchLoginStatus();
   const login = data.login || {};
   applyBrowserLoginState(login);
 
@@ -921,10 +952,7 @@ async function startBrowserLogin() {
   settingsEls.openLoginBrowserBtn.disabled = true;
 
   try {
-    const data = await api('/api/login/browser/start', {
-      method: 'POST',
-      body: JSON.stringify({}),
-    });
+    const data = await triggerLoginStart();
     applyBrowserLoginState(data.login || {});
     startLoginPolling();
     await pollBrowserLogin();
@@ -939,10 +967,7 @@ async function startBrowserLogin() {
 async function syncBrowserLoginStatus() {
   if (!settingsEls.cookieStatus) return;
   try {
-    const data = await api('/api/login/browser/status', {
-      method: 'POST',
-      body: JSON.stringify({}),
-    });
+    const data = await fetchLoginStatus();
     const login = data.login || {};
     if (login.status === 'waiting') {
       applyBrowserLoginState(login);
@@ -1207,6 +1232,11 @@ function bindSettingsEvents() {
       startBrowserLogin().catch((error) => toast(error.message));
     });
   }
+  if (settingsEls.openExternalLoginBrowserBtn) {
+    settingsEls.openExternalLoginBrowserBtn.addEventListener('click', () => {
+      startExternalBrowserLogin().catch((error) => toast(error.message));
+    });
+  }
   if (settingsEls.cycleInput) {
     settingsEls.cycleInput.addEventListener('change', updateScheduleView);
   }
@@ -1240,6 +1270,7 @@ function cleanup() {
 }
 
 async function boot() {
+  applyDesktopMode();
   bindThemeEvents();
   if (page === 'settings') {
     await bootSettings();

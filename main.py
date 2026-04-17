@@ -143,10 +143,5 @@ if __name__ == '__main__':
     note_type = 0 # 0 不限, 1 视频笔记, 2 普通笔记
     note_time = 0  # 0 不限, 1 一天内, 2 一周内天, 3 半年内
     note_range = 0  # 0 不限, 1 已看过, 2 未看过, 3 已关注
-    pos_distance = 0  # 0 不限, 1 同城, 2 附近 指定这个1或2必须要指定 geo
-    # geo = {
-    #     # 经纬度
-    #     "latitude": 39.9725,
-    #     "longitude": 116.4207
-    # }
+    pos_distance = 0  # 0 不限, 1 同城, 2 附近
     data_spider.spider_some_search_note(query, query_num, cookies_str, base_path, 'all', sort_type_choice, note_type, note_time, note_range, pos_distance, geo=None)

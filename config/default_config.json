@@ -20,12 +20,7 @@
     "publish_time": 2,
     "publish_days": 7,
     "note_range": 0,
-    "pos_distance": 0,
-    "geo": {
-      "latitude": "",
-      "longitude": ""
-    },
-    "extra": {}
+    "pos_distance": 0
   },
   "storage": {
     "output_dir": ""
