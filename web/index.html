@@ -166,12 +166,12 @@
       </div>
 
       <div class="row spread file-toolbar">
-        <div>
-          <div class="muted">采集根目录：<code id="dataRootText">datas/markdown_datas</code></div>
-          <div id="breadcrumb" class="breadcrumb"></div>
+        <div class="file-toolbar-copy">
+          <div id="fileSelectionSummary" class="file-selection-summary">已选 0 项</div>
         </div>
         <div class="button-pair">
-          <button id="openCurrentFolderBtn" class="btn btn-ghost" type="button">打开当前文件夹</button>
+          <button id="createDirectoryBtn" class="btn btn-secondary" type="button">新建目录</button>
+          <button id="deleteSelectedBtn" class="btn btn-ghost" type="button" disabled>批量删除</button>
           <button id="refreshFilesBtn" class="btn btn-ghost" type="button">刷新列表</button>
         </div>
       </div>
@@ -181,7 +181,6 @@
         <div class="file-preview-panel">
           <div class="preview-toolbar">
             <div id="filePreviewMeta" class="preview-meta">选择可预览文件。</div>
-            <button id="openFileFolderBtn" class="btn btn-ghost" type="button" disabled>打开所在文件夹</button>
           </div>
           <pre id="filePreview" class="file-preview">选择 Markdown / JSON / TXT 文件。</pre>
         </div>

@@ -978,6 +978,17 @@ def safe_output_path(output_root: Path, relative_path: str) -> Path:
     return target
 
 
+def ensure_manageable_output_target(output_root: Path, target: Path) -> Path:
+    base = output_root.resolve()
+    resolved = target.resolve()
+    if resolved == base:
+        raise ValueError("不能操作采集输出根目录")
+    relative_parts = resolved.relative_to(base).parts
+    if any(part.startswith(".") or part in INTERNAL_DATA_FILES for part in relative_parts):
+        raise ValueError("包含系统保留目录，不能操作")
+    return resolved
+
+
 def list_output_files(output_root: Path, relative_path: str = "") -> Dict[str, Any]:
     ensure_data_dirs()
     output_root.mkdir(parents=True, exist_ok=True)
@@ -1006,6 +1017,81 @@ def list_output_files(output_root: Path, relative_path: str = "") -> Dict[str, A
         "cwd": target.resolve().relative_to(output_root.resolve()).as_posix() if target.resolve() != output_root.resolve() else "",
         "parent": parent,
         "entries": entries,
+    }
+
+
+def create_output_directory(output_root: Path, parent_path: str, name: str) -> Dict[str, Any]:
+    ensure_data_dirs()
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    parent = safe_output_path(output_root, str(parent_path or "").strip())
+    if not parent.exists():
+        raise FileNotFoundError("父目录不存在")
+    if not parent.is_dir():
+        raise ValueError("父路径不是目录")
+
+    normalized_name = str(name or "").strip()
+    if not normalized_name:
+        raise ValueError("目录名称不能为空")
+    if normalized_name in {".", ".."}:
+        raise ValueError("目录名称不合法")
+    if "/" in normalized_name or "\\" in normalized_name:
+        raise ValueError("目录名称不能包含路径分隔符")
+    if normalized_name.startswith(".") or normalized_name in INTERNAL_DATA_FILES:
+        raise ValueError("目录名称不可用")
+
+    target = (parent / normalized_name).resolve()
+    base = output_root.resolve()
+    if target != base and base not in target.parents:
+        raise ValueError("目录超出采集输出目录")
+    if target.exists():
+        raise FileExistsError("目录已存在")
+
+    target.mkdir(parents=False, exist_ok=False)
+    return {
+        "path": relative_to_root(target, output_root),
+        "name": target.name,
+    }
+
+
+def delete_output_entries(output_root: Path, paths: List[str]) -> Dict[str, Any]:
+    ensure_data_dirs()
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    normalized_paths = []
+    for raw_path in paths or []:
+        rel = str(raw_path or "").strip()
+        if rel and rel not in normalized_paths:
+            normalized_paths.append(rel)
+    if not normalized_paths:
+        raise ValueError("请选择要删除的文件或目录")
+
+    targets = []
+    for rel in normalized_paths:
+        target = safe_output_path(output_root, rel)
+        protected_target = ensure_manageable_output_target(output_root, target)
+        if not protected_target.exists():
+            raise FileNotFoundError(f"路径不存在：{rel}")
+        targets.append(protected_target)
+
+    base = output_root.resolve()
+    unique_targets = []
+    for target in sorted(targets, key=lambda item: len(item.relative_to(base).parts)):
+        if any(existing == target or existing in target.parents for existing in unique_targets):
+            continue
+        unique_targets.append(target)
+
+    deleted_paths = []
+    for target in unique_targets:
+        deleted_paths.append(relative_to_root(target, output_root))
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+
+    return {
+        "deleted_count": len(deleted_paths),
+        "deleted_paths": deleted_paths,
     }
 
 

@@ -24,14 +24,13 @@ const homeEls = {
   collectOverlayCloseBtn: document.querySelector('#collectOverlayCloseBtn'),
   jobList: document.querySelector('#jobList'),
   jobSection: document.querySelector('#jobSection'),
-  openCurrentFolderBtn: document.querySelector('#openCurrentFolderBtn'),
-  openFileFolderBtn: document.querySelector('#openFileFolderBtn'),
+  createDirectoryBtn: document.querySelector('#createDirectoryBtn'),
+  deleteSelectedBtn: document.querySelector('#deleteSelectedBtn'),
   refreshFilesBtn: document.querySelector('#refreshFilesBtn'),
   fileList: document.querySelector('#fileList'),
   filePreview: document.querySelector('#filePreview'),
   filePreviewMeta: document.querySelector('#filePreviewMeta'),
-  breadcrumb: document.querySelector('#breadcrumb'),
-  dataRootText: document.querySelector('#dataRootText'),
+  fileSelectionSummary: document.querySelector('#fileSelectionSummary'),
   sortTypeChoices: document.querySelector('#sortTypeChoices'),
   contentTypeChoices: document.querySelector('#contentTypeChoices'),
   publishTimeChoices: document.querySelector('#publishTimeChoices'),
@@ -66,6 +65,8 @@ const state = {
   config: null,
   choices: {},
   currentOutputRoot: 'datas/markdown_datas',
+  currentFiles: null,
+  currentFileEntries: new Map(),
   currentPath: '',
   currentPreviewPath: '',
   jobPoller: null,
@@ -98,6 +99,7 @@ const state = {
   highlightTimer: null,
   themeMode: document.documentElement.dataset.themeMode || 'system',
   desktopMode: false,
+  selectedFilePaths: new Set(),
 };
 
 function getThemeMode() {
@@ -416,8 +418,8 @@ function setHomeBusy(isBusy) {
     homeEls.countInput,
     homeEls.likeTopInput,
     homeEls.publishDaysInput,
-    homeEls.openCurrentFolderBtn,
-    homeEls.openFileFolderBtn,
+    homeEls.createDirectoryBtn,
+    homeEls.deleteSelectedBtn,
     homeEls.refreshFilesBtn,
   ].forEach((element) => {
     if (element) {
@@ -428,6 +430,11 @@ function setHomeBusy(isBusy) {
   renderKeywordList();
   renderOutputDirSelection();
   renderHomeChoices();
+  if (state.currentFiles) {
+    renderFiles(state.currentFiles);
+  } else {
+    updateFileToolbarState();
+  }
 }
 
 function findJobCard(jobId) {
@@ -562,9 +569,6 @@ async function getConfigRaw() {
 
 function updateOutputRoot(config) {
   state.currentOutputRoot = config.paths?.output_root || config.paths?.markdown_root || 'datas/markdown_datas';
-  if (homeEls.dataRootText) {
-    homeEls.dataRootText.textContent = state.currentOutputRoot;
-  }
 }
 
 function renderChoiceButtons(container, choiceMap, value, onSelect, { multi = false, disabled = false } = {}) {
@@ -822,10 +826,9 @@ async function startCollect() {
     await loadHomeConfig();
     if (previousRoot !== state.currentOutputRoot) {
       state.currentPath = '';
-      setPreviewState({
-        meta: `当前目录：${dataPathText('')}`,
-        content: `已切换到 ${dataPathText('')}\n\n继续选择文件进行预览。`,
-      });
+      setPreviewState(defaultPreviewState({
+        meta: '目录已刷新。',
+      }));
       await loadFiles('');
     }
 
@@ -1073,8 +1076,33 @@ function sizeText(size) {
   return `${size} B`;
 }
 
-function dataPathText(path = '') {
-  return path ? `${state.currentOutputRoot} / ${path}` : state.currentOutputRoot;
+function fileBaseName(path = '') {
+  const parts = String(path || '').split('/').filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : '';
+}
+
+function defaultPreviewState(overrides = {}) {
+  return {
+    path: '',
+    meta: '选择可预览文件。',
+    content: '选择 Markdown / JSON / TXT 文件。',
+    ...overrides,
+  };
+}
+
+function updateFileToolbarState() {
+  if (homeEls.fileSelectionSummary) {
+    homeEls.fileSelectionSummary.textContent = `已选 ${state.selectedFilePaths.size} 项`;
+  }
+  if (homeEls.createDirectoryBtn) {
+    homeEls.createDirectoryBtn.disabled = state.collectBusy;
+  }
+  if (homeEls.deleteSelectedBtn) {
+    homeEls.deleteSelectedBtn.disabled = state.collectBusy || state.selectedFilePaths.size === 0;
+  }
+  if (homeEls.refreshFilesBtn) {
+    homeEls.refreshFilesBtn.disabled = state.collectBusy;
+  }
 }
 
 function setPreviewState({
@@ -1086,64 +1114,192 @@ function setPreviewState({
   state.currentPreviewPath = path;
   homeEls.filePreviewMeta.textContent = meta;
   homeEls.filePreview.textContent = content;
-  if (homeEls.openFileFolderBtn) {
-    homeEls.openFileFolderBtn.disabled = !path;
-  }
 }
 
 async function openFolder(path = '') {
-  const data = await api('/api/files/open', {
+  await api('/api/files/open', {
     method: 'POST',
     body: JSON.stringify({ path }),
   });
-  toast(`已打开文件夹：${dataPathText(data.folder?.path || '')}`);
+  toast('已打开文件夹');
 }
 
-function renderBreadcrumb(files) {
-  if (!homeEls.breadcrumb) return;
-  homeEls.breadcrumb.textContent = dataPathText(files.cwd || '');
+function setCurrentFiles(files) {
+  state.currentFiles = files;
+  state.currentFileEntries = new Map((files?.entries || []).map((entry) => [entry.path, entry]));
+}
+
+function clearFileSelection() {
+  state.selectedFilePaths = new Set();
+  updateFileToolbarState();
+}
+
+function toggleFileSelection(path, checked) {
+  const next = new Set(state.selectedFilePaths);
+  if (checked) {
+    next.add(path);
+  } else {
+    next.delete(path);
+  }
+  state.selectedFilePaths = next;
+  updateFileToolbarState();
+}
+
+function shouldResetPreview(removedPaths) {
+  if (!state.currentPreviewPath) return false;
+  return removedPaths.some((path) => (
+    state.currentPreviewPath === path || state.currentPreviewPath.startsWith(`${path}/`)
+  ));
+}
+
+async function createDirectory() {
+  const input = window.prompt('输入新建目录名称');
+  if (input === null) return;
+  const name = input.trim();
+  if (!name) {
+    toast('目录名称不能为空');
+    return;
+  }
+  await api('/api/files/create-dir', {
+    method: 'POST',
+    body: JSON.stringify({
+      parent_path: state.currentPath,
+      name,
+    }),
+  });
+  toast('目录已创建');
+  await loadFiles(state.currentPath);
+}
+
+async function deleteEntries(paths, label = '') {
+  const targets = Array.from(new Set((paths || []).map((value) => String(value || '').trim()).filter(Boolean)));
+  if (!targets.length) {
+    toast('请选择要删除的文件或目录');
+    return;
+  }
+  const confirmText = targets.length === 1
+    ? `确定删除“${label || fileBaseName(targets[0]) || '该项'}”吗？`
+    : `确定删除已选 ${targets.length} 项吗？`;
+  if (!window.confirm(confirmText)) return;
+
+  const data = await api('/api/files/delete', {
+    method: 'POST',
+    body: JSON.stringify({ paths: targets }),
+  });
+
+  if (shouldResetPreview(data.deleted_paths || targets)) {
+    setPreviewState(defaultPreviewState());
+  }
+  await loadFiles(state.currentPath);
+  toast(targets.length === 1 ? '已删除' : `已删除 ${data.deleted_count || targets.length} 项`);
 }
 
 function renderFiles(files) {
   if (!homeEls.fileList) return;
-  renderBreadcrumb(files);
+  setCurrentFiles(files);
+  updateFileToolbarState();
 
+  const disabledAttr = state.collectBusy ? 'disabled' : '';
   const parentButton = files.cwd
-    ? `<button class="file-item" data-kind="directory" data-path="${escapeHtml(files.parent || '')}" type="button"><span>../ 返回上级</span><span class="file-meta">目录</span></button>`
+    ? `<button class="file-parent-item" data-kind="directory" data-path="${escapeHtml(files.parent || '')}" type="button" ${disabledAttr}><span>../ 返回上级</span><span class="file-meta">目录</span></button>`
     : '';
   const rows = files.entries.map((entry) => `
-    <button class="file-item" data-kind="${entry.type}" data-path="${escapeHtml(entry.path)}" data-previewable="${entry.previewable}" type="button">
-      <span>${entry.type === 'directory' ? '[目录]' : '[文件]'} ${escapeHtml(entry.name)}</span>
-      <span class="file-meta">${entry.type === 'directory' ? '目录' : sizeText(entry.size)} · ${escapeHtml(entry.modified)}</span>
-    </button>
+    <div class="file-row" data-path="${escapeHtml(entry.path)}">
+      <label class="file-select" aria-label="选择 ${escapeHtml(entry.name)}">
+        <input class="file-select-input" data-path="${escapeHtml(entry.path)}" type="checkbox" ${state.selectedFilePaths.has(entry.path) ? 'checked' : ''} ${disabledAttr}>
+      </label>
+      <button
+        class="file-entry-button"
+        data-kind="${entry.type}"
+        data-path="${escapeHtml(entry.path)}"
+        data-name="${escapeHtml(entry.name)}"
+        data-previewable="${entry.previewable ? 'true' : 'false'}"
+        type="button"
+        ${disabledAttr}
+      >
+        <span>${entry.type === 'directory' ? '[目录]' : '[文件]'} ${escapeHtml(entry.name)}</span>
+        <span class="file-meta">${entry.type === 'directory' ? '目录' : sizeText(entry.size)} · ${escapeHtml(entry.modified)}</span>
+      </button>
+      <div class="file-actions">
+        <button class="btn btn-ghost file-action-btn" data-action="open-folder" data-path="${escapeHtml(entry.path)}" type="button" ${disabledAttr}>打开所在文件夹</button>
+        <button class="btn btn-ghost file-action-btn file-delete-btn" data-action="delete" data-path="${escapeHtml(entry.path)}" data-name="${escapeHtml(entry.name)}" type="button" ${disabledAttr}>删除</button>
+      </div>
+    </div>
   `).join('');
-  const html = parentButton + rows;
-  homeEls.fileList.innerHTML = html || '<div class="empty-state">目录为空</div>';
+  homeEls.fileList.innerHTML = parentButton + (rows || '<div class="empty-state">目录为空</div>');
 
-  homeEls.fileList.querySelectorAll('.file-item').forEach((button) => {
+  homeEls.fileList.querySelectorAll('.file-parent-item').forEach((button) => {
     button.addEventListener('click', async () => {
-      const path = button.dataset.path || '';
-      if (button.dataset.kind === 'directory') {
-        state.currentPath = path;
-        setPreviewState({
-          meta: `当前目录：${dataPathText(path)}`,
-          content: `已进入 ${dataPathText(path)}\n\n继续选择文件进行预览。`,
-        });
+      try {
+        const path = button.dataset.path || '';
+        setPreviewState(defaultPreviewState({
+          meta: '已进入目录。',
+          content: '继续选择 Markdown / JSON / TXT 文件进行预览。',
+        }));
         await loadFiles(path);
-        return;
+      } catch (error) {
+        toast(error.message);
       }
+    });
+  });
 
-      if (button.dataset.previewable === 'true') {
-        await previewFile(path);
-        return;
+  homeEls.fileList.querySelectorAll('.file-select-input').forEach((input) => {
+    input.addEventListener('click', (event) => {
+      event.stopPropagation();
+    });
+    input.addEventListener('change', () => {
+      toggleFileSelection(input.dataset.path || '', input.checked);
+    });
+  });
+
+  homeEls.fileList.querySelectorAll('.file-entry-button').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try {
+        const path = button.dataset.path || '';
+        const name = button.dataset.name || fileBaseName(path);
+        if (button.dataset.kind === 'directory') {
+          setPreviewState(defaultPreviewState({
+            meta: '已进入目录。',
+            content: '继续选择 Markdown / JSON / TXT 文件进行预览。',
+          }));
+          await loadFiles(path);
+          return;
+        }
+
+        if (button.dataset.previewable === 'true') {
+          await previewFile(path);
+          return;
+        }
+
+        setPreviewState({
+          path,
+          meta: `${name} 不支持文本预览。`,
+          content: '该文件不支持文本预览，已尝试在新窗口打开。',
+        });
+        window.open(`/download?path=${encodeURIComponent(path)}`, '_blank', 'noopener');
+      } catch (error) {
+        toast(error.message);
       }
+    });
+  });
 
-      setPreviewState({
-        path,
-        meta: `文件：${dataPathText(path)}`,
-        content: `该文件不支持文本预览，可用浏览器打开：\n/download?path=${encodeURIComponent(path)}`,
-      });
-      window.open(`/download?path=${encodeURIComponent(path)}`, '_blank', 'noopener');
+  homeEls.fileList.querySelectorAll('.file-action-btn').forEach((button) => {
+    button.addEventListener('click', async (event) => {
+      try {
+        event.preventDefault();
+        event.stopPropagation();
+        const path = button.dataset.path || '';
+        if (!path) return;
+        if (button.dataset.action === 'open-folder') {
+          await openFolder(path);
+          return;
+        }
+        if (button.dataset.action === 'delete') {
+          await deleteEntries([path], button.dataset.name || fileBaseName(path));
+        }
+      } catch (error) {
+        toast(error.message);
+      }
     });
   });
 }
@@ -1152,16 +1308,17 @@ async function loadFiles(path = state.currentPath) {
   if (!homeEls.fileList) return;
   const data = await api(`/api/files?path=${encodeURIComponent(path || '')}`);
   state.currentPath = data.files.cwd || '';
+  clearFileSelection();
   renderFiles(data.files);
 }
 
 async function previewFile(path) {
   const data = await api(`/api/file?path=${encodeURIComponent(path)}`);
-  const downloadUrl = `/download?path=${encodeURIComponent(path)}`;
+  const entryName = state.currentFileEntries.get(path)?.name || fileBaseName(data.file.path);
   setPreviewState({
     path,
-    meta: `文件：${dataPathText(data.file.path)}`,
-    content: `文件：${dataPathText(data.file.path)}\n打开：${downloadUrl}\n\n${data.file.content}${data.file.truncated ? '\n\n...内容过长，已截断预览' : ''}`,
+    meta: entryName ? `预览：${entryName}` : '文件预览',
+    content: `${data.file.content}${data.file.truncated ? '\n\n...内容过长，已截断预览' : ''}`,
   });
 }
 
@@ -1198,15 +1355,14 @@ function bindHomeEvents() {
   if (homeEls.collectOverlayCloseBtn) {
     homeEls.collectOverlayCloseBtn.addEventListener('click', closeCollectOverlay);
   }
-  if (homeEls.openCurrentFolderBtn) {
-    homeEls.openCurrentFolderBtn.addEventListener('click', () => {
-      openFolder(state.currentPath).catch((error) => toast(error.message));
+  if (homeEls.createDirectoryBtn) {
+    homeEls.createDirectoryBtn.addEventListener('click', () => {
+      createDirectory().catch((error) => toast(error.message));
     });
   }
-  if (homeEls.openFileFolderBtn) {
-    homeEls.openFileFolderBtn.addEventListener('click', () => {
-      if (!state.currentPreviewPath) return;
-      openFolder(state.currentPreviewPath).catch((error) => toast(error.message));
+  if (homeEls.deleteSelectedBtn) {
+    homeEls.deleteSelectedBtn.addEventListener('click', () => {
+      deleteEntries(Array.from(state.selectedFilePaths)).catch((error) => toast(error.message));
     });
   }
   if (homeEls.refreshFilesBtn) {
@@ -1245,10 +1401,7 @@ function bindSettingsEvents() {
 async function bootHome() {
   bindHomeEvents();
   await loadHomeConfig();
-  setPreviewState({
-    meta: `当前目录：${dataPathText('')}`,
-    content: `当前目录：${dataPathText('')}\n\n选择 Markdown / JSON / TXT 文件进行预览。`,
-  });
+  setPreviewState(defaultPreviewState());
   await loadJobs();
   await loadFiles('');
   state.jobPoller = window.setInterval(() => {

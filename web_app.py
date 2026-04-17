@@ -25,6 +25,8 @@ from collector_service import (
     DATA_ROOT,
     JobManager,
     SimpleScheduler,
+    create_output_directory,
+    delete_output_entries,
     list_output_files,
     read_output_text_file,
     relative_to_root,
@@ -584,6 +586,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 self._serve_data_file(rel)
             else:
                 self._serve_static(path)
+        except ValueError as exc:
+            error_response(self, str(exc), status=400)
         except FileNotFoundError as exc:
             error_response(self, str(exc), status=404)
         except Exception as exc:
@@ -616,12 +620,35 @@ class AppHandler(BaseHTTPRequestHandler):
                 json_response(self, {"success": True, "login": browser_login_manager.status()})
             elif path == "/api/files/open":
                 json_response(self, {"success": True, "folder": open_data_folder(str(payload.get("path") or ""))})
+            elif path == "/api/files/create-dir":
+                json_response(self, {
+                    "success": True,
+                    "folder": create_output_directory(
+                        resolve_output_root(config_store.load()),
+                        str(payload.get("parent_path") or ""),
+                        str(payload.get("name") or ""),
+                    ),
+                })
+            elif path == "/api/files/delete":
+                json_response(self, {
+                    "success": True,
+                    **delete_output_entries(
+                        resolve_output_root(config_store.load()),
+                        payload.get("paths") if isinstance(payload.get("paths"), list) else [],
+                    ),
+                })
             elif path == "/api/storage/pick-folder":
                 json_response(self, {"success": True, **pick_output_folder(str(payload.get("current_path") or ""))})
             else:
                 error_response(self, "接口不存在", status=404)
         except json.JSONDecodeError:
             error_response(self, "请求体不是合法 JSON", status=400)
+        except ValueError as exc:
+            error_response(self, str(exc), status=400)
+        except FileExistsError as exc:
+            error_response(self, str(exc), status=400)
+        except FileNotFoundError as exc:
+            error_response(self, str(exc), status=404)
         except Exception as exc:
             logger.exception(exc)
             error_response(self, str(exc), status=500)
