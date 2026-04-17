@@ -997,12 +997,14 @@ def list_output_files(output_root: Path, relative_path: str = "") -> Dict[str, A
         raise FileNotFoundError("路径不存在")
     if target.is_file():
         target = target.parent
-    entries = []
-    for child in sorted(target.iterdir(), key=lambda p: (p.is_file(), p.name.lower())):
+    sortable_entries = []
+    for child in target.iterdir():
         if child.name.startswith(".") or child.name in INTERNAL_DATA_FILES:
             continue
         stat = child.stat()
-        entries.append({
+        sortable_entries.append({
+            "is_file": child.is_file(),
+            "modified_ts": stat.st_mtime,
             "name": child.name,
             "path": relative_to_root(child, output_root),
             "type": "directory" if child.is_dir() else "file",
@@ -1010,6 +1012,15 @@ def list_output_files(output_root: Path, relative_path: str = "") -> Dict[str, A
             "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
             "previewable": child.suffix.lower() in [".md", ".txt", ".json", ".log"],
         })
+    sortable_entries.sort(key=lambda item: (item["is_file"], -item["modified_ts"], item["name"].lower()))
+    entries = [{
+        "name": item["name"],
+        "path": item["path"],
+        "type": item["type"],
+        "size": item["size"],
+        "modified": item["modified"],
+        "previewable": item["previewable"],
+    } for item in sortable_entries]
     parent = ""
     if target.resolve() != output_root.resolve():
         parent = target.parent.resolve().relative_to(output_root.resolve()).as_posix()
