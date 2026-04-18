@@ -29,9 +29,13 @@ const homeEls = {
   refreshJobsBtn: document.querySelector('#refreshJobsBtn'),
   deleteSelectedBtn: document.querySelector('#deleteSelectedBtn'),
   refreshFilesBtn: document.querySelector('#refreshFilesBtn'),
+  fileLayout: document.querySelector('#fileLayout'),
   fileList: document.querySelector('#fileList'),
+  filePreviewPanel: document.querySelector('#filePreviewPanel'),
   filePreview: document.querySelector('#filePreview'),
   filePreviewMeta: document.querySelector('#filePreviewMeta'),
+  filePreviewSubMeta: document.querySelector('#filePreviewSubMeta'),
+  copyPreviewTextBtn: document.querySelector('#copyPreviewTextBtn'),
   fileSelectionSummary: document.querySelector('#fileSelectionSummary'),
   sortTypeChoices: document.querySelector('#sortTypeChoices'),
   contentTypeChoices: document.querySelector('#contentTypeChoices'),
@@ -71,6 +75,8 @@ const state = {
   currentFileEntries: new Map(),
   currentPath: '',
   currentPreviewPath: '',
+  currentPreviewContent: '',
+  currentPreviewMode: 'text',
   jobPoller: null,
   loginPoller: null,
   homeFilters: {
@@ -1399,11 +1405,288 @@ function fileBaseName(path = '') {
   return parts.length ? parts[parts.length - 1] : '';
 }
 
+function fileExtension(path = '') {
+  const name = fileBaseName(path).toLowerCase();
+  const dotIndex = name.lastIndexOf('.');
+  return dotIndex >= 0 ? name.slice(dotIndex) : '';
+}
+
+function fileDirectoryParts(path = '') {
+  const parts = String(path || '').replaceAll('\\', '/').split('/').filter(Boolean);
+  parts.pop();
+  return parts;
+}
+
+function localMarkdownDownloadUrl(url, sourcePath = '') {
+  const raw = String(url || '').trim();
+  if (!raw || raw.startsWith('#')) return raw;
+  if (/^(https?:|mailto:|tel:)/i.test(raw)) return raw;
+  if (raw.startsWith('//')) return `https:${raw}`;
+  if (/^(javascript:|data:|vbscript:)/i.test(raw)) return '';
+
+  const hashIndex = raw.indexOf('#');
+  const pathPart = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
+  const hashPart = hashIndex >= 0 ? raw.slice(hashIndex) : '';
+  const joinedParts = pathPart.startsWith('/')
+    ? pathPart.split('/')
+    : [...fileDirectoryParts(sourcePath), ...pathPart.split('/')];
+  const resolvedParts = [];
+
+  joinedParts.forEach((part) => {
+    const cleanPart = part.trim();
+    if (!cleanPart || cleanPart === '.') return;
+    if (cleanPart === '..') {
+      resolvedParts.pop();
+      return;
+    }
+    resolvedParts.push(cleanPart);
+  });
+
+  const resolvedPath = resolvedParts.join('/');
+  return resolvedPath ? `/download?path=${encodeURIComponent(resolvedPath)}${hashPart}` : '';
+}
+
+function renderInlineStyles(html) {
+  return html
+    .replace(/&lt;br\s*\/?&gt;/gi, '<br>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/__([^_]+)__/g, '<strong>$1</strong>')
+    .replace(/\*([^*\s][^*]*?)\*/g, '<em>$1</em>')
+    .replace(/_([^_\s][^_]*?)_/g, '<em>$1</em>');
+}
+
+function renderInlineMarkdown(text, sourcePath = '') {
+  const source = String(text ?? '');
+  const tokenPattern = /(`+)([\s\S]*?)\1|(!?)\[([^\]\n]*)\]\(([^)\n]+)\)/g;
+  let html = '';
+  let lastIndex = 0;
+  let match = tokenPattern.exec(source);
+
+  while (match) {
+    html += renderInlineStyles(escapeHtml(source.slice(lastIndex, match.index)));
+
+    if (match[1]) {
+      html += `<code>${escapeHtml(match[2])}</code>`;
+    } else {
+      const isImage = match[3] === '!';
+      const label = match[4] || '';
+      const href = localMarkdownDownloadUrl(match[5], sourcePath);
+      if (!href) {
+        html += renderInlineStyles(escapeHtml(label));
+      } else if (isImage) {
+        html += `<img src="${escapeHtml(href)}" alt="${escapeHtml(label)}" loading="lazy">`;
+      } else {
+        const external = /^(https?:|mailto:|tel:)/i.test(href);
+        const attrs = external ? ' target="_blank" rel="noopener noreferrer"' : '';
+        html += `<a href="${escapeHtml(href)}"${attrs}>${renderInlineStyles(escapeHtml(label))}</a>`;
+      }
+    }
+
+    lastIndex = tokenPattern.lastIndex;
+    match = tokenPattern.exec(source);
+  }
+
+  html += renderInlineStyles(escapeHtml(source.slice(lastIndex)));
+  return html;
+}
+
+function splitMarkdownTableRow(row) {
+  const trimmed = String(row || '').trim().replace(/^\|/, '').replace(/\|$/, '');
+  const cells = [];
+  let cell = '';
+  let escaped = false;
+
+  Array.from(trimmed).forEach((char) => {
+    if (char === '\\' && !escaped) {
+      escaped = true;
+      cell += char;
+      return;
+    }
+    if (char === '|' && !escaped) {
+      cells.push(cell.trim().replaceAll('\\|', '|'));
+      cell = '';
+      return;
+    }
+    escaped = false;
+    cell += char;
+  });
+
+  cells.push(cell.trim().replaceAll('\\|', '|'));
+  return cells;
+}
+
+function isMarkdownTableSeparator(row) {
+  const cells = splitMarkdownTableRow(row);
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.replaceAll(' ', '')));
+}
+
+function renderMarkdownTable(lines, startIndex, sourcePath = '') {
+  const headers = splitMarkdownTableRow(lines[startIndex]);
+  const rows = [];
+  let index = startIndex + 2;
+
+  while (index < lines.length && lines[index].trim().startsWith('|')) {
+    if (!lines[index].includes('|') || isMarkdownTableSeparator(lines[index])) break;
+    rows.push(splitMarkdownTableRow(lines[index]));
+    index += 1;
+  }
+
+  const headerHtml = headers
+    .map((cell) => `<th>${renderInlineMarkdown(cell, sourcePath)}</th>`)
+    .join('');
+  const bodyHtml = rows
+    .map((row) => `<tr>${headers.map((_header, cellIndex) => `<td>${renderInlineMarkdown(row[cellIndex] || '', sourcePath)}</td>`).join('')}</tr>`)
+    .join('');
+
+  return {
+    html: `<div class="markdown-table-wrap"><table><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table></div>`,
+    nextIndex: index,
+  };
+}
+
+function readHtmlAttribute(markup, name) {
+  const pattern = new RegExp(`${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i');
+  const match = pattern.exec(markup);
+  return match ? (match[1] || match[2] || match[3] || '') : '';
+}
+
+function renderSafeVideo(markup, sourcePath = '') {
+  const src = localMarkdownDownloadUrl(readHtmlAttribute(markup, 'src'), sourcePath);
+  if (!src) return '';
+  const poster = localMarkdownDownloadUrl(readHtmlAttribute(markup, 'poster'), sourcePath);
+  const posterAttr = poster ? ` poster="${escapeHtml(poster)}"` : '';
+  return `<video class="markdown-media-video" controls src="${escapeHtml(src)}"${posterAttr}></video>`;
+}
+
+function isMarkdownListLine(line) {
+  return /^(\s*)([-*+]\s+|\d+\.\s+)/.test(line);
+}
+
+function renderMarkdownList(lines, startIndex, sourcePath = '') {
+  const first = lines[startIndex].trim();
+  const ordered = /^\d+\.\s+/.test(first);
+  const markerPattern = ordered ? /^\d+\.\s+/ : /^[-*+]\s+/;
+  const tag = ordered ? 'ol' : 'ul';
+  const items = [];
+  let index = startIndex;
+
+  while (index < lines.length) {
+    const trimmed = lines[index].trim();
+    if (!markerPattern.test(trimmed)) break;
+    const itemLines = [trimmed.replace(markerPattern, '')];
+    index += 1;
+
+    while (index < lines.length && /^\s{2,}\S/.test(lines[index]) && !isMarkdownListLine(lines[index])) {
+      itemLines.push(lines[index].trim());
+      index += 1;
+    }
+
+    items.push(`<li>${itemLines.map((line) => renderInlineMarkdown(line, sourcePath)).join('<br>')}</li>`);
+  }
+
+  return {
+    html: `<${tag}>${items.join('')}</${tag}>`,
+    nextIndex: index,
+  };
+}
+
+function isMarkdownBlockStart(lines, index) {
+  const trimmed = lines[index]?.trim() || '';
+  return !trimmed
+    || trimmed.startsWith('```')
+    || /^#{1,6}\s+/.test(trimmed)
+    || trimmed.startsWith('<video')
+    || /^!\[[^\]]*]\([^)]+\)$/.test(trimmed)
+    || isMarkdownListLine(lines[index])
+    || (trimmed.startsWith('|') && isMarkdownTableSeparator(lines[index + 1] || ''));
+}
+
+function renderMarkdown(content, sourcePath = '') {
+  const lines = String(content ?? '').replace(/\r\n?/g, '\n').split('\n');
+  const html = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      index += 1;
+      continue;
+    }
+
+    if (trimmed.startsWith('```')) {
+      const codeLines = [];
+      index += 1;
+      while (index < lines.length && !lines[index].trim().startsWith('```')) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) index += 1;
+      html.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
+      continue;
+    }
+
+    const videoHtml = trimmed.startsWith('<video') ? renderSafeVideo(trimmed, sourcePath) : '';
+    if (videoHtml) {
+      html.push(videoHtml);
+      index += 1;
+      continue;
+    }
+
+    const headingMatch = /^(#{1,6})\s+(.+)$/.exec(trimmed);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      html.push(`<h${level}>${renderInlineMarkdown(headingMatch[2], sourcePath)}</h${level}>`);
+      index += 1;
+      continue;
+    }
+
+    if (trimmed.startsWith('|') && isMarkdownTableSeparator(lines[index + 1] || '')) {
+      const table = renderMarkdownTable(lines, index, sourcePath);
+      html.push(table.html);
+      index = table.nextIndex;
+      continue;
+    }
+
+    const imageMatch = /^!\[([^\]]*)]\(([^)]+)\)$/.exec(trimmed);
+    if (imageMatch) {
+      const src = localMarkdownDownloadUrl(imageMatch[2], sourcePath);
+      if (src) {
+        html.push(`<figure><img src="${escapeHtml(src)}" alt="${escapeHtml(imageMatch[1] || '')}" loading="lazy"></figure>`);
+      }
+      index += 1;
+      continue;
+    }
+
+    if (isMarkdownListLine(line)) {
+      const list = renderMarkdownList(lines, index, sourcePath);
+      html.push(list.html);
+      index = list.nextIndex;
+      continue;
+    }
+
+    const paragraphLines = [trimmed];
+    index += 1;
+    while (index < lines.length && !isMarkdownBlockStart(lines, index)) {
+      paragraphLines.push(lines[index].trim());
+      index += 1;
+    }
+    html.push(`<p>${paragraphLines.map((text) => renderInlineMarkdown(text, sourcePath)).join('<br>')}</p>`);
+  }
+
+  return html.join('\n') || '<p></p>';
+}
+
 function defaultPreviewState(overrides = {}) {
   return {
     path: '',
     meta: '',
-    content: '选择 Markdown / JSON / TXT 文件。',
+    subMeta: '',
+    content: '',
+    mode: 'text',
+    truncated: false,
+    open: false,
     ...overrides,
   };
 }
@@ -1423,14 +1706,52 @@ function updateFileToolbarState() {
 function setPreviewState({
   path = '',
   meta = '',
-  content = '选择 Markdown / JSON / TXT 文件。',
+  subMeta = '',
+  content = '',
+  mode = 'text',
+  truncated = false,
+  open = Boolean(path),
 } = {}) {
   if (!homeEls.filePreview) return;
   state.currentPreviewPath = path;
+  state.currentPreviewContent = content;
+  state.currentPreviewMode = mode;
+
+  const shouldShow = Boolean(open && (path || meta || content));
+  if (homeEls.fileLayout) {
+    homeEls.fileLayout.classList.toggle('has-preview', shouldShow);
+  }
+  if (homeEls.filePreviewPanel) {
+    homeEls.filePreviewPanel.classList.toggle('is-hidden', !shouldShow);
+    homeEls.filePreviewPanel.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
+  }
+
+  if (!shouldShow) {
+    if (homeEls.filePreviewMeta) homeEls.filePreviewMeta.textContent = '';
+    if (homeEls.filePreviewSubMeta) homeEls.filePreviewSubMeta.textContent = '';
+    if (homeEls.copyPreviewTextBtn) homeEls.copyPreviewTextBtn.disabled = true;
+    homeEls.filePreview.className = 'file-preview';
+    homeEls.filePreview.innerHTML = '';
+    return;
+  }
+
   if (homeEls.filePreviewMeta) {
     homeEls.filePreviewMeta.textContent = meta;
   }
-  homeEls.filePreview.textContent = content;
+  if (homeEls.filePreviewSubMeta) {
+    homeEls.filePreviewSubMeta.textContent = subMeta;
+  }
+  if (homeEls.copyPreviewTextBtn) {
+    homeEls.copyPreviewTextBtn.disabled = !content;
+  }
+
+  homeEls.filePreview.className = `file-preview ${mode === 'markdown' ? 'is-markdown' : 'is-plain'}`;
+  if (mode === 'markdown') {
+    const truncatedHtml = truncated ? '<p class="file-preview-notice">内容过长，已截断预览</p>' : '';
+    homeEls.filePreview.innerHTML = `${renderMarkdown(content, path)}${truncatedHtml}`;
+  } else {
+    homeEls.filePreview.textContent = `${content}${truncated ? '\n\n...内容过长，已截断预览' : ''}`;
+  }
 }
 
 async function openFolder(path = '') {
@@ -1530,10 +1851,7 @@ function renderFiles(files) {
     button.addEventListener('click', async () => {
       try {
         const path = button.dataset.path || '';
-        setPreviewState(defaultPreviewState({
-          meta: '已进入目录。',
-          content: '继续选择 Markdown / JSON / TXT 文件进行预览。',
-        }));
+        setPreviewState(defaultPreviewState());
         await loadFiles(path);
       } catch (error) {
         toast(error.message);
@@ -1556,10 +1874,7 @@ function renderFiles(files) {
         const path = button.dataset.path || '';
         const name = button.dataset.name || fileBaseName(path);
         if (button.dataset.kind === 'directory') {
-          setPreviewState(defaultPreviewState({
-            meta: '已进入目录。',
-            content: '继续选择 Markdown / JSON / TXT 文件进行预览。',
-          }));
+          setPreviewState(defaultPreviewState());
           await loadFiles(path);
           return;
         }
@@ -1569,12 +1884,9 @@ function renderFiles(files) {
           return;
         }
 
-        setPreviewState({
-          path,
-          meta: `${name} 不支持文本预览。`,
-          content: '该文件不支持文本预览，已尝试在新窗口打开。',
-        });
+        setPreviewState(defaultPreviewState());
         window.open(`/download?path=${encodeURIComponent(path)}`, '_blank', 'noopener');
+        toast(`${name} 不支持文本预览，已在新窗口打开`);
       } catch (error) {
         toast(error.message);
       }
@@ -1612,11 +1924,18 @@ async function loadFiles(path = state.currentPath) {
 
 async function previewFile(path) {
   const data = await api(`/api/file?path=${encodeURIComponent(path)}`);
-  const entryName = state.currentFileEntries.get(path)?.name || fileBaseName(data.file.path);
+  const previewPath = data.file.path || path;
+  const entryName = state.currentFileEntries.get(path)?.name || fileBaseName(previewPath);
+  const extension = fileExtension(previewPath);
+  const isMarkdown = extension === '.md' || extension === '.markdown';
   setPreviewState({
-    path,
-    meta: entryName ? `预览：${entryName}` : '文件预览',
-    content: `${data.file.content}${data.file.truncated ? '\n\n...内容过长，已截断预览' : ''}`,
+    path: previewPath,
+    meta: entryName || '文件预览',
+    subMeta: isMarkdown ? 'Markdown 预览' : '文本预览',
+    content: data.file.content || '',
+    mode: isMarkdown ? 'markdown' : 'text',
+    truncated: Boolean(data.file.truncated),
+    open: true,
   });
 }
 
@@ -1694,6 +2013,14 @@ function bindHomeEvents() {
   if (homeEls.refreshFilesBtn) {
     homeEls.refreshFilesBtn.addEventListener('click', () => {
       loadFiles().catch((error) => toast(error.message));
+    });
+  }
+  if (homeEls.copyPreviewTextBtn) {
+    homeEls.copyPreviewTextBtn.addEventListener('click', () => {
+      const text = homeEls.filePreview?.innerText || state.currentPreviewContent;
+      copyText(text)
+        .then(() => toast('预览文本已复制'))
+        .catch((error) => toast(error.message || '复制失败'));
     });
   }
 }

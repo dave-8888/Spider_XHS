@@ -79,10 +79,17 @@
         </div>
       </div>
 
-      <div class="file-layout">
+      <div id="fileLayout" class="file-layout">
         <div id="fileList" class="file-list"></div>
-        <div class="file-preview-panel">
-          <pre id="filePreview" class="file-preview">选择 Markdown / JSON / TXT 文件。</pre>
+        <div id="filePreviewPanel" class="file-preview-panel is-hidden" aria-hidden="true">
+          <div class="file-preview-header">
+            <div class="file-preview-heading">
+              <strong id="filePreviewMeta" class="file-preview-title"></strong>
+              <span id="filePreviewSubMeta" class="file-preview-subtitle"></span>
+            </div>
+            <button id="copyPreviewTextBtn" class="btn btn-ghost file-preview-copy-btn" type="button">复制文本</button>
+          </div>
+          <div id="filePreview" class="file-preview" tabindex="0"></div>
         </div>
       </div>
     </section>

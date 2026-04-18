@@ -1182,8 +1182,12 @@ select:focus {
 
 .file-layout {
   display: grid;
-  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
+}
+
+.file-layout.has-preview {
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
 }
 
 .file-list {
@@ -1283,7 +1287,50 @@ select:focus {
 }
 
 .file-preview-panel {
+  display: grid;
+  align-content: start;
+  gap: 10px;
   min-width: 0;
+}
+
+.file-preview-panel.is-hidden {
+  display: none;
+}
+
+.file-preview-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.file-preview-heading {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.file-preview-title {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-preview-subtitle {
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.file-preview-copy-btn {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 12px;
 }
 
 .file-preview {
@@ -1291,13 +1338,159 @@ select:focus {
   overflow: auto;
   margin: 0;
   padding: 18px;
+  border: 1px solid var(--line-soft);
   border-radius: var(--radius-lg);
+  background: var(--panel-bg);
+  color: var(--text);
+  line-height: 1.68;
+  cursor: text;
+  user-select: text;
+}
+
+.file-preview.is-plain {
   background: var(--preview-bg);
   color: var(--preview-text);
   white-space: pre-wrap;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-size: 13px;
-  line-height: 1.65;
+}
+
+.file-preview.is-markdown {
+  white-space: normal;
+  font-family: var(--font-text);
+  font-size: 15px;
+}
+
+.file-preview.is-markdown > :first-child {
+  margin-top: 0;
+}
+
+.file-preview.is-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.file-preview.is-markdown h1,
+.file-preview.is-markdown h2,
+.file-preview.is-markdown h3,
+.file-preview.is-markdown h4,
+.file-preview.is-markdown h5,
+.file-preview.is-markdown h6 {
+  margin: 1.2em 0 0.55em;
+  color: var(--text);
+  line-height: 1.25;
+}
+
+.file-preview.is-markdown h1 {
+  font-size: 1.55rem;
+}
+
+.file-preview.is-markdown h2 {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 1.22rem;
+}
+
+.file-preview.is-markdown h3 {
+  font-size: 1.05rem;
+}
+
+.file-preview.is-markdown p,
+.file-preview.is-markdown ul,
+.file-preview.is-markdown ol {
+  margin: 0 0 14px;
+}
+
+.file-preview.is-markdown ul,
+.file-preview.is-markdown ol {
+  padding-left: 22px;
+}
+
+.file-preview.is-markdown li + li {
+  margin-top: 6px;
+}
+
+.file-preview.is-markdown a {
+  color: var(--blue);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.file-preview.is-markdown code {
+  padding: 2px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+
+.file-preview.is-markdown pre {
+  overflow: auto;
+  margin: 14px 0;
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  background: var(--preview-bg);
+  color: var(--preview-text);
+}
+
+.file-preview.is-markdown pre code {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  white-space: pre;
+}
+
+.markdown-table-wrap {
+  overflow-x: auto;
+  margin: 14px 0;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+}
+
+.file-preview.is-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.file-preview.is-markdown th,
+.file-preview.is-markdown td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+  vertical-align: top;
+}
+
+.file-preview.is-markdown th {
+  background: var(--panel-muted-bg);
+  color: var(--text-soft);
+  font-weight: 700;
+}
+
+.file-preview.is-markdown tr:last-child td {
+  border-bottom: 0;
+}
+
+.file-preview.is-markdown figure {
+  margin: 16px 0;
+}
+
+.file-preview.is-markdown img,
+.markdown-media-video {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+  background: var(--panel-muted-bg);
+}
+
+.markdown-media-video {
+  width: 100%;
+  max-height: 420px;
+}
+
+.file-preview-notice {
+  color: var(--text-faint);
+  font-size: 13px;
 }
 
 .empty-state {
@@ -1463,7 +1656,7 @@ body.has-collect-overlay {
   .two-columns,
   .field-grid-2,
   .field-grid-4,
-  .file-layout,
+  .file-layout.has-preview,
   .choice-grid,
   .choice-grid.compact {
     grid-template-columns: 1fr 1fr;
@@ -1562,7 +1755,7 @@ body.has-collect-overlay {
   .two-columns,
   .field-grid-2,
   .field-grid-4,
-  .file-layout,
+  .file-layout.has-preview,
   .choice-grid,
   .choice-grid.compact {
     grid-template-columns: 1fr;
@@ -1595,8 +1788,13 @@ body.has-collect-overlay {
 
   .hero-actions .btn,
   .button-pair .btn,
-  .directory-actions .btn {
+  .directory-actions .btn,
+  .file-preview-copy-btn {
     width: 100%;
+  }
+
+  .file-preview-header {
+    flex-direction: column;
   }
 
   .collect-overlay-card {
