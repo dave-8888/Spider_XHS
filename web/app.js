@@ -1217,7 +1217,7 @@ function renderFiles(files) {
         type="button"
         ${disabledAttr}
       >
-        <span>${entry.type === 'directory' ? '[目录]' : '[文件]'} ${escapeHtml(entry.name)}</span>
+        <span>${entry.type === 'directory' ? escapeHtml(entry.name) : `[文件] ${escapeHtml(entry.name)}`}</span>
         <span class="file-meta">${entry.type === 'directory' ? '目录' : sizeText(entry.size)} · ${escapeHtml(entry.modified)}</span>
       </button>
       <div class="file-actions">
