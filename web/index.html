@@ -47,13 +47,16 @@
     </section>
 
     <section id="jobSection" class="surface reveal">
-      <div class="section-title">
+      <div class="section-title job-section-title">
         <span class="section-index">01</span>
         <div>
           <h2>任务状态</h2>
           <p class="muted">最近任务与日志。</p>
         </div>
+        <button id="refreshJobsBtn" class="btn btn-ghost job-refresh-btn" type="button">刷新</button>
       </div>
+      <div id="jobStatusSummary" class="job-status-summary" aria-live="polite"></div>
+      <div id="jobFilters" class="job-filters" role="tablist" aria-label="任务状态筛选"></div>
       <div id="jobList" class="job-list muted">暂无任务</div>
     </section>
 

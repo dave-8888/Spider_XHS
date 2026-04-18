@@ -24,6 +24,9 @@ const homeEls = {
   collectOverlayCloseBtn: document.querySelector('#collectOverlayCloseBtn'),
   jobList: document.querySelector('#jobList'),
   jobSection: document.querySelector('#jobSection'),
+  jobStatusSummary: document.querySelector('#jobStatusSummary'),
+  jobFilters: document.querySelector('#jobFilters'),
+  refreshJobsBtn: document.querySelector('#refreshJobsBtn'),
   deleteSelectedBtn: document.querySelector('#deleteSelectedBtn'),
   refreshFilesBtn: document.querySelector('#refreshFilesBtn'),
   fileList: document.querySelector('#fileList'),
@@ -85,6 +88,9 @@ const state = {
   outputDirDisplay: 'datas/markdown_datas',
   settingsWeekdays: [1, 2, 3, 4, 5, 6, 7],
   jobLogScrollState: new Map(),
+  jobLogOpenState: new Map(),
+  jobFilter: 'all',
+  currentJobs: [],
   collectBusy: false,
   collectOverlayState: {
     status: 'idle',
@@ -484,6 +490,25 @@ function toast(message) {
   sharedEls.toast.classList.add('show');
   window.clearTimeout(sharedEls.toast.timer);
   sharedEls.toast.timer = window.setTimeout(() => sharedEls.toast.classList.remove('show'), 3200);
+}
+
+async function copyText(value) {
+  const text = String(value || '');
+  if (!text) return;
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const input = document.createElement('textarea');
+  input.value = text;
+  input.setAttribute('readonly', '');
+  input.style.position = 'fixed';
+  input.style.opacity = '0';
+  document.body.appendChild(input);
+  input.select();
+  document.execCommand('copy');
+  input.remove();
 }
 
 function escapeHtml(value) {
@@ -998,6 +1023,224 @@ function isNearBottom(element, threshold = 24) {
   return element.scrollHeight - element.clientHeight - element.scrollTop <= threshold;
 }
 
+function jobStatusMeta(status) {
+  const map = {
+    running: { label: '运行中', tone: 'running' },
+    success: { label: '已完成', tone: 'success' },
+    failed: { label: '失败', tone: 'failed' },
+    interrupted: { label: '已中断', tone: 'interrupted' },
+  };
+  return map[status] || { label: status || '未知', tone: 'idle' };
+}
+
+function jobSourceLabel(source) {
+  return source === 'schedule' ? '定时任务' : '手动采集';
+}
+
+function compactTime(value) {
+  const text = String(value || '').trim();
+  if (!text) return '未记录';
+  const [date = '', time = ''] = text.split(' ');
+  if (!time) return text;
+  const shortDate = date.length >= 10 ? date.slice(5) : date;
+  return `${shortDate} ${time.slice(0, 5)}`;
+}
+
+function parseLocalDate(value) {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  const date = new Date(text.replace(/-/g, '/'));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDuration(startedAt, finishedAt) {
+  const start = parseLocalDate(startedAt);
+  const finish = parseLocalDate(finishedAt) || new Date();
+  if (!start) return '计算中';
+  const seconds = Math.max(0, Math.round((finish.getTime() - start.getTime()) / 1000));
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  const restSeconds = seconds % 60;
+  if (minutes < 60) return `${minutes} 分 ${restSeconds} 秒`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} 时 ${minutes % 60} 分`;
+}
+
+function truncateText(value, maxLength = 84) {
+  const text = String(value || '').trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1)}…`;
+}
+
+function latestJobLog(job) {
+  const logs = Array.isArray(job.logs) ? job.logs : [];
+  return logs.length ? logs[logs.length - 1] : null;
+}
+
+function countJobLogIssues(job) {
+  const logs = Array.isArray(job.logs) ? job.logs : [];
+  return logs.filter((item) => /失败|错误|异常|error|exception/i.test(String(item.message || ''))).length;
+}
+
+function jobKeywords(summary = {}) {
+  const keywords = Array.isArray(summary.keywords) ? summary.keywords.filter(Boolean) : [];
+  if (!keywords.length) return '未设置关键词';
+  const shown = keywords.slice(0, 3).join('、');
+  return keywords.length > 3 ? `${shown} 等 ${keywords.length} 个` : shown;
+}
+
+function jobScopeText(summary = {}) {
+  const parts = [
+    summary.sort_type,
+    summary.content_type,
+    summary.publish_time,
+    summary.note_range && summary.note_range !== '不限' ? summary.note_range : '',
+  ].filter(Boolean);
+  return parts.length ? parts.join(' · ') : '默认筛选';
+}
+
+function jobProgress(job) {
+  const status = job.status || '';
+  if (status === 'success') {
+    return { value: 100, label: '已完成' };
+  }
+  if (status === 'failed' || status === 'interrupted') {
+    return { value: 100, label: jobStatusMeta(status).label };
+  }
+
+  const logs = Array.isArray(job.logs) ? job.logs : [];
+  for (let index = logs.length - 1; index >= 0; index -= 1) {
+    const message = String(logs[index].message || '');
+    const match = message.match(/拉取详情.+?(\d+)\s*\/\s*(\d+)/);
+    if (match) {
+      const current = Number(match[1]);
+      const total = Number(match[2]);
+      if (total > 0) {
+        return {
+          value: Math.max(4, Math.min(96, Math.round((current / total) * 100))),
+          label: `详情 ${current}/${total}`,
+        };
+      }
+    }
+  }
+
+  return { value: status === 'running' ? 12 : 0, label: status === 'running' ? '准备中' : '未开始' };
+}
+
+function jobPrimaryMessage(job) {
+  const result = job.result || {};
+  const latestLog = latestJobLog(job);
+  if (job.status === 'success') {
+    return `保存 ${result.saved_count || 0} 篇，失败 ${result.failed_count || 0} 条`;
+  }
+  if (job.status === 'failed' || job.status === 'interrupted') {
+    return truncateText(job.error || latestLog?.message || jobStatusMeta(job.status).label, 120);
+  }
+  return truncateText(latestLog?.message || '正在等待采集日志', 120);
+}
+
+function jobMetricItems(job) {
+  const summary = job.summary || {};
+  const result = job.result || {};
+  const saved = result.saved_count ?? '—';
+  const failed = result.failed_count ?? countJobLogIssues(job);
+  return [
+    { label: '目标', value: `${summary.count || '—'} 篇` },
+    { label: '已保存', value: saved === '—' ? saved : `${saved} 篇` },
+    { label: '异常', value: `${failed || 0} 条` },
+    { label: '耗时', value: formatDuration(job.started_at || job.created_at, job.finished_at) },
+  ];
+}
+
+function jobFilterOptions(jobs) {
+  const issueCount = jobs.filter((job) => ['failed', 'interrupted'].includes(job.status)).length;
+  return [
+    { value: 'all', label: '全部', count: jobs.length },
+    { value: 'running', label: '运行中', count: jobs.filter((job) => job.status === 'running').length },
+    { value: 'success', label: '已完成', count: jobs.filter((job) => job.status === 'success').length },
+    { value: 'failed', label: '异常', count: issueCount },
+  ];
+}
+
+function filterJobs(jobs) {
+  const filter = state.jobFilter;
+  if (filter === 'running') return jobs.filter((job) => job.status === 'running');
+  if (filter === 'success') return jobs.filter((job) => job.status === 'success');
+  if (filter === 'failed') return jobs.filter((job) => ['failed', 'interrupted'].includes(job.status));
+  return jobs;
+}
+
+function renderJobStatusSummary(jobs) {
+  if (!homeEls.jobStatusSummary) return;
+  const runningJobs = jobs.filter((job) => job.status === 'running');
+  const latest = runningJobs[0] || jobs[0];
+
+  if (!latest) {
+    homeEls.jobStatusSummary.innerHTML = `
+      <div class="job-summary-main">
+        <span class="job-status-dot idle" aria-hidden="true"></span>
+        <div>
+          <div class="job-summary-title">暂无任务记录</div>
+          <div class="job-summary-subtitle">当前没有采集历史。</div>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  const meta = jobStatusMeta(latest.status);
+  const title = runningJobs.length ? '正在采集' : `最近任务${meta.label}`;
+  const subtitle = `${jobSourceLabel(latest.source)} · ${compactTime(latest.started_at || latest.created_at)} · ${jobPrimaryMessage(latest)}`;
+  const successCount = jobs.filter((job) => job.status === 'success').length;
+  const issueCount = jobs.filter((job) => ['failed', 'interrupted'].includes(job.status)).length;
+
+  homeEls.jobStatusSummary.innerHTML = `
+    <div class="job-summary-main">
+      <span class="job-status-dot ${escapeHtml(meta.tone)}" aria-hidden="true"></span>
+      <div>
+        <div class="job-summary-title">${escapeHtml(title)}</div>
+        <div class="job-summary-subtitle">${escapeHtml(subtitle)}</div>
+      </div>
+    </div>
+    <div class="job-summary-stats" aria-label="任务统计">
+      <span><strong>${escapeHtml(runningJobs.length)}</strong>运行中</span>
+      <span><strong>${escapeHtml(successCount)}</strong>完成</span>
+      <span><strong>${escapeHtml(issueCount)}</strong>异常</span>
+    </div>
+  `;
+}
+
+function renderJobFilters(jobs) {
+  if (!homeEls.jobFilters) return;
+  const options = jobFilterOptions(jobs);
+  if (!options.some((option) => option.value === state.jobFilter)) {
+    state.jobFilter = 'all';
+  }
+
+  homeEls.jobFilters.innerHTML = options.map((option) => {
+    const active = option.value === state.jobFilter;
+    return `
+      <button
+        class="job-filter${active ? ' active' : ''}"
+        type="button"
+        role="tab"
+        aria-selected="${active ? 'true' : 'false'}"
+        data-job-filter="${escapeHtml(option.value)}"
+      >
+        <span>${escapeHtml(option.label)}</span>
+        <strong>${escapeHtml(option.count)}</strong>
+      </button>
+    `;
+  }).join('');
+}
+
+function saveJobLogOpenState() {
+  if (!homeEls.jobList) return;
+  homeEls.jobList.querySelectorAll('.job-detail[data-job-id]').forEach((element) => {
+    state.jobLogOpenState.set(element.dataset.jobId, element.open);
+  });
+}
+
 function saveJobLogScrollState() {
   if (!homeEls.jobList) return;
   homeEls.jobList.querySelectorAll('.job-log[data-job-id]').forEach((element) => {
@@ -1006,6 +1249,19 @@ function saveJobLogScrollState() {
       stickToBottom: isNearBottom(element),
       offsetFromBottom: Math.max(0, element.scrollHeight - element.clientHeight - element.scrollTop),
     });
+  });
+}
+
+function pruneJobUiState(visibleJobIds) {
+  Array.from(state.jobLogScrollState.keys()).forEach((jobId) => {
+    if (!visibleJobIds.has(jobId)) {
+      state.jobLogScrollState.delete(jobId);
+    }
+  });
+  Array.from(state.jobLogOpenState.keys()).forEach((jobId) => {
+    if (!visibleJobIds.has(jobId)) {
+      state.jobLogOpenState.delete(jobId);
+    }
   });
 }
 
@@ -1033,40 +1289,94 @@ function bindJobLogAutoScroll() {
     }, { passive: true });
   });
 
-  Array.from(state.jobLogScrollState.keys()).forEach((jobId) => {
-    if (!visibleJobIds.has(jobId)) {
-      state.jobLogScrollState.delete(jobId);
-    }
+  homeEls.jobList.querySelectorAll('.job-detail[data-job-id]').forEach((element) => {
+    const jobId = element.dataset.jobId;
+    visibleJobIds.add(jobId);
+    element.addEventListener('toggle', () => {
+      state.jobLogOpenState.set(jobId, element.open);
+    });
   });
+
+  pruneJobUiState(visibleJobIds);
+}
+
+function renderJobEmptyState(message) {
+  homeEls.jobList.classList.add('muted', 'job-list-empty');
+  homeEls.jobList.innerHTML = `<div class="job-empty-state">${escapeHtml(message)}</div>`;
 }
 
 function renderJobs(jobs) {
   if (!homeEls.jobList) return;
-  if (!jobs || jobs.length === 0) {
+  const allJobs = Array.isArray(jobs) ? jobs : [];
+  state.currentJobs = allJobs;
+  renderJobStatusSummary(allJobs);
+  renderJobFilters(allJobs);
+
+  if (allJobs.length === 0) {
     state.jobLogScrollState.clear();
-    homeEls.jobList.classList.add('muted');
-    homeEls.jobList.textContent = '暂无任务';
+    state.jobLogOpenState.clear();
+    renderJobEmptyState('暂无任务记录');
     return;
   }
 
   saveJobLogScrollState();
-  homeEls.jobList.classList.remove('muted');
-  homeEls.jobList.innerHTML = jobs.slice(0, 8).map((job) => {
-    const result = job.result || {};
-    const logs = (job.logs || []).map((item) => `[${item.time}] ${item.message}`).join('\n');
-    const countText = job.status === 'success'
-      ? `保存 ${result.saved_count || 0} 篇，失败 ${result.failed_count || 0} 条`
-      : (job.error || '运行中');
+  saveJobLogOpenState();
+
+  const visibleJobs = filterJobs(allJobs).slice(0, 8);
+  if (!visibleJobs.length) {
+    renderJobEmptyState('该状态下暂无任务');
+    return;
+  }
+
+  homeEls.jobList.classList.remove('muted', 'job-list-empty');
+  homeEls.jobList.innerHTML = visibleJobs.map((job) => {
+    const meta = jobStatusMeta(job.status);
+    const summary = job.summary || {};
+    const logs = Array.isArray(job.logs) ? job.logs : [];
+    const logText = logs.map((item) => `[${item.time}] ${item.message}`).join('\n');
+    const progress = jobProgress(job);
     const highlight = job.id === state.highlightedJobId ? ' job-card-highlight' : '';
-    return `
-      <div class="job-card${highlight}" data-job-card-id="${escapeHtml(job.id)}">
-        <div class="job-head">
-          <strong>${escapeHtml(job.id)}</strong>
-          <span class="badge ${escapeHtml(job.status)}">${escapeHtml(job.status)}</span>
-        </div>
-        <div class="muted">${escapeHtml(job.source)} · ${escapeHtml(job.started_at || job.created_at)} · ${escapeHtml(countText)}</div>
-        ${logs ? `<pre class="job-log" data-job-id="${escapeHtml(job.id)}">${escapeHtml(logs)}</pre>` : ''}
+    const storedOpen = state.jobLogOpenState.get(job.id);
+    const shouldOpen = storedOpen !== undefined ? storedOpen : (job.status === 'running' || job.id === state.highlightedJobId);
+    const metricHtml = jobMetricItems(job).map((item) => `
+      <div class="job-metric">
+        <span>${escapeHtml(item.label)}</span>
+        <strong>${escapeHtml(item.value)}</strong>
       </div>
+    `).join('');
+    const detailHtml = logs.length ? `
+      <details class="job-detail" data-job-id="${escapeHtml(job.id)}"${shouldOpen ? ' open' : ''}>
+        <summary>
+          <span>运行日志</span>
+          <strong>${escapeHtml(logs.length)} 条</strong>
+        </summary>
+        <pre class="job-log" data-job-id="${escapeHtml(job.id)}">${escapeHtml(logText)}</pre>
+      </details>
+    ` : '';
+
+    return `
+      <article class="job-card job-status-${escapeHtml(meta.tone)}${highlight}" data-job-card-id="${escapeHtml(job.id)}">
+        <div class="job-card-top">
+          <div class="job-title-block">
+            <div class="job-title-row">
+              <span class="job-status-dot ${escapeHtml(meta.tone)}" aria-hidden="true"></span>
+              <strong class="job-title">${escapeHtml(jobKeywords(summary))}</strong>
+              <span class="job-id">#${escapeHtml(job.id)}</span>
+            </div>
+            <div class="job-subtitle">${escapeHtml(jobSourceLabel(job.source))} · ${escapeHtml(compactTime(job.started_at || job.created_at))} · ${escapeHtml(jobScopeText(summary))}</div>
+          </div>
+          <div class="job-card-actions">
+            <button class="job-copy-id" type="button" data-job-id="${escapeHtml(job.id)}">复制ID</button>
+            <span class="badge ${escapeHtml(meta.tone)}">${escapeHtml(meta.label)}</span>
+          </div>
+        </div>
+        <div class="job-progress" aria-label="${escapeHtml(progress.label)}">
+          <span style="width: ${escapeHtml(progress.value)}%"></span>
+        </div>
+        <div class="job-card-grid">${metricHtml}</div>
+        <div class="job-latest">${escapeHtml(jobPrimaryMessage(job))}</div>
+        ${detailHtml}
+      </article>
     `;
   }).join('');
   bindJobLogAutoScroll();
@@ -1075,7 +1385,7 @@ function renderJobs(jobs) {
 async function loadJobs() {
   if (!homeEls.jobList) return;
   const data = await api('/api/jobs');
-  renderJobs(data.jobs);
+  renderJobs(data.jobs || []);
 }
 
 function sizeText(size) {
@@ -1345,6 +1655,36 @@ function bindHomeEvents() {
   }
   if (homeEls.collectOverlayCloseBtn) {
     homeEls.collectOverlayCloseBtn.addEventListener('click', closeCollectOverlay);
+  }
+  if (homeEls.refreshJobsBtn) {
+    homeEls.refreshJobsBtn.addEventListener('click', async () => {
+      homeEls.refreshJobsBtn.disabled = true;
+      try {
+        await loadJobs();
+        toast('任务状态已刷新');
+      } catch (error) {
+        toast(error.message);
+      } finally {
+        homeEls.refreshJobsBtn.disabled = false;
+      }
+    });
+  }
+  if (homeEls.jobFilters) {
+    homeEls.jobFilters.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-job-filter]');
+      if (!button) return;
+      state.jobFilter = button.dataset.jobFilter || 'all';
+      renderJobs(state.currentJobs);
+    });
+  }
+  if (homeEls.jobList) {
+    homeEls.jobList.addEventListener('click', (event) => {
+      const button = event.target.closest('.job-copy-id');
+      if (!button) return;
+      copyText(button.dataset.jobId || '')
+        .then(() => toast('任务 ID 已复制'))
+        .catch((error) => toast(error.message || '复制失败'));
+    });
   }
   if (homeEls.deleteSelectedBtn) {
     homeEls.deleteSelectedBtn.addEventListener('click', () => {
