@@ -46,7 +46,7 @@
       <div class="hero-copy">
         <p class="eyebrow eyebrow-muted">Spider_XHS Settings</p>
         <h1>系统设置页</h1>
-        <p class="hero-lead">登录、拉取节奏和自动调度统一在这里维护。</p>
+        <p class="hero-lead">关键词、采集参数、筛选条件、登录和自动调度统一在这里维护。</p>
       </div>
       <div class="hero-actions">
         <a class="btn btn-ghost" href="/">返回采集台</a>
@@ -55,9 +55,99 @@
     </section>
 
     <section class="grid two-columns">
-      <article class="surface surface-dark reveal">
+      <article class="surface reveal">
         <div class="section-title">
           <span class="section-index">01</span>
+          <div>
+            <h2>关键词</h2>
+            <p class="muted">一行一个，按顺序执行。</p>
+          </div>
+        </div>
+        <div class="field">
+          <span>关键词列表</span>
+          <div id="keywordList" class="keyword-list" aria-live="polite"></div>
+        </div>
+        <button id="addKeywordBtn" class="btn btn-secondary keyword-add-btn" type="button">新增关键词</button>
+      </article>
+
+      <article class="surface reveal">
+        <div class="section-title">
+          <span class="section-index">02</span>
+          <div>
+            <h2>采集参数</h2>
+            <p class="muted">控制采集数量、点赞筛选和结果目录。</p>
+          </div>
+        </div>
+        <div class="field-grid field-grid-2">
+          <div class="field full-width">
+            <span>采集存放目录</span>
+            <div class="directory-picker">
+              <div class="directory-display">
+                <div class="directory-label">当前目录</div>
+                <div id="outputDirText" class="directory-path">加载中...</div>
+              </div>
+              <div class="button-pair directory-actions">
+                <button id="pickOutputDirBtn" class="btn btn-secondary" type="button">选择文件夹</button>
+                <button id="resetOutputDirBtn" class="btn btn-ghost" type="button">恢复默认</button>
+              </div>
+            </div>
+          </div>
+          <label class="field">
+            <span>每个关键词采集篇数</span>
+            <input id="countInput" type="number" min="1" max="200" value="10">
+          </label>
+          <label class="field">
+            <span>点赞 Top N</span>
+            <input id="likeTopInput" type="number" min="1" max="200" value="10">
+          </label>
+          <label class="field full-width">
+            <span>自定义发布时间天数</span>
+            <input id="publishDaysInput" type="number" min="0" max="3650" value="7">
+          </label>
+        </div>
+        <p class="muted">目录通过系统选择器指定，恢复默认后使用项目内默认输出目录。</p>
+      </article>
+    </section>
+
+    <section class="surface reveal">
+      <div class="section-title">
+        <span class="section-index">03</span>
+        <div>
+          <h2>筛选条件</h2>
+          <p class="muted">排序、类型、时间、范围和位置。</p>
+        </div>
+      </div>
+
+      <div class="choice-section">
+        <h3>排序依据</h3>
+        <div id="sortTypeChoices" class="choice-grid"></div>
+      </div>
+
+      <div class="choice-section">
+        <h3>笔记类型</h3>
+        <div id="contentTypeChoices" class="choice-grid compact"></div>
+      </div>
+
+      <div class="choice-section">
+        <h3>发布时间</h3>
+        <div id="publishTimeChoices" class="choice-grid"></div>
+      </div>
+
+      <div class="choice-section">
+        <h3>搜索范围</h3>
+        <div id="noteRangeChoices" class="choice-grid compact"></div>
+      </div>
+
+      <div class="choice-section">
+        <h3>位置距离</h3>
+        <div id="posDistanceChoices" class="choice-grid compact"></div>
+      </div>
+    </section>
+
+    <section class="grid two-columns">
+      <article class="surface surface-dark reveal">
+        <div class="section-title">
+          <span class="section-index">04</span>
           <div>
             <h2>账号与登录</h2>
             <p class="muted">采集依赖登录 Cookie。</p>
@@ -75,7 +165,7 @@
 
       <article class="surface reveal">
         <div class="section-title">
-          <span class="section-index">02</span>
+          <span class="section-index">05</span>
           <div>
             <h2>拉取节奏</h2>
             <p class="muted">控制搜索和详情请求间隔。</p>
@@ -111,7 +201,7 @@
 
     <section class="surface reveal">
       <div class="section-title">
-        <span class="section-index">03</span>
+        <span class="section-index">06</span>
         <div>
           <h2>自动化调度</h2>
           <p class="muted">服务运行时按配置触发，不会并发重叠。</p>

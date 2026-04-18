@@ -24,7 +24,6 @@ const homeEls = {
   collectOverlayCloseBtn: document.querySelector('#collectOverlayCloseBtn'),
   jobList: document.querySelector('#jobList'),
   jobSection: document.querySelector('#jobSection'),
-  createDirectoryBtn: document.querySelector('#createDirectoryBtn'),
   deleteSelectedBtn: document.querySelector('#deleteSelectedBtn'),
   refreshFilesBtn: document.querySelector('#refreshFilesBtn'),
   fileList: document.querySelector('#fileList'),
@@ -418,7 +417,6 @@ function setHomeBusy(isBusy) {
     homeEls.countInput,
     homeEls.likeTopInput,
     homeEls.publishDaysInput,
-    homeEls.createDirectoryBtn,
     homeEls.deleteSelectedBtn,
     homeEls.refreshFilesBtn,
   ].forEach((element) => {
@@ -635,7 +633,6 @@ function updateScheduleView() {
 }
 
 function applyHomeConfig(config) {
-  if (!homeEls.keywordList) return;
   const filters = config.filters || {};
   const collect = config.collect || {};
 
@@ -649,9 +646,15 @@ function applyHomeConfig(config) {
   state.outputDirDisplay = config.paths?.output_root || state.defaultOutputRoot;
 
   setKeywordItems(config.keywords || ['男士穿搭']);
-  homeEls.countInput.value = collect.count ?? 10;
-  homeEls.likeTopInput.value = collect.like_top_n ?? 10;
-  homeEls.publishDaysInput.value = filters.publish_days ?? 7;
+  if (homeEls.countInput) {
+    homeEls.countInput.value = collect.count ?? 10;
+  }
+  if (homeEls.likeTopInput) {
+    homeEls.likeTopInput.value = collect.like_top_n ?? 10;
+  }
+  if (homeEls.publishDaysInput) {
+    homeEls.publishDaysInput.value = filters.publish_days ?? 7;
+  }
 
   updateOutputRoot(config);
   renderKeywordList();
@@ -679,6 +682,7 @@ function applySettingsConfig(config) {
   const collect = config.collect || {};
   const schedule = config.schedule || {};
 
+  applyHomeConfig(config);
   applyLoginSummary(config);
   settingsEls.requestMultiplierInput.value = collect.request_multiplier ?? 3;
   settingsEls.searchDelayMinInput.value = collect.search_delay_min_sec ?? 2;
@@ -736,15 +740,20 @@ function readHomeDraft() {
 }
 
 function readSettingsDraft() {
+  const collectionDraft = readHomeDraft();
   const runTimes = readRunTimes();
   return {
+    keywords: collectionDraft.keywords,
     collect: {
+      ...collectionDraft.collect,
       request_multiplier: toNumber(settingsEls.requestMultiplierInput?.value, 3),
       search_delay_min_sec: toNumber(settingsEls.searchDelayMinInput?.value, 2),
       search_delay_max_sec: toNumber(settingsEls.searchDelayMaxInput?.value, 4),
       detail_delay_min_sec: toNumber(settingsEls.detailDelayMinInput?.value, 1),
       detail_delay_max_sec: toNumber(settingsEls.detailDelayMaxInput?.value, 3),
     },
+    filters: collectionDraft.filters,
+    storage: collectionDraft.storage,
     schedule: {
       enabled: Boolean(settingsEls.scheduleEnabledInput?.checked),
       cycle: settingsEls.cycleInput?.value || 'daily',
@@ -776,14 +785,14 @@ async function pickOutputFolder() {
   state.selectedOutputDir = data.folder?.path || '';
   state.outputDirDisplay = data.folder?.path || state.outputDirDisplay;
   renderOutputDirSelection();
-  toast(`已选择目录：${state.outputDirDisplay}`);
+  toast(`已选择目录：${state.outputDirDisplay}，保存设置后生效`);
 }
 
 function resetOutputFolder() {
   state.selectedOutputDir = '';
   state.outputDirDisplay = state.defaultOutputRoot;
   renderOutputDirSelection();
-  toast('已恢复默认目录');
+  toast('已恢复默认目录，保存设置后生效');
 }
 
 async function startCollect() {
@@ -793,13 +802,14 @@ async function startCollect() {
     open: true,
     status: 'validating',
     title: '正在校验采集配置',
-    detail: '检查关键词、筛选条件和目录设置。',
+    detail: '检查已保存的关键词、筛选条件和目录设置。',
   });
   setHomeBusy(true);
 
   try {
-    const draft = readHomeDraft();
-    if (!draft.keywords.length) {
+    const savedConfig = await getConfigRaw();
+    const savedKeywords = Array.isArray(savedConfig.keywords) ? savedConfig.keywords.filter(Boolean) : [];
+    if (!savedKeywords.length) {
       throw new Error('请至少填写一个关键词');
     }
 
@@ -810,11 +820,9 @@ async function startCollect() {
       detail: '配置校验通过，正在提交采集请求。',
     });
 
-    const savedConfig = await getConfigRaw();
-    const mergedConfig = deepMerge(savedConfig, draft);
     const data = await api('/api/collect', {
       method: 'POST',
-      body: JSON.stringify({ config: mergedConfig }),
+      body: JSON.stringify({}),
     });
     setCollectOverlay({
       open: true,
@@ -1084,7 +1092,7 @@ function fileBaseName(path = '') {
 function defaultPreviewState(overrides = {}) {
   return {
     path: '',
-    meta: '选择可预览文件。',
+    meta: '',
     content: '选择 Markdown / JSON / TXT 文件。',
     ...overrides,
   };
@@ -1093,9 +1101,6 @@ function defaultPreviewState(overrides = {}) {
 function updateFileToolbarState() {
   if (homeEls.fileSelectionSummary) {
     homeEls.fileSelectionSummary.textContent = `已选 ${state.selectedFilePaths.size} 项`;
-  }
-  if (homeEls.createDirectoryBtn) {
-    homeEls.createDirectoryBtn.disabled = state.collectBusy;
   }
   if (homeEls.deleteSelectedBtn) {
     homeEls.deleteSelectedBtn.disabled = state.collectBusy || state.selectedFilePaths.size === 0;
@@ -1107,12 +1112,14 @@ function updateFileToolbarState() {
 
 function setPreviewState({
   path = '',
-  meta = '选择可预览文件。',
+  meta = '',
   content = '选择 Markdown / JSON / TXT 文件。',
 } = {}) {
-  if (!homeEls.filePreviewMeta || !homeEls.filePreview) return;
+  if (!homeEls.filePreview) return;
   state.currentPreviewPath = path;
-  homeEls.filePreviewMeta.textContent = meta;
+  if (homeEls.filePreviewMeta) {
+    homeEls.filePreviewMeta.textContent = meta;
+  }
   homeEls.filePreview.textContent = content;
 }
 
@@ -1150,25 +1157,6 @@ function shouldResetPreview(removedPaths) {
   return removedPaths.some((path) => (
     state.currentPreviewPath === path || state.currentPreviewPath.startsWith(`${path}/`)
   ));
-}
-
-async function createDirectory() {
-  const input = window.prompt('输入新建目录名称');
-  if (input === null) return;
-  const name = input.trim();
-  if (!name) {
-    toast('目录名称不能为空');
-    return;
-  }
-  await api('/api/files/create-dir', {
-    method: 'POST',
-    body: JSON.stringify({
-      parent_path: state.currentPath,
-      name,
-    }),
-  });
-  toast('目录已创建');
-  await loadFiles(state.currentPath);
 }
 
 async function deleteEntries(paths, label = '') {
@@ -1322,21 +1310,7 @@ async function previewFile(path) {
   });
 }
 
-function bindHomeEvents() {
-  if (homeEls.collectBtn) {
-    homeEls.collectBtn.addEventListener('click', () => {
-      startCollect().catch((error) => {
-        setCollectOverlay({
-          open: true,
-          status: 'error',
-          title: '启动采集失败',
-          detail: error.message || '启动采集时发生错误，请稍后重试。',
-          dismissible: true,
-        });
-        setHomeBusy(false);
-      });
-    });
-  }
+function bindCollectionConfigEvents() {
   if (homeEls.addKeywordBtn) {
     homeEls.addKeywordBtn.addEventListener('click', () => {
       const keyword = createKeywordItem('');
@@ -1352,13 +1326,25 @@ function bindHomeEvents() {
   if (homeEls.resetOutputDirBtn) {
     homeEls.resetOutputDirBtn.addEventListener('click', resetOutputFolder);
   }
+}
+
+function bindHomeEvents() {
+  if (homeEls.collectBtn) {
+    homeEls.collectBtn.addEventListener('click', () => {
+      startCollect().catch((error) => {
+        setCollectOverlay({
+          open: true,
+          status: 'error',
+          title: '启动采集失败',
+          detail: error.message || '启动采集时发生错误，请稍后重试。',
+          dismissible: true,
+        });
+        setHomeBusy(false);
+      });
+    });
+  }
   if (homeEls.collectOverlayCloseBtn) {
     homeEls.collectOverlayCloseBtn.addEventListener('click', closeCollectOverlay);
-  }
-  if (homeEls.createDirectoryBtn) {
-    homeEls.createDirectoryBtn.addEventListener('click', () => {
-      createDirectory().catch((error) => toast(error.message));
-    });
   }
   if (homeEls.deleteSelectedBtn) {
     homeEls.deleteSelectedBtn.addEventListener('click', () => {
@@ -1373,6 +1359,7 @@ function bindHomeEvents() {
 }
 
 function bindSettingsEvents() {
+  bindCollectionConfigEvents();
   if (settingsEls.saveConfigBtn) {
     settingsEls.saveConfigBtn.addEventListener('click', () => {
       saveSettings().catch((error) => toast(error.message));

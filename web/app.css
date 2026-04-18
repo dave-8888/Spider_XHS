@@ -622,7 +622,7 @@ select:focus {
 .collect-action-strip {
   display: flex;
   justify-content: center;
-  margin: -6px 0 24px;
+  margin: 0 0 24px;
 }
 
 .collect-btn-centered {
@@ -842,8 +842,7 @@ select:focus {
 }
 
 .file-list {
-  min-height: 320px;
-  max-height: 540px;
+  height: clamp(320px, 52vh, 540px);
   overflow: auto;
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-lg);
@@ -939,25 +938,11 @@ select:focus {
 }
 
 .file-preview-panel {
-  display: grid;
-  gap: 12px;
-}
-
-.preview-toolbar {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.preview-meta {
-  min-height: 24px;
-  color: var(--text-soft);
+  min-width: 0;
 }
 
 .file-preview {
-  min-height: 320px;
-  max-height: 540px;
+  height: clamp(320px, 52vh, 540px);
   overflow: auto;
   margin: 0;
   padding: 18px;
@@ -1210,7 +1195,6 @@ body.has-collect-overlay {
     grid-template-columns: 1fr;
   }
 
-  .preview-toolbar,
   .row.spread {
     align-items: stretch;
     flex-direction: column;
@@ -1218,7 +1202,6 @@ body.has-collect-overlay {
 
   .hero-actions .btn,
   .button-pair .btn,
-  .preview-toolbar .btn,
   .directory-actions .btn {
     width: 100%;
   }

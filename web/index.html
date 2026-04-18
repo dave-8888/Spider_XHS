@@ -42,112 +42,13 @@
   </header>
 
   <main class="page-shell">
-    <section class="surface surface-dark hero reveal">
-      <div class="hero-copy">
-        <p class="eyebrow">Spider_XHS Console</p>
-        <h1>小红书内容采集台</h1>
-        <p class="hero-lead">配置关键词、筛选条件并查看本地结果。登录和调度在设置页维护。</p>
-      </div>
-    </section>
-
-    <section class="grid two-columns">
-      <article class="surface reveal">
-        <div class="section-title">
-          <span class="section-index">01</span>
-          <div>
-            <h2>关键词</h2>
-            <p class="muted">一行一个，按顺序执行。</p>
-          </div>
-        </div>
-        <div class="field">
-          <span>关键词列表</span>
-          <div id="keywordList" class="keyword-list" aria-live="polite"></div>
-        </div>
-        <button id="addKeywordBtn" class="btn btn-ghost keyword-add-btn" type="button">新增关键词</button>
-      </article>
-
-      <article class="surface reveal">
-        <div class="section-title">
-          <span class="section-index">02</span>
-          <div>
-            <h2>采集参数</h2>
-            <p class="muted">首页保留常用采集项，其余配置在设置页。</p>
-          </div>
-        </div>
-        <div class="field-grid field-grid-2">
-          <div class="field full-width">
-            <span>采集存放目录</span>
-            <div class="directory-picker">
-              <div class="directory-display">
-                <div class="directory-label">当前目录</div>
-                <div id="outputDirText" class="directory-path">加载中...</div>
-              </div>
-              <div class="button-pair directory-actions">
-                <button id="pickOutputDirBtn" class="btn btn-secondary" type="button">选择文件夹</button>
-                <button id="resetOutputDirBtn" class="btn btn-ghost" type="button">恢复默认</button>
-              </div>
-            </div>
-          </div>
-          <label class="field">
-            <span>每个关键词采集篇数</span>
-            <input id="countInput" type="number" min="1" max="200" value="10">
-          </label>
-          <label class="field">
-            <span>点赞 Top N</span>
-            <input id="likeTopInput" type="number" min="1" max="200" value="10">
-          </label>
-          <label class="field full-width">
-            <span>自定义发布时间天数</span>
-            <input id="publishDaysInput" type="number" min="0" max="3650" value="7">
-          </label>
-        </div>
-        <p class="muted">目录通过系统选择器指定，恢复默认后使用项目内默认输出目录。</p>
-      </article>
-    </section>
-
     <section class="collect-action-strip reveal">
       <button id="collectBtn" class="btn btn-primary collect-btn-centered" type="button">立即采集</button>
     </section>
 
-    <section class="surface reveal">
-      <div class="section-title">
-        <span class="section-index">03</span>
-        <div>
-          <h2>筛选条件</h2>
-          <p class="muted">排序、类型、时间、范围和位置。</p>
-        </div>
-      </div>
-
-      <div class="choice-section">
-        <h3>排序依据</h3>
-        <div id="sortTypeChoices" class="choice-grid"></div>
-      </div>
-
-      <div class="choice-section">
-        <h3>笔记类型</h3>
-        <div id="contentTypeChoices" class="choice-grid compact"></div>
-      </div>
-
-      <div class="choice-section">
-        <h3>发布时间</h3>
-        <div id="publishTimeChoices" class="choice-grid"></div>
-      </div>
-
-      <div class="choice-section">
-        <h3>搜索范围</h3>
-        <div id="noteRangeChoices" class="choice-grid compact"></div>
-      </div>
-
-      <div class="choice-section">
-        <h3>位置距离</h3>
-        <div id="posDistanceChoices" class="choice-grid compact"></div>
-      </div>
-
-    </section>
-
     <section id="jobSection" class="surface reveal">
       <div class="section-title">
-        <span class="section-index">04</span>
+        <span class="section-index">01</span>
         <div>
           <h2>任务状态</h2>
           <p class="muted">最近任务与日志。</p>
@@ -158,7 +59,7 @@
 
     <section class="surface reveal">
       <div class="section-title">
-        <span class="section-index">05</span>
+        <span class="section-index">02</span>
         <div>
           <h2>本地文件</h2>
           <p class="muted">最近文件与预览。</p>
@@ -170,7 +71,6 @@
           <div id="fileSelectionSummary" class="file-selection-summary">已选 0 项</div>
         </div>
         <div class="button-pair">
-          <button id="createDirectoryBtn" class="btn btn-secondary" type="button">新建目录</button>
           <button id="deleteSelectedBtn" class="btn btn-ghost" type="button" disabled>批量删除</button>
           <button id="refreshFilesBtn" class="btn btn-ghost" type="button">刷新列表</button>
         </div>
@@ -179,9 +79,6 @@
       <div class="file-layout">
         <div id="fileList" class="file-list"></div>
         <div class="file-preview-panel">
-          <div class="preview-toolbar">
-            <div id="filePreviewMeta" class="preview-meta">选择可预览文件。</div>
-          </div>
           <pre id="filePreview" class="file-preview">选择 Markdown / JSON / TXT 文件。</pre>
         </div>
       </div>
