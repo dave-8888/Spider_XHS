@@ -89,7 +89,7 @@ def now_text() -> str:
 
 
 def batch_name() -> str:
-    return datetime.now().strftime("%Y%m%d_%H%M%S")
+    return datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
 def deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
@@ -174,6 +174,19 @@ def safe_filename(value: Any, fallback: str = "untitled", max_len: int = 80) -> 
     return text[:max_len]
 
 
+def available_child_path(parent: Path, preferred_name: str) -> Path:
+    candidate = parent / preferred_name
+    if not candidate.exists():
+        return candidate
+
+    index = 2
+    while True:
+        candidate = parent / f"{preferred_name}-{index}"
+        if not candidate.exists():
+            return candidate
+        index += 1
+
+
 def resolve_output_root(config: Optional[Dict[str, Any]] = None) -> Path:
     storage = config.get("storage", {}) if config else {}
     configured = str(storage.get("output_dir") or "").strip()
@@ -196,11 +209,6 @@ def redact_cookie(cookie: str) -> str:
     if len(cookie) <= 24:
         return "已配置"
     return f"{cookie[:18]}...{cookie[-8:]}"
-
-
-def markdown_escape_table(value: Any) -> str:
-    text = str(value or "")
-    return text.replace("|", "\\|").replace("\n", "<br>")
 
 
 def pick_extension(url: str, content_type: str, default_ext: str) -> str:
@@ -247,30 +255,10 @@ def download_url(url: str, target_without_ext: Path, default_ext: str) -> Tuple[
         return None, str(exc)
 
 
-def render_markdown(note: Dict[str, Any], keyword: str, media_items: List[Dict[str, Any]]) -> str:
+def render_markdown(note: Dict[str, Any], media_items: List[Dict[str, Any]]) -> str:
     title = note.get("title") or "无标题"
-    tags = note.get("tags") or []
-    tag_text = " ".join([f"#{tag}" for tag in tags]) if tags else "无"
     lines = [
         f"# {title}",
-        "",
-        "## 基本信息",
-        "",
-        "| 字段 | 内容 |",
-        "| --- | --- |",
-        f"| 采集关键词 | {markdown_escape_table(keyword)} |",
-        f"| 笔记 ID | {markdown_escape_table(note.get('note_id'))} |",
-        f"| 笔记链接 | {markdown_escape_table(note.get('note_url'))} |",
-        f"| 内容类型 | {markdown_escape_table(note.get('note_type'))} |",
-        f"| 作者 | {markdown_escape_table(note.get('nickname'))} |",
-        f"| 作者主页 | {markdown_escape_table(note.get('home_url'))} |",
-        f"| 发布时间 | {markdown_escape_table(note.get('upload_time'))} |",
-        f"| IP 属地 | {markdown_escape_table(note.get('ip_location'))} |",
-        f"| 点赞 | {markdown_escape_table(note.get('liked_count'))} |",
-        f"| 收藏 | {markdown_escape_table(note.get('collected_count'))} |",
-        f"| 评论 | {markdown_escape_table(note.get('comment_count'))} |",
-        f"| 分享 | {markdown_escape_table(note.get('share_count'))} |",
-        f"| 标签 | {markdown_escape_table(tag_text)} |",
         "",
         "## 正文",
         "",
@@ -304,21 +292,13 @@ def render_markdown(note: Dict[str, Any], keyword: str, media_items: List[Dict[s
         else:
             lines.extend([f"- {label} 下载失败：{error or '未知错误'}", f"  原始地址：{source_url}", ""])
 
-    lines.extend([
-        "## 原始数据摘要",
-        "",
-        "```json",
-        json.dumps(note, ensure_ascii=False, indent=2),
-        "```",
-        "",
-    ])
     return "\n".join(lines)
 
 
-def save_note_as_markdown(note: Dict[str, Any], keyword: str, keyword_dir: Path, output_root: Path) -> Dict[str, Any]:
+def save_note_as_markdown(note: Dict[str, Any], keyword_dir: Path, output_root: Path) -> Dict[str, Any]:
     note_id = str(note.get("note_id") or uuid.uuid4().hex)
     title = safe_filename(note.get("title"), fallback="无标题", max_len=60)
-    note_dir = keyword_dir / f"{title}_{note_id}"
+    note_dir = available_child_path(keyword_dir, title)
     assert_dir = note_dir / "assert"
     note_dir.mkdir(parents=True, exist_ok=True)
     assert_dir.mkdir(parents=True, exist_ok=True)
@@ -362,8 +342,8 @@ def save_note_as_markdown(note: Dict[str, Any], keyword: str, keyword_dir: Path,
     info_path = note_dir / "info.json"
     info_path.write_text(json.dumps(note, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    md_path = note_dir / f"{title}_{note_id}.md"
-    md_path.write_text(render_markdown(note, keyword, media_items), encoding="utf-8")
+    md_path = note_dir / f"{note_dir.name}.md"
+    md_path.write_text(render_markdown(note, media_items), encoding="utf-8")
 
     return {
         "note_id": note_id,
@@ -695,7 +675,7 @@ class ContentCollector:
                 keyword_dir = batch_dir / safe_filename(keyword, fallback="keyword", max_len=60)
                 for note in selected:
                     try:
-                        saved = save_note_as_markdown(note, keyword, keyword_dir, output_root)
+                        saved = save_note_as_markdown(note, keyword_dir, output_root)
                         result["items"].append(saved)
                         keyword_result["saved"] += 1
                         self._progress(progress, f"已保存：{saved['title']}")

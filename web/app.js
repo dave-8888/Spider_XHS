@@ -29,13 +29,20 @@ const homeEls = {
   refreshJobsBtn: document.querySelector('#refreshJobsBtn'),
   deleteSelectedBtn: document.querySelector('#deleteSelectedBtn'),
   refreshFilesBtn: document.querySelector('#refreshFilesBtn'),
+  selectAllFilesBtn: document.querySelector('#selectAllFilesBtn'),
+  clearFileSelectionBtn: document.querySelector('#clearFileSelectionBtn'),
+  openCurrentFolderBtn: document.querySelector('#openCurrentFolderBtn'),
   fileLayout: document.querySelector('#fileLayout'),
   fileList: document.querySelector('#fileList'),
+  fileListMeta: document.querySelector('#fileListMeta'),
+  fileBreadcrumbs: document.querySelector('#fileBreadcrumbs'),
   filePreviewPanel: document.querySelector('#filePreviewPanel'),
   filePreview: document.querySelector('#filePreview'),
   filePreviewMeta: document.querySelector('#filePreviewMeta'),
   filePreviewSubMeta: document.querySelector('#filePreviewSubMeta'),
   copyPreviewTextBtn: document.querySelector('#copyPreviewTextBtn'),
+  openPreviewFileBtn: document.querySelector('#openPreviewFileBtn'),
+  closePreviewBtn: document.querySelector('#closePreviewBtn'),
   fileSelectionSummary: document.querySelector('#fileSelectionSummary'),
   sortTypeChoices: document.querySelector('#sortTypeChoices'),
   contentTypeChoices: document.querySelector('#contentTypeChoices'),
@@ -431,6 +438,11 @@ function setHomeBusy(isBusy) {
     homeEls.publishDaysInput,
     homeEls.deleteSelectedBtn,
     homeEls.refreshFilesBtn,
+    homeEls.selectAllFilesBtn,
+    homeEls.clearFileSelectionBtn,
+    homeEls.openCurrentFolderBtn,
+    homeEls.openPreviewFileBtn,
+    homeEls.closePreviewBtn,
   ].forEach((element) => {
     if (element) {
       element.disabled = isBusy;
@@ -524,6 +536,13 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;');
+}
+
+function cssEscape(value) {
+  if (window.CSS && typeof window.CSS.escape === 'function') {
+    return window.CSS.escape(String(value ?? ''));
+  }
+  return String(value ?? '').replace(/["\\]/g, '\\$&');
 }
 
 function cloneData(value) {
@@ -1411,6 +1430,80 @@ function fileExtension(path = '') {
   return dotIndex >= 0 ? name.slice(dotIndex) : '';
 }
 
+const textPreviewExtensions = new Set(['.md', '.markdown', '.txt', '.json', '.log']);
+const imagePreviewExtensions = new Set(['.apng', '.avif', '.gif', '.jpg', '.jpeg', '.png', '.svg', '.webp']);
+const videoPreviewExtensions = new Set(['.m4v', '.mov', '.mp4', '.webm']);
+
+function isTextPreviewPath(path = '') {
+  return textPreviewExtensions.has(fileExtension(path));
+}
+
+function isMarkdownPath(path = '') {
+  const extension = fileExtension(path);
+  return extension === '.md' || extension === '.markdown';
+}
+
+function isImagePreviewPath(path = '') {
+  return imagePreviewExtensions.has(fileExtension(path));
+}
+
+function isVideoPreviewPath(path = '') {
+  return videoPreviewExtensions.has(fileExtension(path));
+}
+
+function filePreviewMode(entry = {}) {
+  const path = entry.path || entry.name || '';
+  if (entry.type === 'directory') return 'directory';
+  if (entry.previewable || isTextPreviewPath(path)) return isMarkdownPath(path) ? 'markdown' : 'text';
+  if (isImagePreviewPath(path)) return 'image';
+  if (isVideoPreviewPath(path)) return 'video';
+  return 'download';
+}
+
+function canPreviewEntry(entry = {}) {
+  return ['markdown', 'text', 'image', 'video'].includes(filePreviewMode(entry));
+}
+
+function fileKindLabel(entry = {}) {
+  if (entry.type === 'directory') return '目录';
+  if (isImagePreviewPath(entry.path || entry.name)) return '图片';
+  if (isVideoPreviewPath(entry.path || entry.name)) return '视频';
+  if (isMarkdownPath(entry.path || entry.name)) return 'Markdown';
+  const extension = fileExtension(entry.path || entry.name).replace('.', '').toUpperCase();
+  return extension || '文件';
+}
+
+function iconSvg(name) {
+  const icons = {
+    folder: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l1.7 2h9.3v7.8a2.2 2.2 0 0 1-2.2 2.2H5.7a2.2 2.2 0 0 1-2.2-2.2z"/><path d="M3.5 9.5V6.7c0-1.2 1-2.2 2.2-2.2h4.1l1.7 2h6.8c1.2 0 2.2 1 2.2 2.2v.8"/></svg>',
+    file: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3.5h6.8L18 7.7v12.8H7z"/><path d="M13.5 3.8v4.4h4.3"/></svg>',
+    markdown: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4z"/><path d="M7 15V9l2.4 3 2.4-3v6"/><path d="M15 9v6"/><path d="m13.5 13.5 1.5 1.5 1.5-1.5"/></svg>',
+    image: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"/><path d="m7 16 3.1-3.1 2.2 2.2 2.8-3.6L18 16"/><path d="M8.5 9.2h.1"/></svg>',
+    video: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 7h11v10h-11z"/><path d="m15.5 10 4-2.2v8.4l-4-2.2z"/></svg>',
+    open: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h8v8"/><path d="m8 16 8-8"/><path d="M5 5h5"/><path d="M5 5v14h14v-5"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14"/><path d="M9 7V5.8c0-.7.6-1.3 1.3-1.3h3.4c.7 0 1.3.6 1.3 1.3V7"/><path d="M8 10v8M12 10v8M16 10v8"/><path d="M7 7l.8 13h8.4L17 7"/></svg>',
+    back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m11 6-6 6 6 6"/><path d="M5 12h14"/></svg>',
+    refresh: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 8a7 7 0 0 0-12.2-2.4L5 7.5"/><path d="M5 4v3.5h3.5"/><path d="M5 16a7 7 0 0 0 12.2 2.4L19 16.5"/><path d="M19 20v-3.5h-3.5"/></svg>',
+  };
+  return icons[name] || icons.file;
+}
+
+function fileIconName(entry = {}) {
+  if (entry.type === 'directory') return 'folder';
+  if (isMarkdownPath(entry.path || entry.name)) return 'markdown';
+  if (isImagePreviewPath(entry.path || entry.name)) return 'image';
+  if (isVideoPreviewPath(entry.path || entry.name)) return 'video';
+  return 'file';
+}
+
+function filePathParts(path = '') {
+  return String(path || '').replaceAll('\\', '/').split('/').filter(Boolean);
+}
+
+function pathFromParts(parts = [], endIndex = parts.length) {
+  return parts.slice(0, endIndex).join('/');
+}
+
 function fileDirectoryParts(path = '') {
   const parts = String(path || '').replaceAll('\\', '/').split('/').filter(Boolean);
   parts.pop();
@@ -1681,10 +1774,11 @@ function renderMarkdown(content, sourcePath = '') {
 function defaultPreviewState(overrides = {}) {
   return {
     path: '',
+    url: '',
     meta: '',
     subMeta: '',
     content: '',
-    mode: 'text',
+    mode: 'empty',
     truncated: false,
     open: false,
     ...overrides,
@@ -1692,23 +1786,104 @@ function defaultPreviewState(overrides = {}) {
 }
 
 function updateFileToolbarState() {
+  const entries = state.currentFiles?.entries || [];
+  const selectablePaths = entries.map((entry) => entry.path).filter(Boolean);
+  const selectedCount = state.selectedFilePaths.size;
+  const allVisibleSelected = selectablePaths.length > 0
+    && selectablePaths.every((path) => state.selectedFilePaths.has(path));
+
   if (homeEls.fileSelectionSummary) {
-    homeEls.fileSelectionSummary.textContent = `已选 ${state.selectedFilePaths.size} 项`;
+    homeEls.fileSelectionSummary.textContent = selectedCount
+      ? `已选 ${selectedCount} 项`
+      : '未选择文件';
   }
   if (homeEls.deleteSelectedBtn) {
-    homeEls.deleteSelectedBtn.disabled = state.collectBusy || state.selectedFilePaths.size === 0;
+    homeEls.deleteSelectedBtn.disabled = state.collectBusy || selectedCount === 0;
   }
   if (homeEls.refreshFilesBtn) {
     homeEls.refreshFilesBtn.disabled = state.collectBusy;
   }
+  if (homeEls.selectAllFilesBtn) {
+    homeEls.selectAllFilesBtn.disabled = state.collectBusy || selectablePaths.length === 0;
+    homeEls.selectAllFilesBtn.classList.toggle('is-active', allVisibleSelected);
+  }
+  if (homeEls.clearFileSelectionBtn) {
+    homeEls.clearFileSelectionBtn.disabled = state.collectBusy || selectedCount === 0;
+  }
+  if (homeEls.openCurrentFolderBtn) {
+    homeEls.openCurrentFolderBtn.disabled = state.collectBusy;
+  }
+}
+
+function renderFileBreadcrumbs(currentPath = '') {
+  if (!homeEls.fileBreadcrumbs) return;
+  const parts = filePathParts(currentPath);
+  const rootButton = `<button class="file-crumb ${parts.length ? '' : 'active'}" data-path="" type="button">全部结果</button>`;
+  const crumbs = parts.map((part, index) => `
+    <span class="file-crumb-separator" aria-hidden="true">/</span>
+    <button class="file-crumb ${index === parts.length - 1 ? 'active' : ''}" data-path="${escapeHtml(pathFromParts(parts, index + 1))}" type="button">
+      ${escapeHtml(part)}
+    </button>
+  `).join('');
+  homeEls.fileBreadcrumbs.innerHTML = rootButton + crumbs;
+
+  homeEls.fileBreadcrumbs.querySelectorAll('.file-crumb').forEach((button) => {
+    button.addEventListener('click', () => {
+      const path = button.dataset.path || '';
+      if (path === state.currentPath) return;
+      setPreviewState(defaultPreviewState());
+      loadFiles(path).catch((error) => toast(error.message));
+    });
+  });
+}
+
+function renderFileListMeta(files) {
+  if (!homeEls.fileListMeta) return;
+  const entries = files?.entries || [];
+  const directoryCount = entries.filter((entry) => entry.type === 'directory').length;
+  const fileCount = entries.length - directoryCount;
+  homeEls.fileListMeta.innerHTML = `
+    <span><strong>${directoryCount}</strong> 目录</span>
+    <span><strong>${fileCount}</strong> 文件</span>
+  `;
+}
+
+function renderFileEmptyState(files = {}, disabledAttr = '') {
+  const currentPath = String(files.cwd || '');
+  const pathParts = filePathParts(currentPath);
+  const currentName = pathParts[pathParts.length - 1] || '采集结果';
+  const pathLabel = currentPath || '输出根目录';
+  const hasParent = Boolean(currentPath);
+  const description = hasParent
+    ? '这个目录里还没有文件或子目录，可以返回上一级，或者先打开目录确认当前位置。'
+    : '采集完成后，结果、素材和 Markdown 文件会出现在这里。';
+  const secondaryAction = hasParent
+    ? `<button class="btn btn-ghost btn-icon-text file-empty-action" data-action="back" data-path="${escapeHtml(files.parent || '')}" type="button" ${disabledAttr}>${iconSvg('back')}返回上级</button>`
+    : `<button class="btn btn-ghost btn-icon-text file-empty-action" data-action="refresh" type="button" ${disabledAttr}>${iconSvg('refresh')}刷新列表</button>`;
+
+  return `
+    <div class="file-empty-state ${hasParent ? 'has-parent' : ''}">
+      <div class="file-empty-state-shell">
+        <span class="file-empty-state-icon" aria-hidden="true">${iconSvg('folder')}</span>
+        <div class="file-empty-state-path">${escapeHtml(pathLabel)}</div>
+        <strong class="file-empty-state-title">${escapeHtml(currentName)} 为空</strong>
+        <p class="file-empty-state-text">${escapeHtml(description)}</p>
+        <div class="file-empty-state-actions">
+          <button class="btn btn-ghost btn-icon-text file-empty-action" data-action="open-folder" data-path="${escapeHtml(currentPath)}" type="button" ${disabledAttr}>${iconSvg('open')}打开当前目录</button>
+          ${secondaryAction}
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 function setPreviewState({
   path = '',
+  url = '',
   meta = '',
   subMeta = '',
   content = '',
-  mode = 'text',
+  mode = 'empty',
   truncated = false,
   open = Boolean(path),
 } = {}) {
@@ -1722,16 +1897,26 @@ function setPreviewState({
     homeEls.fileLayout.classList.toggle('has-preview', shouldShow);
   }
   if (homeEls.filePreviewPanel) {
-    homeEls.filePreviewPanel.classList.toggle('is-hidden', !shouldShow);
-    homeEls.filePreviewPanel.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
+    homeEls.filePreviewPanel.classList.toggle('has-file', shouldShow);
+    homeEls.filePreviewPanel.setAttribute('aria-hidden', 'false');
   }
 
   if (!shouldShow) {
-    if (homeEls.filePreviewMeta) homeEls.filePreviewMeta.textContent = '';
-    if (homeEls.filePreviewSubMeta) homeEls.filePreviewSubMeta.textContent = '';
+    if (homeEls.filePreviewMeta) homeEls.filePreviewMeta.textContent = '预览';
+    if (homeEls.filePreviewSubMeta) homeEls.filePreviewSubMeta.textContent = '未选择文件';
     if (homeEls.copyPreviewTextBtn) homeEls.copyPreviewTextBtn.disabled = true;
-    homeEls.filePreview.className = 'file-preview';
-    homeEls.filePreview.innerHTML = '';
+    if (homeEls.openPreviewFileBtn) homeEls.openPreviewFileBtn.disabled = true;
+    if (homeEls.closePreviewBtn) homeEls.closePreviewBtn.disabled = true;
+    homeEls.filePreview.className = 'file-preview is-empty';
+    homeEls.filePreview.innerHTML = `
+      <div class="file-preview-empty">
+        <span class="file-preview-empty-icon" aria-hidden="true"></span>
+        <strong>未选择文件</strong>
+      </div>
+    `;
+    if (homeEls.fileList) {
+      homeEls.fileList.querySelectorAll('.file-row').forEach((row) => row.classList.remove('is-active'));
+    }
     return;
   }
 
@@ -1742,15 +1927,31 @@ function setPreviewState({
     homeEls.filePreviewSubMeta.textContent = subMeta;
   }
   if (homeEls.copyPreviewTextBtn) {
-    homeEls.copyPreviewTextBtn.disabled = !content;
+    homeEls.copyPreviewTextBtn.disabled = !content || !['markdown', 'text'].includes(mode);
+  }
+  if (homeEls.openPreviewFileBtn) {
+    homeEls.openPreviewFileBtn.disabled = !path;
+  }
+  if (homeEls.closePreviewBtn) {
+    homeEls.closePreviewBtn.disabled = false;
   }
 
-  homeEls.filePreview.className = `file-preview ${mode === 'markdown' ? 'is-markdown' : 'is-plain'}`;
+  homeEls.filePreview.className = `file-preview is-${mode}`;
   if (mode === 'markdown') {
     const truncatedHtml = truncated ? '<p class="file-preview-notice">内容过长，已截断预览</p>' : '';
     homeEls.filePreview.innerHTML = `${renderMarkdown(content, path)}${truncatedHtml}`;
+  } else if (mode === 'image') {
+    homeEls.filePreview.innerHTML = `<img class="file-preview-media" src="${escapeHtml(url)}" alt="${escapeHtml(meta)}" loading="lazy">`;
+  } else if (mode === 'video') {
+    homeEls.filePreview.innerHTML = `<video class="file-preview-media" src="${escapeHtml(url)}" controls preload="metadata"></video>`;
   } else {
     homeEls.filePreview.textContent = `${content}${truncated ? '\n\n...内容过长，已截断预览' : ''}`;
+  }
+
+  if (homeEls.fileList) {
+    homeEls.fileList.querySelectorAll('.file-row').forEach((row) => {
+      row.classList.toggle('is-active', row.dataset.path === path);
+    });
   }
 }
 
@@ -1781,6 +1982,17 @@ function toggleFileSelection(path, checked) {
   }
   state.selectedFilePaths = next;
   updateFileToolbarState();
+  if (homeEls.fileList) {
+    const row = homeEls.fileList.querySelector(`.file-row[data-path="${cssEscape(path)}"]`);
+    if (row) row.classList.toggle('is-selected', checked);
+  }
+}
+
+function selectAllVisibleFiles() {
+  const entries = state.currentFiles?.entries || [];
+  if (!state.currentFiles || !entries.length) return;
+  state.selectedFilePaths = new Set(entries.map((entry) => entry.path).filter(Boolean));
+  renderFiles(state.currentFiles);
 }
 
 function shouldResetPreview(removedPaths) {
@@ -1816,14 +2028,21 @@ async function deleteEntries(paths, label = '') {
 function renderFiles(files) {
   if (!homeEls.fileList) return;
   setCurrentFiles(files);
+  renderFileBreadcrumbs(files.cwd || '');
+  renderFileListMeta(files);
   updateFileToolbarState();
 
   const disabledAttr = state.collectBusy ? 'disabled' : '';
+  const entries = Array.isArray(files.entries) ? files.entries : [];
   const parentButton = files.cwd
-    ? `<button class="file-parent-item" data-kind="directory" data-path="${escapeHtml(files.parent || '')}" type="button" ${disabledAttr}><span>../ 返回上级</span><span class="file-meta">目录</span></button>`
+    ? `<button class="file-parent-item" data-kind="directory" data-path="${escapeHtml(files.parent || '')}" type="button" ${disabledAttr}>
+        <span class="file-parent-icon">${iconSvg('back')}</span>
+        <span>返回上级</span>
+        <span class="file-meta">目录</span>
+      </button>`
     : '';
-  const rows = files.entries.map((entry) => `
-    <div class="file-row" data-path="${escapeHtml(entry.path)}">
+  const rows = entries.map((entry) => `
+    <div class="file-row ${state.selectedFilePaths.has(entry.path) ? 'is-selected' : ''} ${state.currentPreviewPath === entry.path ? 'is-active' : ''}" data-path="${escapeHtml(entry.path)}">
       <label class="file-select" aria-label="选择 ${escapeHtml(entry.name)}">
         <input class="file-select-input" data-path="${escapeHtml(entry.path)}" type="checkbox" ${state.selectedFilePaths.has(entry.path) ? 'checked' : ''} ${disabledAttr}>
       </label>
@@ -1832,20 +2051,29 @@ function renderFiles(files) {
         data-kind="${entry.type}"
         data-path="${escapeHtml(entry.path)}"
         data-name="${escapeHtml(entry.name)}"
-        data-previewable="${entry.previewable ? 'true' : 'false'}"
+        data-preview-mode="${filePreviewMode(entry)}"
         type="button"
         ${disabledAttr}
       >
-        <span>${entry.type === 'directory' ? escapeHtml(entry.name) : `[文件] ${escapeHtml(entry.name)}`}</span>
-        <span class="file-meta">${entry.type === 'directory' ? '目录' : sizeText(entry.size)} · ${escapeHtml(entry.modified)}</span>
+        <span class="file-icon file-icon-${fileIconName(entry)}">${iconSvg(fileIconName(entry))}</span>
+        <span class="file-main">
+          <span class="file-name">${escapeHtml(entry.name)}</span>
+          <span class="file-details">
+            <span>${escapeHtml(fileKindLabel(entry))}</span>
+            <span>${entry.type === 'directory' ? '文件夹' : sizeText(entry.size)}</span>
+            <span>${escapeHtml(entry.modified)}</span>
+          </span>
+        </span>
       </button>
       <div class="file-actions">
-        <button class="btn btn-ghost file-action-btn" data-action="open-folder" data-path="${escapeHtml(entry.path)}" type="button" ${disabledAttr}>打开所在文件夹</button>
-        <button class="btn btn-ghost file-action-btn file-delete-btn" data-action="delete" data-path="${escapeHtml(entry.path)}" data-name="${escapeHtml(entry.name)}" type="button" ${disabledAttr}>删除</button>
+        ${entry.type === 'file' && canPreviewEntry(entry) ? `<button class="btn btn-ghost file-action-btn" data-action="preview" data-path="${escapeHtml(entry.path)}" data-name="${escapeHtml(entry.name)}" type="button" title="预览" aria-label="预览 ${escapeHtml(entry.name)}" ${disabledAttr}>${iconSvg(fileIconName(entry))}</button>` : ''}
+        <button class="btn btn-ghost file-action-btn" data-action="open-folder" data-path="${escapeHtml(entry.path)}" type="button" title="打开所在文件夹" aria-label="打开 ${escapeHtml(entry.name)} 所在文件夹" ${disabledAttr}>${iconSvg('open')}</button>
+        <button class="btn btn-ghost file-action-btn file-delete-btn" data-action="delete" data-path="${escapeHtml(entry.path)}" data-name="${escapeHtml(entry.name)}" type="button" title="删除" aria-label="删除 ${escapeHtml(entry.name)}" ${disabledAttr}>${iconSvg('trash')}</button>
       </div>
     </div>
   `).join('');
-  homeEls.fileList.innerHTML = parentButton + (rows || '<div class="empty-state">目录为空</div>');
+  homeEls.fileList.classList.toggle('is-empty', !rows);
+  homeEls.fileList.innerHTML = parentButton + (rows || renderFileEmptyState(files, disabledAttr));
 
   homeEls.fileList.querySelectorAll('.file-parent-item').forEach((button) => {
     button.addEventListener('click', async () => {
@@ -1853,6 +2081,28 @@ function renderFiles(files) {
         const path = button.dataset.path || '';
         setPreviewState(defaultPreviewState());
         await loadFiles(path);
+      } catch (error) {
+        toast(error.message);
+      }
+    });
+  });
+
+  homeEls.fileList.querySelectorAll('.file-empty-action').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try {
+        const action = button.dataset.action || '';
+        if (action === 'open-folder') {
+          await openFolder(button.dataset.path || files.cwd || '');
+          return;
+        }
+        if (action === 'back') {
+          setPreviewState(defaultPreviewState());
+          await loadFiles(button.dataset.path || files.parent || '');
+          return;
+        }
+        if (action === 'refresh') {
+          await loadFiles(files.cwd || state.currentPath);
+        }
       } catch (error) {
         toast(error.message);
       }
@@ -1873,14 +2123,20 @@ function renderFiles(files) {
       try {
         const path = button.dataset.path || '';
         const name = button.dataset.name || fileBaseName(path);
+        const mode = button.dataset.previewMode || 'download';
         if (button.dataset.kind === 'directory') {
           setPreviewState(defaultPreviewState());
           await loadFiles(path);
           return;
         }
 
-        if (button.dataset.previewable === 'true') {
+        if (mode === 'markdown' || mode === 'text') {
           await previewFile(path);
+          return;
+        }
+
+        if (mode === 'image' || mode === 'video') {
+          previewMediaFile(path, name, mode);
           return;
         }
 
@@ -1904,6 +2160,16 @@ function renderFiles(files) {
           await openFolder(path);
           return;
         }
+        if (button.dataset.action === 'preview') {
+          const entry = state.currentFileEntries.get(path) || {};
+          const mode = filePreviewMode(entry);
+          if (mode === 'markdown' || mode === 'text') {
+            await previewFile(path);
+          } else if (mode === 'image' || mode === 'video') {
+            previewMediaFile(path, button.dataset.name || fileBaseName(path), mode);
+          }
+          return;
+        }
         if (button.dataset.action === 'delete') {
           await deleteEntries([path], button.dataset.name || fileBaseName(path));
         }
@@ -1922,14 +2188,27 @@ async function loadFiles(path = state.currentPath) {
   renderFiles(data.files);
 }
 
+function previewMediaFile(path, name = '', mode = 'image') {
+  const url = `/download?path=${encodeURIComponent(path)}`;
+  setPreviewState({
+    path,
+    url,
+    meta: name || fileBaseName(path) || '文件预览',
+    subMeta: mode === 'video' ? '视频预览' : '图片预览',
+    content: '',
+    mode,
+    open: true,
+  });
+}
+
 async function previewFile(path) {
   const data = await api(`/api/file?path=${encodeURIComponent(path)}`);
   const previewPath = data.file.path || path;
   const entryName = state.currentFileEntries.get(path)?.name || fileBaseName(previewPath);
-  const extension = fileExtension(previewPath);
-  const isMarkdown = extension === '.md' || extension === '.markdown';
+  const isMarkdown = isMarkdownPath(previewPath);
   setPreviewState({
     path: previewPath,
+    url: `/download?path=${encodeURIComponent(previewPath)}`,
     meta: entryName || '文件预览',
     subMeta: isMarkdown ? 'Markdown 预览' : '文本预览',
     content: data.file.content || '',
@@ -2010,6 +2289,20 @@ function bindHomeEvents() {
       deleteEntries(Array.from(state.selectedFilePaths)).catch((error) => toast(error.message));
     });
   }
+  if (homeEls.selectAllFilesBtn) {
+    homeEls.selectAllFilesBtn.addEventListener('click', selectAllVisibleFiles);
+  }
+  if (homeEls.clearFileSelectionBtn) {
+    homeEls.clearFileSelectionBtn.addEventListener('click', () => {
+      clearFileSelection();
+      renderFiles(state.currentFiles);
+    });
+  }
+  if (homeEls.openCurrentFolderBtn) {
+    homeEls.openCurrentFolderBtn.addEventListener('click', () => {
+      openFolder(state.currentPath).catch((error) => toast(error.message));
+    });
+  }
   if (homeEls.refreshFilesBtn) {
     homeEls.refreshFilesBtn.addEventListener('click', () => {
       loadFiles().catch((error) => toast(error.message));
@@ -2021,6 +2314,17 @@ function bindHomeEvents() {
       copyText(text)
         .then(() => toast('预览文本已复制'))
         .catch((error) => toast(error.message || '复制失败'));
+    });
+  }
+  if (homeEls.openPreviewFileBtn) {
+    homeEls.openPreviewFileBtn.addEventListener('click', () => {
+      if (!state.currentPreviewPath) return;
+      window.open(`/download?path=${encodeURIComponent(state.currentPreviewPath)}`, '_blank', 'noopener');
+    });
+  }
+  if (homeEls.closePreviewBtn) {
+    homeEls.closePreviewBtn.addEventListener('click', () => {
+      setPreviewState(defaultPreviewState());
     });
   }
 }

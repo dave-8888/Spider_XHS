@@ -18,6 +18,19 @@ def norm_text(text):
     return text
 
 
+def unique_child_path(base_path, name):
+    candidate = os.path.join(base_path, name)
+    if not os.path.exists(candidate):
+        return candidate
+
+    index = 2
+    while True:
+        candidate = os.path.join(base_path, f'{name}-{index}')
+        if not os.path.exists(candidate):
+            return candidate
+        index += 1
+
+
 def timestamp_to_str(timestamp):
     time_local = time.localtime(timestamp / 1000)
     dt = time.strftime("%Y-%m-%d %H:%M:%S", time_local)
@@ -255,15 +268,17 @@ def save_note_detail(note, path):
 
 @retry(tries=3, delay=1)
 def download_note(note_info, path, save_choice):
-    note_id = note_info['note_id']
-    user_id = note_info['user_id']
     title = note_info['title']
     title = norm_str(title)[:40]
     nickname = note_info['nickname']
     nickname = norm_str(nickname)[:20]
     if title.strip() == '':
         title = f'无标题'
-    save_path = f'{path}/{nickname}_{user_id}/{title}_{note_id}'
+    if nickname.strip() == '':
+        nickname = '用户'
+    user_path = os.path.join(path, nickname)
+    check_and_create_path(user_path)
+    save_path = unique_child_path(user_path, title)
     check_and_create_path(save_path)
     with open(f'{save_path}/info.json', mode='w', encoding='utf-8') as f:
         f.write(json.dumps(note_info) + '\n')
