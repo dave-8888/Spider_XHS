@@ -26,11 +26,19 @@
 <body data-page="home">
   <header class="topbar">
     <div class="topbar-inner">
-      <a class="brand" href="/">Spider_XHS</a>
+      <a class="brand" href="/" aria-label="Spider_XHS 采集台">
+        <span class="brand-mark">SX</span>
+        <span class="brand-copy">
+          <span class="brand-name">Spider_XHS</span>
+          <span class="brand-subtitle">Business Console</span>
+        </span>
+      </a>
       <div class="topbar-actions">
         <nav class="topnav" aria-label="主导航">
           <a class="nav-link active" href="/" aria-current="page">采集台</a>
+          <a class="nav-link" href="#fileSection">AI仿写</a>
           <a class="nav-link" href="/settings">设置</a>
+          <a class="nav-link" href="/settings#modelConfig">大模型配置</a>
         </nav>
         <div class="theme-switch" role="group" aria-label="主题模式">
           <button class="theme-option" data-theme-option="light" type="button">浅色</button>
@@ -42,30 +50,100 @@
   </header>
 
   <main class="page-shell">
-    <section class="collect-action-strip reveal">
-      <button id="collectBtn" class="btn btn-primary collect-btn-centered" type="button">立即采集</button>
+    <section class="surface command-hero reveal">
+      <div class="command-hero-copy">
+        <p class="eyebrow eyebrow-muted">XHS Collection Operations</p>
+        <h1>小红书数据采集控制台</h1>
+        <p class="hero-lead">围绕关键词策略、任务进度与本地资产归档，构建稳定可追踪的内容数据工作流。</p>
+        <div class="hero-actions hero-actions-left">
+          <button id="collectBtn" class="btn btn-primary btn-lg btn-icon-text collect-btn-centered" type="button">
+            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+            启动采集任务
+          </button>
+          <a class="btn btn-secondary btn-icon-text" href="/settings">
+            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.1 2.1-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-3v-.2a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L6.6 17l.1-.1A1.7 1.7 0 0 0 7 15a1.7 1.7 0 0 0-1.6-1H5.2v-3h.2A1.7 1.7 0 0 0 7 10a1.7 1.7 0 0 0-.3-1.9l-.1-.1 2.1-2.1.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6v-.2h3v.2a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1 2.1 2.1-.1.1A1.7 1.7 0 0 0 19.4 10a1.7 1.7 0 0 0 1.6 1h.2v3H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>
+            配置策略
+          </a>
+        </div>
+      </div>
+
+      <aside class="command-panel" aria-label="运行视图">
+        <div class="command-panel-head">
+          <span class="panel-kicker">Operational View</span>
+          <strong>今日工作台</strong>
+        </div>
+        <div class="signal-grid">
+          <div class="signal-card">
+            <span class="signal-dot signal-dot-ready"></span>
+            <div>
+              <span>采集链路</span>
+              <strong>待命</strong>
+            </div>
+          </div>
+          <div class="signal-card">
+            <span class="signal-dot signal-dot-sync"></span>
+            <div>
+              <span>任务刷新</span>
+              <strong>5 秒</strong>
+            </div>
+          </div>
+          <div class="signal-card">
+            <span class="signal-dot signal-dot-storage"></span>
+            <div>
+              <span>结果归档</span>
+              <strong>本地</strong>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="business-metrics reveal" aria-label="控制台模块">
+      <a class="metric-tile" href="#jobSection">
+        <span class="metric-label">任务监控</span>
+        <strong class="metric-value">进度 / 日志 / 异常</strong>
+      </a>
+      <a class="metric-tile" href="#fileSection">
+        <span class="metric-label">资产归档</span>
+        <strong class="metric-value">Markdown / 素材 / 预览</strong>
+      </a>
+      <a class="metric-tile" href="#fileSection">
+        <span class="metric-label">AI仿写</span>
+        <strong class="metric-value">选中笔记 / 一键生成文案</strong>
+      </a>
+      <a class="metric-tile" href="/settings">
+        <span class="metric-label">策略配置</span>
+        <strong class="metric-value">关键词 / 筛选 / 调度</strong>
+      </a>
+      <a class="metric-tile" href="/settings#modelConfig">
+        <span class="metric-label">大模型配置</span>
+        <strong class="metric-value">API Key / 文本模型 / 图片模型</strong>
+      </a>
     </section>
 
     <section id="jobSection" class="surface reveal">
       <div class="section-title job-section-title">
         <span class="section-index">01</span>
         <div>
-          <h2>任务状态</h2>
-          <p class="muted">最近任务与日志。</p>
+          <h2>任务监控</h2>
+          <p class="muted">采集任务、进度、异常和运行日志。</p>
         </div>
-        <button id="refreshJobsBtn" class="btn btn-ghost job-refresh-btn" type="button">刷新</button>
+        <button id="refreshJobsBtn" class="btn btn-ghost btn-icon-text job-refresh-btn" type="button">
+          <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 8a7 7 0 0 0-12.2-2.4L5 7.5"/><path d="M5 4v3.5h3.5"/><path d="M5 16a7 7 0 0 0 12.2 2.4L19 16.5"/><path d="M19 20v-3.5h-3.5"/></svg>
+          刷新
+        </button>
       </div>
       <div id="jobStatusSummary" class="job-status-summary" aria-live="polite"></div>
       <div id="jobFilters" class="job-filters" role="tablist" aria-label="任务状态筛选"></div>
       <div id="jobList" class="job-list muted">暂无任务</div>
     </section>
 
-    <section class="surface reveal file-section">
+    <section id="fileSection" class="surface reveal file-section">
       <div class="section-title file-section-title">
         <span class="section-index">02</span>
         <div class="file-section-heading">
-          <h2>本地文件</h2>
-          <p class="muted">采集结果、素材与 Markdown 预览。</p>
+          <h2>资产归档与 AI 仿写</h2>
+          <p class="muted">采集结果、素材、Markdown 预览与文案生成。</p>
         </div>
         <div id="fileListMeta" class="file-list-meta" aria-live="polite"></div>
       </div>
@@ -78,6 +156,10 @@
         <div class="file-toolbar-copy" aria-live="polite">
           <div id="fileSelectionSummary" class="file-selection-summary">已选 0 项</div>
         </div>
+        <label class="inline-field rewrite-topic-field">
+          <span>仿写主题</span>
+          <input id="rewriteTopicInput" type="text" value="创业沙龙" placeholder="创业沙龙">
+        </label>
         <div class="button-pair">
           <button id="selectAllFilesBtn" class="btn btn-ghost btn-icon-text" type="button">
             <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v14H5z"/><path d="m8 12 2.3 2.3L16 8.6"/></svg>
@@ -86,6 +168,10 @@
           <button id="clearFileSelectionBtn" class="btn btn-ghost btn-icon-text" type="button" disabled>
             <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v14H5z"/><path d="m8 8 8 8M16 8l-8 8"/></svg>
             清空
+          </button>
+          <button id="rewriteSelectedBtn" class="btn btn-secondary btn-icon-text file-rewrite-command" type="button" disabled>
+            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4.5 19.5 9.8-9.8 2 2-9.8 9.8h-2z"/><path d="m13.7 6.3 2-2 4 4-2 2"/><path d="M6 4.5v3M4.5 6h3M18 16.5v3M16.5 18h3"/></svg>
+            AI仿写
           </button>
           <button id="openCurrentFolderBtn" class="btn btn-ghost btn-icon-text" type="button">
             <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l1.7 2h9.3v7.8a2.2 2.2 0 0 1-2.2 2.2H5.7a2.2 2.2 0 0 1-2.2-2.2z"/><path d="M3.5 9.5V6.7c0-1.2 1-2.2 2.2-2.2h4.1l1.7 2h6.8c1.2 0 2.2 1 2.2 2.2v.8"/></svg>
@@ -135,7 +221,7 @@
 
   <div id="collectOverlay" class="collect-overlay is-hidden" aria-live="polite" aria-hidden="true">
     <div class="collect-overlay-card">
-      <p class="collect-overlay-eyebrow">Collection Flow</p>
+      <p class="collect-overlay-eyebrow">Collection Workflow</p>
       <h2 id="collectOverlayTitle">准备开始</h2>
       <p id="collectOverlayDetail" class="collect-overlay-detail">正在检查采集配置。</p>
       <div id="collectOverlaySteps" class="collect-overlay-steps"></div>

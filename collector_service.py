@@ -1,4 +1,6 @@
 import json
+import base64
+import mimetypes
 import os
 import random
 import re
@@ -209,6 +211,15 @@ def redact_cookie(cookie: str) -> str:
     if len(cookie) <= 24:
         return "已配置"
     return f"{cookie[:18]}...{cookie[-8:]}"
+
+
+def redact_secret(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) <= 12:
+        return "已配置"
+    return f"{text[:6]}...{text[-4:]}"
 
 
 def pick_extension(url: str, content_type: str, default_ext: str) -> str:
@@ -430,6 +441,8 @@ def summarize_config(config: Dict[str, Any]) -> Dict[str, Any]:
         "note_range": NOTE_RANGE_LABELS.get(to_int(filters.get("note_range"), 0), "未知"),
         "pos_distance": POS_DISTANCE_LABELS.get(to_int(filters.get("pos_distance"), 0), "未知"),
         "schedule_enabled": bool(schedule.get("enabled")),
+        "rewrite_enabled": bool(config.get("rewrite", {}).get("enabled")),
+        "rewrite_topic": config.get("rewrite", {}).get("topic") or "创业沙龙",
         "output_root": str(resolve_output_root(config)),
     }
 
@@ -465,6 +478,16 @@ class ConfigStore:
             "storage": {
                 "output_dir": "",
             },
+            "rewrite": {
+                "enabled": False,
+                "topic": "创业沙龙",
+                "api_key": "",
+                "text_model": "qwen-plus",
+                "image_model": "wan2.6-image",
+                "region": "cn-beijing",
+                "generate_image_prompts": True,
+                "generate_images": False,
+            },
             "schedule": {
                 "enabled": False,
                 "cycle": "daily",
@@ -490,6 +513,11 @@ class ConfigStore:
             incoming_cookie = incoming.get("login", {}).get("cookies")
             if incoming_cookie is None or str(incoming_cookie).strip() == "":
                 incoming.setdefault("login", {})["cookies"] = current.get("login", {}).get("cookies", "")
+            incoming_rewrite = incoming.get("rewrite")
+            if isinstance(incoming_rewrite, dict):
+                incoming_api_key = incoming_rewrite.get("api_key")
+                if incoming_api_key is None or str(incoming_api_key).strip() == "":
+                    incoming_rewrite["api_key"] = current.get("rewrite", {}).get("api_key", "")
             merged = deep_merge(current, incoming)
             sanitized = self._sanitize(merged)
             write_json(self.config_path, sanitized)
@@ -520,7 +548,20 @@ class ConfigStore:
             "note_range": NOTE_RANGE_LABELS,
             "pos_distance": POS_DISTANCE_LABELS,
             "weekdays": WEEKDAY_LABELS,
+            "rewrite_region": {
+                "cn-beijing": "北京",
+                "ap-southeast-1": "新加坡",
+            },
         }
+        rewrite_config = config.get("rewrite", {}) if isinstance(config.get("rewrite"), dict) else {}
+        stored_api_key = str(rewrite_config.get("api_key") or "").strip()
+        env_api_key = os.getenv("DASHSCOPE_API_KEY", "").strip()
+        api_key = stored_api_key or env_api_key
+        public_rewrite = public_config.setdefault("rewrite", {})
+        public_rewrite["api_key"] = ""
+        public_rewrite["api_key_present"] = bool(api_key)
+        public_rewrite["api_key_preview"] = redact_secret(api_key)
+        public_rewrite["api_key_source"] = "配置文件" if stored_api_key else ("环境变量" if env_api_key else "")
         public_config["summary"] = summarize_config(config)
         return public_config
 
@@ -569,6 +610,17 @@ class ConfigStore:
 
         storage = sanitized.setdefault("storage", {})
         storage["output_dir"] = str(storage.get("output_dir") or "").strip().strip("'").strip('"')
+
+        rewrite = sanitized.setdefault("rewrite", {})
+        rewrite["enabled"] = bool(rewrite.get("enabled"))
+        rewrite["topic"] = str(rewrite.get("topic") or "创业沙龙").strip()[:80] or "创业沙龙"
+        rewrite["api_key"] = str(rewrite.get("api_key") or "").strip().strip("'").strip('"')[:300]
+        rewrite["text_model"] = str(rewrite.get("text_model") or "qwen-plus").strip()[:80] or "qwen-plus"
+        rewrite["image_model"] = str(rewrite.get("image_model") or "wan2.6-image").strip()[:80] or "wan2.6-image"
+        region = str(rewrite.get("region") or "cn-beijing").strip()
+        rewrite["region"] = region if region in {"cn-beijing", "ap-southeast-1"} else "cn-beijing"
+        rewrite["generate_image_prompts"] = bool(rewrite.get("generate_image_prompts", True))
+        rewrite["generate_images"] = bool(rewrite.get("generate_images"))
 
         schedule = sanitized.setdefault("schedule", {})
         schedule["enabled"] = bool(schedule.get("enabled"))
@@ -761,6 +813,595 @@ class ContentCollector:
             progress(message)
 
 
+class RewriteService:
+    def __init__(self, output_root: Path, config: Optional[Dict[str, Any]] = None) -> None:
+        self.output_root = output_root.resolve()
+        self.config = config or {}
+        self.topic = str(self.config.get("topic") or "创业沙龙").strip() or "创业沙龙"
+        self.text_model = str(self.config.get("text_model") or "qwen-plus").strip() or "qwen-plus"
+        self.image_model = str(self.config.get("image_model") or "wan2.6-image").strip() or "wan2.6-image"
+        self.region = str(self.config.get("region") or "cn-beijing").strip() or "cn-beijing"
+        self.generate_image_prompts = bool(self.config.get("generate_image_prompts", True))
+        self.generate_images = bool(self.config.get("generate_images"))
+        self.api_key = str(self.config.get("api_key") or os.getenv("DASHSCOPE_API_KEY", "")).strip()
+
+    def rewrite_from_collection(
+        self,
+        result: Dict[str, Any],
+        progress: Optional[Callable[[str], None]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        notes = self._notes_from_collection_result(result)
+        if not notes:
+            return None
+        batch_dir = self._collection_batch_dir(result, notes)
+        return self.generate(notes, batch_dir, mode="batch", progress=progress)
+
+    def rewrite_note(
+        self,
+        relative_path: str,
+        topic: Optional[str] = None,
+        progress: Optional[Callable[[str], None]] = None,
+    ) -> Dict[str, Any]:
+        if topic:
+            self.topic = str(topic).strip()[:80] or self.topic
+        note_folder = self._resolve_note_folder(relative_path)
+        target_note = self._load_note_folder(note_folder)
+        peers = self._peer_notes(note_folder)
+        notes = [target_note] + [note for note in peers if note.get("note_id") != target_note.get("note_id")]
+        target_dir = available_child_path(
+            note_folder,
+            f"AI仿写_{safe_filename(self.topic, fallback='topic', max_len=28)}_{batch_name()}",
+        )
+        return self.generate(notes[:10], target_dir, mode="single", target_note=target_note, progress=progress)
+
+    def generate(
+        self,
+        notes: List[Dict[str, Any]],
+        output_dir: Path,
+        mode: str = "batch",
+        target_note: Optional[Dict[str, Any]] = None,
+        progress: Optional[Callable[[str], None]] = None,
+    ) -> Dict[str, Any]:
+        if not self.api_key:
+            raise RuntimeError("缺少 DASHSCOPE_API_KEY，无法调用阿里百炼模型生成仿写文案")
+
+        started_at = now_text()
+        stage_logs: List[Dict[str, str]] = []
+
+        def record(message: str) -> None:
+            stage_logs.append({"time": now_text(), "message": message})
+            self._progress(progress, message)
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        record("正在准备仿写输出目录")
+        record(f"正在请求文本模型：{self.text_model}")
+        payload = self._call_text_model(notes, mode=mode, target_note=target_note)
+        record("文本模型已返回，正在整理仿写结构")
+        articles = self._normalize_articles(payload.get("articles"), notes, mode=mode, target_note=target_note)
+        analysis_report = str(payload.get("analysis_report") or payload.get("analysis") or "").strip()
+        if not analysis_report:
+            record("模型未返回分析报告，正在生成兜底分析")
+            analysis_report = self._fallback_analysis(notes)
+
+        if self.generate_images:
+            images_dir = output_dir / "images"
+            images_dir.mkdir(parents=True, exist_ok=True)
+            for index, article in enumerate(articles, start=1):
+                prompt = str(article.get("image_prompt") or "").strip()
+                if not prompt:
+                    continue
+                note = self._article_source_note(article, notes)
+                record(f"正在生成配图 {index}/{len(articles)}")
+                try:
+                    image_urls = self._generate_image(prompt, self._reference_image(note))
+                    if image_urls:
+                        file_name, error = download_url(image_urls[0], images_dir / f"article_{index:02d}", ".jpg")
+                        if file_name:
+                            article["generated_image"] = f"images/{file_name}"
+                        else:
+                            article["generated_image_url"] = image_urls[0]
+                            article["image_download_error"] = error
+                except Exception as exc:
+                    article["image_error"] = str(exc)
+                    record(f"配图生成失败 {index}/{len(articles)}：{exc}")
+
+        result = {
+            "topic": self.topic,
+            "mode": mode,
+            "note_count": len(notes),
+            "article_count": len(articles),
+            "started_at": started_at,
+            "generated_at": now_text(),
+            "model": {
+                "text": self.text_model,
+                "image": self.image_model,
+                "region": self.region,
+            },
+            "analysis_report": analysis_report,
+            "articles": articles,
+        }
+        result["output_dir"] = relative_to_root(output_dir, self.output_root)
+        result["analysis_path"] = relative_to_root(output_dir / "爆款分析报告.md", self.output_root)
+        result["articles_path"] = relative_to_root(output_dir / "仿写文案.md", self.output_root)
+        result["image_prompts_path"] = relative_to_root(output_dir / "图片提示词.md", self.output_root)
+        result["result_path"] = relative_to_root(output_dir / "result.json", self.output_root)
+        result["log_path"] = relative_to_root(output_dir / "仿写日志.md", self.output_root)
+        result["finished_at"] = now_text()
+        record("正在写入仿写结果文件")
+        self._write_result_files(output_dir, result)
+        record("正在写入仿写日志")
+        stage_logs.append({
+            "time": now_text(),
+            "message": f"仿写完成：生成 {len(articles)} 篇，目录 {result['output_dir']}",
+        })
+        self._write_rewrite_log(output_dir, result, notes, target_note, stage_logs)
+        self._progress(progress, stage_logs[-1]["message"])
+        return result
+
+    def _notes_from_collection_result(self, result: Dict[str, Any]) -> List[Dict[str, Any]]:
+        notes = []
+        seen = set()
+        for item in result.get("items") or []:
+            folder = str(item.get("folder") or "").strip()
+            if not folder:
+                continue
+            note_folder = safe_output_path(self.output_root, folder)
+            if not (note_folder / "info.json").exists():
+                continue
+            note = self._load_note_folder(note_folder)
+            note_id = note.get("note_id") or note.get("folder")
+            if note_id in seen:
+                continue
+            seen.add(note_id)
+            notes.append(note)
+        notes.sort(key=lambda item: parse_count(item.get("liked_count")), reverse=True)
+        return notes
+
+    def _collection_batch_dir(self, result: Dict[str, Any], notes: List[Dict[str, Any]]) -> Path:
+        run_dir = str(result.get("run_dir") or "").strip()
+        if run_dir:
+            batch_dir = safe_output_path(self.output_root, run_dir)
+        else:
+            first_folder = safe_output_path(self.output_root, notes[0]["folder"])
+            batch_dir = first_folder.parent.parent if len(first_folder.parents) >= 2 else first_folder.parent
+        return available_child_path(
+            batch_dir,
+            f"AI仿写_{safe_filename(self.topic, fallback='topic', max_len=28)}_{batch_name()}",
+        )
+
+    def _resolve_note_folder(self, relative_path: str) -> Path:
+        target = safe_output_path(self.output_root, str(relative_path or "").strip())
+        if target.is_file():
+            if target.name == "info.json":
+                target = target.parent
+            elif target.parent.joinpath("info.json").exists():
+                target = target.parent
+            elif target.parent.name == "assert" and target.parent.parent.joinpath("info.json").exists():
+                target = target.parent.parent
+        if target.is_dir() and target.joinpath("info.json").exists():
+            return target
+        raise FileNotFoundError("请选择包含 info.json 的单篇笔记目录或 Markdown 文件")
+
+    def _load_note_folder(self, note_folder: Path) -> Dict[str, Any]:
+        info_path = note_folder / "info.json"
+        info = read_json(info_path, {})
+        if not isinstance(info, dict):
+            info = {}
+        markdown_paths = sorted(path for path in note_folder.glob("*.md") if path.is_file())
+        local_images = []
+        assert_dir = note_folder / "assert"
+        if assert_dir.exists():
+            for child in sorted(assert_dir.iterdir()):
+                if child.is_file() and child.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp", ".gif"]:
+                    local_images.append(relative_to_root(child, self.output_root))
+        return {
+            "note_id": str(info.get("note_id") or note_folder.name),
+            "title": str(info.get("title") or note_folder.name),
+            "desc": str(info.get("desc") or ""),
+            "liked_count": info.get("liked_count"),
+            "collected_count": info.get("collected_count"),
+            "comment_count": info.get("comment_count"),
+            "share_count": info.get("share_count"),
+            "upload_time": info.get("upload_time"),
+            "note_url": info.get("note_url") or info.get("url"),
+            "note_type": info.get("note_type"),
+            "tags": info.get("tags") or [],
+            "image_list": info.get("image_list") or [],
+            "folder": relative_to_root(note_folder, self.output_root),
+            "markdown": relative_to_root(markdown_paths[0], self.output_root) if markdown_paths else "",
+            "local_images": local_images,
+        }
+
+    def _peer_notes(self, note_folder: Path) -> List[Dict[str, Any]]:
+        peers = []
+        search_roots = [note_folder.parent, note_folder.parent.parent]
+        seen = set()
+        for root in search_roots:
+            if not root.exists() or root.resolve() == self.output_root:
+                continue
+            for info_path in root.rglob("info.json"):
+                candidate = info_path.parent
+                if candidate == note_folder or candidate in seen:
+                    continue
+                seen.add(candidate)
+                try:
+                    peers.append(self._load_note_folder(candidate))
+                except Exception:
+                    continue
+                if len(peers) >= 9:
+                    break
+            if len(peers) >= 9:
+                break
+        peers.sort(key=lambda item: parse_count(item.get("liked_count")), reverse=True)
+        return peers[:9]
+
+    def _call_text_model(
+        self,
+        notes: List[Dict[str, Any]],
+        mode: str,
+        target_note: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        request_notes = []
+        for note in notes[:10]:
+            request_notes.append({
+                "note_id": note.get("note_id"),
+                "title": note.get("title"),
+                "desc": str(note.get("desc") or "")[:1800],
+                "metrics": {
+                    "liked": note.get("liked_count"),
+                    "collected": note.get("collected_count"),
+                    "comment": note.get("comment_count"),
+                    "share": note.get("share_count"),
+                },
+                "note_type": note.get("note_type"),
+                "image_count": len(note.get("image_list") or []) or len(note.get("local_images") or []),
+                "tags": note.get("tags") or [],
+            })
+        article_count = 1 if mode == "single" else min(10, len(request_notes))
+        prompt = {
+            "topic": self.topic,
+            "mode": mode,
+            "article_count": article_count,
+            "target_note_id": target_note.get("note_id") if target_note else "",
+            "notes": request_notes,
+        }
+        user_prompt = (
+            "请基于以下小红书创业类爆款样本做爆款拆解，并围绕 topic 生成仿写文案。"
+            "要求：只学习结构、节奏、选题角度和视觉风格，不照抄原文，不复用原文连续 8 个字以上。"
+            "如果 mode=batch，请给每篇参考笔记生成一篇不同风格的最终文案；如果 mode=single，只围绕 target_note_id 的套路生成一篇。"
+            "每篇最终文案必须和 topic 一致，目标是引导用户参加或咨询该主题对应活动/项目。"
+            "输出必须是合法 JSON，不要使用 Markdown 代码块。JSON 结构为："
+            "{\"analysis_report\":\"Markdown格式爆款分析报告\",\"articles\":[{\"source_note_id\":\"参考笔记ID\","
+            "\"source_title\":\"参考标题\",\"strategy\":\"仿写策略\",\"title_options\":[\"标题1\",\"标题2\",\"标题3\"],"
+            "\"body\":\"完整小红书正文，含自然转化引导\",\"hashtags\":[\"#话题#\"],"
+            "\"comment_cta\":\"评论区引导话术\",\"image_prompt\":\"阿里通义万相图片生成提示词\"}]}"
+            f"\n\n输入数据：{json.dumps(prompt, ensure_ascii=False)}"
+        )
+        response = requests.post(
+            self._text_endpoint(),
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": self.text_model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "你是资深小红书内容策略师，擅长爆款拆解、合规仿写和商业转化文案。",
+                    },
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": 0.82,
+                "response_format": {"type": "json_object"},
+            },
+            timeout=180,
+        )
+        response.raise_for_status()
+        data = response.json()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        if isinstance(content, list):
+            content = "\n".join(
+                str(part.get("text") or part.get("content") or "")
+                for part in content
+                if isinstance(part, dict)
+            )
+        return self._parse_model_json(content)
+
+    def _parse_model_json(self, content: str) -> Dict[str, Any]:
+        text = str(content or "").strip()
+        if text.startswith("```"):
+            text = re.sub(r"^```(?:json)?\s*", "", text)
+            text = re.sub(r"\s*```$", "", text)
+        try:
+            parsed = json.loads(text)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start >= 0 and end > start:
+                parsed = json.loads(text[start:end + 1])
+                return parsed if isinstance(parsed, dict) else {}
+        raise ValueError("模型返回内容不是合法 JSON")
+
+    def _normalize_articles(
+        self,
+        articles: Any,
+        notes: List[Dict[str, Any]],
+        mode: str,
+        target_note: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        raw_articles = articles if isinstance(articles, list) else []
+        expected = 1 if mode == "single" else min(10, len(notes))
+        normalized = []
+        for index in range(expected):
+            source_note = target_note if target_note and index == 0 else notes[index % len(notes)]
+            item = raw_articles[index] if index < len(raw_articles) and isinstance(raw_articles[index], dict) else {}
+            title_options = item.get("title_options") if isinstance(item.get("title_options"), list) else []
+            normalized.append({
+                "source_note_id": str(item.get("source_note_id") or source_note.get("note_id") or ""),
+                "source_title": str(item.get("source_title") or source_note.get("title") or ""),
+                "strategy": str(item.get("strategy") or "提炼参考笔记的标题钩子、痛点开场和转化收口。"),
+                "title_options": [str(title) for title in title_options[:5]] or self._fallback_titles(source_note),
+                "body": str(item.get("body") or self._fallback_body(source_note)),
+                "hashtags": [str(tag) for tag in item.get("hashtags", []) if str(tag).strip()] or [
+                    "#创业沙龙[话题]#",
+                    "#创业[话题]#",
+                    "#副业[话题]#",
+                    "#商业思维[话题]#",
+                ],
+                "comment_cta": str(item.get("comment_cta") or "想了解活动安排，可以评论“沙龙”。"),
+                "image_prompt": str(item.get("image_prompt") or self._fallback_image_prompt(source_note)),
+            })
+        return normalized
+
+    def _fallback_analysis(self, notes: List[Dict[str, Any]]) -> str:
+        titles = "、".join(str(note.get("title") or "") for note in notes[:5])
+        return (
+            f"这批样本围绕「{titles}」展开，核心爆点集中在强结果、强反差、真实经历和可复制路径。"
+            "适合把创业沙龙包装成一次解决信息差、链接同频人和获得具体方向的机会。"
+        )
+
+    def _fallback_titles(self, note: Dict[str, Any]) -> List[str]:
+        return [
+            f"想创业的人，真的该来一次{self.topic}",
+            f"我建议你创业前先参加一次{self.topic}",
+            f"别一个人硬扛，来{self.topic}聊聊",
+        ]
+
+    def _fallback_body(self, note: Dict[str, Any]) -> str:
+        return (
+            f"最近越来越感觉，创业最难的不是努力，而是没人帮你拆清楚方向。\n\n"
+            f"所以这次我们准备了一场「{self.topic}」，不讲虚的，主要聊三个问题：\n"
+            "1. 你的项目到底适不适合继续做\n"
+            "2. 普通人怎么找到第一批用户和资源\n"
+            "3. 怎么避开那些很贵的试错\n\n"
+            "如果你正在创业、准备做副业，或者卡在一个想法里很久了，可以来现场一起聊。\n"
+            "评论“沙龙”，我把报名方式发你。"
+        )
+
+    def _fallback_image_prompt(self, note: Dict[str, Any]) -> str:
+        return (
+            f"小红书创业主题封面图，主题为{self.topic}，真实线下创业交流沙龙场景，"
+            "年轻创业者围坐讨论，白板、笔记本电脑、咖啡、暖色自然光，竖版 3:4，"
+            "画面干净、有真实感、适合小红书封面，不出现品牌 logo，不出现小红书界面。"
+        )
+
+    def _write_result_files(self, output_dir: Path, result: Dict[str, Any]) -> None:
+        (output_dir / "爆款分析报告.md").write_text(
+            f"# {self.topic} 爆款分析报告\n\n{result['analysis_report'].strip()}\n",
+            encoding="utf-8",
+        )
+        article_lines = [f"# {self.topic} 仿写文案", ""]
+        prompt_lines = [f"# {self.topic} 图片提示词", ""]
+        for index, article in enumerate(result.get("articles") or [], start=1):
+            article_lines.extend([
+                f"## {index:02d}. {article.get('source_title') or '参考笔记'}",
+                "",
+                f"参考套路：{article.get('strategy') or ''}",
+                "",
+                "### 标题备选",
+                "",
+                *[f"- {title}" for title in article.get("title_options") or []],
+                "",
+                "### 正文",
+                "",
+                str(article.get("body") or "").strip(),
+                "",
+                "### 话题",
+                "",
+                " ".join(article.get("hashtags") or []),
+                "",
+                "### 评论引导",
+                "",
+                str(article.get("comment_cta") or "").strip(),
+                "",
+                "### 图片提示词",
+                "",
+                str(article.get("image_prompt") or "").strip(),
+                "",
+            ])
+            if article.get("generated_image"):
+                article_lines.extend([f"![生成图]({article['generated_image']})", ""])
+            prompt_lines.extend([
+                f"## {index:02d}. {article.get('source_title') or '参考笔记'}",
+                "",
+                str(article.get("image_prompt") or "").strip(),
+                "",
+            ])
+        (output_dir / "仿写文案.md").write_text("\n".join(article_lines), encoding="utf-8")
+        (output_dir / "图片提示词.md").write_text("\n".join(prompt_lines), encoding="utf-8")
+        (output_dir / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _write_rewrite_log(
+        self,
+        output_dir: Path,
+        result: Dict[str, Any],
+        notes: List[Dict[str, Any]],
+        target_note: Optional[Dict[str, Any]],
+        stage_logs: List[Dict[str, str]],
+    ) -> None:
+        source_notes = [target_note] if target_note else notes
+        source_notes = [note for note in source_notes if note]
+        lines = [
+            f"# {self.topic} 仿写日志",
+            "",
+            "## 运行信息",
+            "",
+            f"- 开始时间：{result.get('started_at') or ''}",
+            f"- 结束时间：{result.get('finished_at') or ''}",
+            f"- 仿写主题：{self.topic}",
+            f"- 生成模式：{result.get('mode') or ''}",
+            f"- 文本模型：{self.text_model}",
+            f"- 图片模型：{self.image_model}",
+            f"- 模型地域：{self.region}",
+            f"- 样本数量：{result.get('note_count')}",
+            f"- 生成篇数：{result.get('article_count')}",
+            "",
+            "## 源笔记",
+            "",
+        ]
+        if not source_notes:
+            lines.extend(["- 未记录源笔记", ""])
+        for index, note in enumerate(source_notes[:10], start=1):
+            title = str(note.get("title") or "无标题").strip()
+            note_id = str(note.get("note_id") or "").strip()
+            note_url = str(note.get("note_url") or note.get("url") or "").strip()
+            liked = str(note.get("liked_count") or "").strip()
+            lines.append(f"- {index}. {title}")
+            if note_id:
+                lines.append(f"  - 笔记ID：{note_id}")
+            if liked:
+                lines.append(f"  - 点赞数：{liked}")
+            if note_url:
+                lines.append(f"  - 原始链接：{note_url}")
+        lines.extend([
+            "",
+            "## 输出文件",
+            "",
+            f"- 爆款分析报告：{result.get('analysis_path') or ''}",
+            f"- 仿写文案：{result.get('articles_path') or ''}",
+            f"- 图片提示词：{result.get('image_prompts_path') or ''}",
+            f"- 结构化结果：{result.get('result_path') or ''}",
+            f"- 仿写日志：{result.get('log_path') or ''}",
+            "",
+            "## 阶段日志",
+            "",
+        ])
+        if not stage_logs:
+            lines.append("- 未记录阶段日志")
+        for item in stage_logs:
+            lines.append(f"- [{item.get('time') or ''}] {item.get('message') or ''}")
+        (output_dir / "仿写日志.md").write_text("\n".join(lines), encoding="utf-8")
+
+    def _text_endpoint(self) -> str:
+        host = "dashscope-intl.aliyuncs.com" if self.region == "ap-southeast-1" else "dashscope.aliyuncs.com"
+        return f"https://{host}/compatible-mode/v1/chat/completions"
+
+    def _image_endpoint(self) -> str:
+        host = "dashscope-intl.aliyuncs.com" if self.region == "ap-southeast-1" else "dashscope.aliyuncs.com"
+        return f"https://{host}/api/v1/services/aigc/image-generation/generation"
+
+    def _task_endpoint(self, task_id: str) -> str:
+        host = "dashscope-intl.aliyuncs.com" if self.region == "ap-southeast-1" else "dashscope.aliyuncs.com"
+        return f"https://{host}/api/v1/tasks/{task_id}"
+
+    def _generate_image(self, prompt: str, reference_image: str = "") -> List[str]:
+        content = [{"text": prompt}]
+        parameters = {
+            "prompt_extend": True,
+            "watermark": False,
+            "n": 1,
+            "size": "1K",
+        }
+        if reference_image:
+            content.append({"image": reference_image})
+            parameters["enable_interleave"] = False
+        else:
+            parameters["enable_interleave"] = True
+            parameters["max_images"] = 1
+        response = requests.post(
+            self._image_endpoint(),
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "X-DashScope-Async": "enable",
+            },
+            json={
+                "model": self.image_model,
+                "input": {"messages": [{"role": "user", "content": content}]},
+                "parameters": parameters,
+            },
+            timeout=60,
+        )
+        response.raise_for_status()
+        data = response.json()
+        task_id = data.get("output", {}).get("task_id") or data.get("output", {}).get("taskId")
+        if not task_id:
+            return self._extract_image_urls(data)
+        deadline = time.time() + 240
+        while time.time() < deadline:
+            time.sleep(6)
+            status_response = requests.get(
+                self._task_endpoint(str(task_id)),
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                timeout=30,
+            )
+            status_response.raise_for_status()
+            status_data = status_response.json()
+            status = str(status_data.get("output", {}).get("task_status") or "").upper()
+            if status in {"SUCCEEDED", "SUCCESS"}:
+                return self._extract_image_urls(status_data)
+            if status in {"FAILED", "CANCELED", "UNKNOWN"}:
+                raise RuntimeError(status_data.get("output", {}).get("message") or f"图片任务失败：{status}")
+        raise TimeoutError("图片生成超时")
+
+    def _extract_image_urls(self, value: Any) -> List[str]:
+        urls = []
+
+        def visit(item: Any) -> None:
+            if isinstance(item, dict):
+                for key, nested in item.items():
+                    if key in {"url", "image", "image_url"} and isinstance(nested, str) and nested.startswith("http"):
+                        urls.append(nested)
+                    else:
+                        visit(nested)
+            elif isinstance(item, list):
+                for nested in item:
+                    visit(nested)
+
+        visit(value)
+        unique_urls = []
+        for url in urls:
+            if url not in unique_urls:
+                unique_urls.append(url)
+        return unique_urls
+
+    def _reference_image(self, note: Optional[Dict[str, Any]]) -> str:
+        if not note:
+            return ""
+        for rel_path in note.get("local_images") or []:
+            path = safe_output_path(self.output_root, rel_path)
+            if path.exists() and path.stat().st_size <= 10 * 1024 * 1024:
+                mime = mimetypes.guess_type(str(path))[0] or "image/jpeg"
+                data = base64.b64encode(path.read_bytes()).decode("ascii")
+                return f"data:{mime};base64,{data}"
+        image_list = note.get("image_list") or []
+        return str(image_list[0]) if image_list else ""
+
+    def _article_source_note(self, article: Dict[str, Any], notes: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        source_id = str(article.get("source_note_id") or "")
+        for note in notes:
+            if str(note.get("note_id") or "") == source_id:
+                return note
+        return notes[0] if notes else None
+
+    def _progress(self, progress: Optional[Callable[[str], None]], message: str) -> None:
+        logger.info(message)
+        if progress:
+            progress(message)
+
+
 class JobManager:
     def __init__(self, config_store: ConfigStore):
         self.config_store = config_store
@@ -771,10 +1412,14 @@ class JobManager:
             self.jobs = []
         changed = False
         for job in self.jobs:
+            if not job.get("type"):
+                job["type"] = "collect"
+                changed = True
             if job.get("status") == "running":
                 job["status"] = "interrupted"
                 job["finished_at"] = now_text()
                 job["error"] = "服务重启，上一轮运行状态已失效"
+                job["progress"] = {"value": 100, "label": "已中断", "phase": "interrupted"}
                 changed = True
         if changed:
             write_json(JOB_HISTORY_PATH, self.jobs)
@@ -787,12 +1432,14 @@ class JobManager:
             config_snapshot = deepcopy(config or self.config_store.load())
             job = {
                 "id": uuid.uuid4().hex[:12],
+                "type": "collect",
                 "source": source,
                 "status": "running",
                 "created_at": now_text(),
                 "started_at": now_text(),
                 "finished_at": None,
                 "summary": summarize_config(config_snapshot),
+                "progress": {"value": 3, "label": "等待采集启动", "phase": "starting"},
                 "logs": [],
                 "result": None,
                 "error": None,
@@ -805,9 +1452,66 @@ class JobManager:
         thread.start()
         return job
 
+    def start_rewrite(
+        self,
+        targets: List[Dict[str, Any]],
+        topic: str,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        normalized_targets = self._normalize_rewrite_targets(targets)
+        config_snapshot = deepcopy(config or self.config_store.load())
+        topic_text = str(topic or config_snapshot.get("rewrite", {}).get("topic") or "创业沙龙").strip()[:80] or "创业沙龙"
+        config_snapshot.setdefault("rewrite", {})["topic"] = topic_text
+        target_names = [target.get("name") or Path(target.get("path", "")).name for target in normalized_targets]
+        summary = summarize_config(config_snapshot)
+        summary.update({
+            "target_count": len(normalized_targets),
+            "target_names": target_names[:5],
+            "rewrite_topic": topic_text,
+        })
+
+        with self.lock:
+            running = self._running_job_unlocked()
+            if running:
+                raise RuntimeError(f"已有任务正在运行：{running['id']}")
+            job = {
+                "id": uuid.uuid4().hex[:12],
+                "type": "rewrite",
+                "source": "manual_rewrite",
+                "status": "running",
+                "created_at": now_text(),
+                "started_at": now_text(),
+                "finished_at": None,
+                "summary": summary,
+                "progress": {
+                    "value": 2,
+                    "label": f"等待仿写启动 0/{len(normalized_targets)}",
+                    "phase": "starting",
+                    "current": 0,
+                    "total": len(normalized_targets),
+                },
+                "logs": [],
+                "result": None,
+                "error": None,
+            }
+            self.jobs.insert(0, job)
+            self.jobs = self.jobs[:50]
+            self._persist_unlocked()
+
+        thread = threading.Thread(
+            target=self._run_rewrite_job,
+            args=(job["id"], normalized_targets, topic_text, config_snapshot),
+            daemon=True,
+        )
+        thread.start()
+        return job
+
     def list_jobs(self) -> List[Dict[str, Any]]:
         with self.lock:
-            return deepcopy(self.jobs)
+            jobs = deepcopy(self.jobs)
+        for job in jobs:
+            job.setdefault("type", "collect")
+        return jobs
 
     def has_running(self) -> bool:
         with self.lock:
@@ -819,18 +1523,42 @@ class JobManager:
                 job = self._find_job_unlocked(job_id)
                 if not job:
                     return
-                job.setdefault("logs", []).append({"time": now_text(), "message": message})
-                job["logs"] = job["logs"][-120:]
+                self._append_job_log_unlocked(job, message)
+                self._update_collect_progress_unlocked(job, message)
                 self._persist_unlocked()
 
         try:
             result = self.collector.run(config, source=self._job_source(job_id), progress=progress)
+            rewrite_config = config.get("rewrite", {}) if isinstance(config.get("rewrite"), dict) else {}
+            if rewrite_config.get("enabled") and result.get("saved_count"):
+                try:
+                    progress("开始自动生成仿写文案")
+                    rewrite_result = RewriteService(resolve_output_root(config), rewrite_config).rewrite_from_collection(
+                        result,
+                        progress=progress,
+                    )
+                    if rewrite_result:
+                        result["rewrite"] = {
+                            "topic": rewrite_result.get("topic"),
+                            "article_count": rewrite_result.get("article_count"),
+                            "output_dir": rewrite_result.get("output_dir"),
+                            "analysis_path": rewrite_result.get("analysis_path"),
+                            "articles_path": rewrite_result.get("articles_path"),
+                            "image_prompts_path": rewrite_result.get("image_prompts_path"),
+                            "result_path": rewrite_result.get("result_path"),
+                            "log_path": rewrite_result.get("log_path"),
+                        }
+                except Exception as exc:
+                    result["rewrite_error"] = str(exc)
+                    progress(f"自动仿写失败：{exc}")
+                    logger.exception(exc)
             with self.lock:
                 job = self._find_job_unlocked(job_id)
                 if job:
                     job["status"] = "success"
                     job["finished_at"] = now_text()
                     job["result"] = result
+                    self._set_job_progress_unlocked(job, 100, "已完成", "completed")
                     self._persist_unlocked()
         except Exception as exc:
             logger.exception(exc)
@@ -840,7 +1568,279 @@ class JobManager:
                     job["status"] = "failed"
                     job["finished_at"] = now_text()
                     job["error"] = str(exc)
+                    self._append_job_log_unlocked(job, f"任务失败：{exc}")
+                    self._set_job_progress_unlocked(job, 100, "失败", "failed")
                     self._persist_unlocked()
+
+    def _run_rewrite_job(
+        self,
+        job_id: str,
+        targets: List[Dict[str, Any]],
+        topic: str,
+        config: Dict[str, Any],
+    ) -> None:
+        total = len(targets)
+        result = {
+            "type": "rewrite",
+            "topic": topic,
+            "started_at": now_text(),
+            "finished_at": None,
+            "target_count": total,
+            "success_count": 0,
+            "failed_count": 0,
+            "items": [],
+        }
+        rewrite_config = dict(config.get("rewrite", {}) if isinstance(config.get("rewrite"), dict) else {})
+        rewrite_config["topic"] = topic
+        service = RewriteService(resolve_output_root(config), rewrite_config)
+
+        try:
+            with self.lock:
+                job = self._find_job_unlocked(job_id)
+                if job:
+                    job["result"] = deepcopy(result)
+                    self._append_job_log_unlocked(job, f"开始 AI 仿写任务：共 {total} 篇，主题「{topic}」")
+                    self._set_job_progress_unlocked(job, 2, f"开始仿写 0/{total}", "starting", 0, total)
+                    self._persist_unlocked()
+
+            for index, target in enumerate(targets, start=1):
+                target_path = target["path"]
+                target_name = target.get("name") or Path(target_path).name
+                item = {"path": target_path, "name": target_name}
+
+                with self.lock:
+                    job = self._find_job_unlocked(job_id)
+                    if job:
+                        self._append_job_log_unlocked(job, f"开始仿写 {index}/{total}：{target_name}")
+                        self._set_rewrite_item_progress_unlocked(job, index, total, "开始仿写", "rewriting")
+                        self._persist_unlocked()
+
+                def progress(message: str, item_index: int = index) -> None:
+                    with self.lock:
+                        job = self._find_job_unlocked(job_id)
+                        if not job:
+                            return
+                        self._append_job_log_unlocked(job, message)
+                        self._set_rewrite_item_progress_unlocked(job, item_index, total, message, "rewriting")
+                        self._persist_unlocked()
+
+                try:
+                    rewrite_result = service.rewrite_note(target_path, topic=topic, progress=progress)
+                    item.update({
+                        "output_dir": rewrite_result.get("output_dir"),
+                        "articles_path": rewrite_result.get("articles_path"),
+                        "analysis_path": rewrite_result.get("analysis_path"),
+                        "image_prompts_path": rewrite_result.get("image_prompts_path"),
+                        "result_path": rewrite_result.get("result_path"),
+                        "log_path": rewrite_result.get("log_path"),
+                        "article_count": rewrite_result.get("article_count"),
+                    })
+                    result["success_count"] += 1
+                    result["items"].append(item)
+                    with self.lock:
+                        job = self._find_job_unlocked(job_id)
+                        if job:
+                            job["result"] = deepcopy(result)
+                            self._append_job_log_unlocked(job, f"单篇仿写完成 {index}/{total}：{target_name}")
+                            self._set_job_progress_unlocked(
+                                job,
+                                round((index / total) * 100),
+                                f"完成 {index}/{total}",
+                                "rewriting",
+                                index,
+                                total,
+                            )
+                            self._persist_unlocked()
+                except Exception as exc:
+                    item["error"] = str(exc)
+                    result["failed_count"] += 1
+                    result["items"].append(item)
+                    logger.exception(exc)
+                    with self.lock:
+                        job = self._find_job_unlocked(job_id)
+                        if job:
+                            job["result"] = deepcopy(result)
+                            self._append_job_log_unlocked(job, f"单篇仿写失败 {index}/{total}：{target_name}，{exc}")
+                            self._set_job_progress_unlocked(
+                                job,
+                                round((index / total) * 100),
+                                f"失败 {index}/{total}",
+                                "rewriting",
+                                index,
+                                total,
+                            )
+                            self._persist_unlocked()
+
+            result["finished_at"] = now_text()
+            final_status = "success" if result["success_count"] > 0 else "failed"
+            final_label = f"完成：成功 {result['success_count']}/{total}"
+            final_error = None if final_status == "success" else "全部仿写失败"
+            if final_error and result["items"]:
+                final_error = result["items"][0].get("error") or final_error
+
+            with self.lock:
+                job = self._find_job_unlocked(job_id)
+                if job:
+                    job["status"] = final_status
+                    job["finished_at"] = now_text()
+                    job["result"] = result
+                    job["error"] = final_error
+                    self._append_job_log_unlocked(
+                        job,
+                        f"AI 仿写任务结束：成功 {result['success_count']} 篇，失败 {result['failed_count']} 篇",
+                    )
+                    self._set_job_progress_unlocked(
+                        job,
+                        100,
+                        final_label if final_status == "success" else "仿写失败",
+                        "completed" if final_status == "success" else "failed",
+                        total,
+                        total,
+                    )
+                    self._persist_unlocked()
+        except Exception as exc:
+            logger.exception(exc)
+            with self.lock:
+                job = self._find_job_unlocked(job_id)
+                if job:
+                    job["status"] = "failed"
+                    job["finished_at"] = now_text()
+                    job["error"] = str(exc)
+                    self._append_job_log_unlocked(job, f"AI 仿写任务失败：{exc}")
+                    self._set_job_progress_unlocked(job, 100, "仿写失败", "failed", 0, total)
+                    self._persist_unlocked()
+
+    def _normalize_rewrite_targets(self, targets: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+        normalized: List[Dict[str, str]] = []
+        seen = set()
+        for item in targets or []:
+            if isinstance(item, str):
+                raw_path = item
+                raw_name = ""
+            elif isinstance(item, dict):
+                raw_path = item.get("path") or ""
+                raw_name = item.get("name") or ""
+            else:
+                continue
+            path = str(raw_path).strip()
+            if not path or path in seen:
+                continue
+            seen.add(path)
+            name = str(raw_name).strip()[:120] or Path(path).name
+            normalized.append({"path": path, "name": name})
+        if not normalized:
+            raise ValueError("请选择要仿写的笔记")
+        return normalized
+
+    def _append_job_log_unlocked(self, job: Dict[str, Any], message: str) -> None:
+        job.setdefault("logs", []).append({"time": now_text(), "message": str(message)})
+        job["logs"] = job["logs"][-120:]
+
+    def _set_job_progress_unlocked(
+        self,
+        job: Dict[str, Any],
+        value: Any,
+        label: str,
+        phase: str,
+        current: Optional[int] = None,
+        total: Optional[int] = None,
+    ) -> None:
+        try:
+            numeric = int(round(float(value)))
+        except (TypeError, ValueError):
+            numeric = 0
+        progress = {
+            "value": max(0, min(100, numeric)),
+            "label": str(label or "").strip() or "处理中",
+            "phase": str(phase or "").strip() or "running",
+        }
+        if current is not None:
+            progress["current"] = current
+        if total is not None:
+            progress["total"] = total
+        job["progress"] = progress
+
+    def _update_collect_progress_unlocked(self, job: Dict[str, Any], message: str) -> None:
+        if job.get("type", "collect") != "collect":
+            return
+        text = str(message or "")
+        detail_match = re.search(r"拉取详情\s+.+?\s+(\d+)\s*/\s*(\d+)", text)
+        image_match = re.search(r"正在生成配图\s+(\d+)\s*/\s*(\d+)", text)
+        if "开始搜索关键词" in text:
+            self._set_job_progress_unlocked(job, 8, "搜索关键词", "searching")
+        elif "获取到" in text and "搜索结果" in text:
+            self._set_job_progress_unlocked(job, 14, "搜索完成", "searching")
+        elif detail_match:
+            current = to_int(detail_match.group(1), 0)
+            total = to_int(detail_match.group(2), 0)
+            value = 16 + (current / total) * 62 if total else 16
+            self._set_job_progress_unlocked(job, value, f"详情 {current}/{total}", "collecting", current, total)
+        elif "已保存" in text:
+            self._set_job_progress_unlocked(job, 82, "保存笔记", "saving")
+        elif "采集完成" in text:
+            self._set_job_progress_unlocked(job, 88, "采集完成", "collect_done")
+        elif "开始自动生成仿写文案" in text:
+            self._set_job_progress_unlocked(job, 90, "自动仿写", "rewrite")
+        elif "正在请求文本模型" in text or "正在准备仿写输出目录" in text:
+            self._set_job_progress_unlocked(job, 92, "自动仿写：文本生成", "rewrite")
+        elif image_match:
+            current = to_int(image_match.group(1), 0)
+            total = to_int(image_match.group(2), 0)
+            value = 94 + (current / total) * 3 if total else 94
+            self._set_job_progress_unlocked(job, value, f"自动配图 {current}/{total}", "rewrite_images", current, total)
+        elif "仿写完成" in text:
+            self._set_job_progress_unlocked(job, 98, "自动仿写完成", "rewrite_done")
+
+    def _set_rewrite_item_progress_unlocked(
+        self,
+        job: Dict[str, Any],
+        index: int,
+        total: int,
+        message: str,
+        phase: str,
+    ) -> None:
+        total = max(total, 1)
+        fraction = self._rewrite_phase_fraction(message)
+        value = ((max(index, 1) - 1 + fraction) / total) * 100
+        if fraction < 1:
+            value = min(value, 99)
+        self._set_job_progress_unlocked(
+            job,
+            value,
+            f"{index}/{total} {message}",
+            phase,
+            index,
+            total,
+        )
+
+    def _rewrite_phase_fraction(self, message: str) -> float:
+        text = str(message or "")
+        image_match = re.search(r"正在生成配图\s+(\d+)\s*/\s*(\d+)", text)
+        if "开始仿写" in text:
+            return 0.04
+        if "正在准备仿写输出目录" in text:
+            return 0.08
+        if "正在请求文本模型" in text:
+            return 0.22
+        if "文本模型已返回" in text:
+            return 0.46
+        if "兜底分析" in text or "整理仿写结构" in text:
+            return 0.56
+        if image_match:
+            current = to_int(image_match.group(1), 0)
+            total = max(to_int(image_match.group(2), 1), 1)
+            return min(0.82, 0.58 + (current / total) * 0.24)
+        if "配图生成失败" in text:
+            return 0.82
+        if "正在写入仿写结果文件" in text:
+            return 0.88
+        if "正在写入仿写日志" in text:
+            return 0.94
+        if "仿写完成" in text:
+            return 1.0
+        if "失败" in text or "错误" in text or "异常" in text:
+            return 0.96
+        return 0.32
 
     def _job_source(self, job_id: str) -> str:
         with self.lock:
@@ -982,6 +1982,14 @@ def list_output_files(output_root: Path, relative_path: str = "") -> Dict[str, A
         if child.name.startswith(".") or child.name in INTERNAL_DATA_FILES:
             continue
         stat = child.stat()
+        rewriteable = (
+            (child.is_dir() and child.joinpath("info.json").exists())
+            or (
+                child.is_file()
+                and child.suffix.lower() in [".md", ".markdown"]
+                and child.parent.joinpath("info.json").exists()
+            )
+        )
         sortable_entries.append({
             "is_file": child.is_file(),
             "modified_ts": stat.st_mtime,
@@ -991,6 +1999,7 @@ def list_output_files(output_root: Path, relative_path: str = "") -> Dict[str, A
             "size": stat.st_size,
             "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
             "previewable": child.suffix.lower() in [".md", ".txt", ".json", ".log"],
+            "rewriteable": rewriteable,
         })
     sortable_entries.sort(key=lambda item: (item["is_file"], -item["modified_ts"], item["name"].lower()))
     entries = [{
@@ -1000,6 +2009,7 @@ def list_output_files(output_root: Path, relative_path: str = "") -> Dict[str, A
         "size": item["size"],
         "modified": item["modified"],
         "previewable": item["previewable"],
+        "rewriteable": item["rewriteable"],
     } for item in sortable_entries]
     parent = ""
     if target.resolve() != output_root.resolve():

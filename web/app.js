@@ -28,10 +28,12 @@ const homeEls = {
   jobFilters: document.querySelector('#jobFilters'),
   refreshJobsBtn: document.querySelector('#refreshJobsBtn'),
   deleteSelectedBtn: document.querySelector('#deleteSelectedBtn'),
+  rewriteSelectedBtn: document.querySelector('#rewriteSelectedBtn'),
   refreshFilesBtn: document.querySelector('#refreshFilesBtn'),
   selectAllFilesBtn: document.querySelector('#selectAllFilesBtn'),
   clearFileSelectionBtn: document.querySelector('#clearFileSelectionBtn'),
   openCurrentFolderBtn: document.querySelector('#openCurrentFolderBtn'),
+  rewriteTopicInput: document.querySelector('#rewriteTopicInput'),
   fileLayout: document.querySelector('#fileLayout'),
   fileList: document.querySelector('#fileList'),
   fileListMeta: document.querySelector('#fileListMeta'),
@@ -64,6 +66,14 @@ const settingsEls = {
   runTimesInput: document.querySelector('#runTimesInput'),
   weekdayChoices: document.querySelector('#weekdayChoices'),
   weekdaySection: document.querySelector('#weekdaySection'),
+  rewriteEnabledInput: document.querySelector('#rewriteEnabledInput'),
+  rewriteApiKeyInput: document.querySelector('#rewriteApiKeyInput'),
+  rewriteTopicSettingsInput: document.querySelector('#rewriteTopicSettingsInput'),
+  rewriteTextModelInput: document.querySelector('#rewriteTextModelInput'),
+  rewriteImageModelInput: document.querySelector('#rewriteImageModelInput'),
+  rewriteRegionInput: document.querySelector('#rewriteRegionInput'),
+  rewriteGenerateImagesInput: document.querySelector('#rewriteGenerateImagesInput'),
+  rewriteApiStatus: document.querySelector('#rewriteApiStatus'),
   saveConfigBtn: document.querySelector('#saveConfigBtn'),
   checkLoginBtn: document.querySelector('#checkLoginBtn'),
   openLoginBrowserBtn: document.querySelector('#openLoginBrowserBtn'),
@@ -105,6 +115,7 @@ const state = {
   jobFilter: 'all',
   currentJobs: [],
   collectBusy: false,
+  rewriteBusy: false,
   collectOverlayState: {
     status: 'idle',
     title: '',
@@ -599,7 +610,13 @@ function applyDesktopMode(config = state.config) {
   state.desktopMode = detectDesktopMode(config);
 
   if (settingsEls.openLoginBrowserBtn) {
-    settingsEls.openLoginBrowserBtn.textContent = state.desktopMode ? '打开登录窗口' : '打开浏览器登录';
+    const label = state.desktopMode ? '打开登录窗口' : '打开浏览器登录';
+    const labelNode = settingsEls.openLoginBrowserBtn.querySelector('.btn-label');
+    if (labelNode) {
+      labelNode.textContent = label;
+    } else {
+      settingsEls.openLoginBrowserBtn.textContent = label;
+    }
   }
 
   if (settingsEls.openExternalLoginBrowserBtn) {
@@ -705,6 +722,9 @@ function applyHomeConfig(config) {
   if (homeEls.publishDaysInput) {
     homeEls.publishDaysInput.value = filters.publish_days ?? 7;
   }
+  if (homeEls.rewriteTopicInput) {
+    homeEls.rewriteTopicInput.value = config.rewrite?.topic || '创业沙龙';
+  }
 
   updateOutputRoot(config);
   renderKeywordList();
@@ -727,13 +747,39 @@ function applyLoginSummary(config) {
   setLoginStatus('未保存 Cookie，请打开浏览器登录', 'bad');
 }
 
+function applyRewriteSummary(config) {
+  if (!settingsEls.rewriteApiStatus) return;
+  const rewrite = config.rewrite || {};
+  const topic = rewrite.topic || '创业沙龙';
+  const source = rewrite.api_key_source ? ` · 来源：${rewrite.api_key_source}` : '';
+  const preview = rewrite.api_key_preview ? ` · ${rewrite.api_key_preview}` : '';
+  const textModel = rewrite.text_model || 'qwen-plus';
+  const imageModel = rewrite.image_model || 'wan2.6-image';
+  const message = rewrite.api_key_present
+    ? `模型配置可用${source}${preview} · ${textModel} / ${imageModel} · 默认主题：${topic}`
+    : '未配置 DashScope API Key，仿写接口会等待模型密钥';
+  settingsEls.rewriteApiStatus.textContent = message;
+  settingsEls.rewriteApiStatus.className = `status-panel ${rewrite.api_key_present ? 'good' : 'muted'}`;
+}
+
+function applyRewriteApiKeyPlaceholder(rewrite) {
+  if (!settingsEls.rewriteApiKeyInput) return;
+  const preview = rewrite.api_key_preview ? `（${rewrite.api_key_preview}）` : '';
+  settingsEls.rewriteApiKeyInput.value = '';
+  settingsEls.rewriteApiKeyInput.placeholder = rewrite.api_key_present
+    ? `已保存 DashScope API Key${preview}，留空保留，粘贴新 Key 后覆盖`
+    : '粘贴 DashScope API Key 后保存';
+}
+
 function applySettingsConfig(config) {
   if (!settingsEls.saveConfigBtn) return;
   const collect = config.collect || {};
   const schedule = config.schedule || {};
+  const rewrite = config.rewrite || {};
 
   applyHomeConfig(config);
   applyLoginSummary(config);
+  applyRewriteSummary(config);
   settingsEls.requestMultiplierInput.value = collect.request_multiplier ?? 3;
   settingsEls.searchDelayMinInput.value = collect.search_delay_min_sec ?? 2;
   settingsEls.searchDelayMaxInput.value = collect.search_delay_max_sec ?? 4;
@@ -744,6 +790,13 @@ function applySettingsConfig(config) {
   settingsEls.dailyRunsInput.value = schedule.daily_runs || 1;
   settingsEls.runTimesInput.value = (schedule.run_times || ['09:00']).join(', ');
   state.settingsWeekdays = (schedule.weekdays || [1, 2, 3, 4, 5, 6, 7]).map(Number);
+  if (settingsEls.rewriteEnabledInput) settingsEls.rewriteEnabledInput.checked = Boolean(rewrite.enabled);
+  applyRewriteApiKeyPlaceholder(rewrite);
+  if (settingsEls.rewriteTopicSettingsInput) settingsEls.rewriteTopicSettingsInput.value = rewrite.topic || '创业沙龙';
+  if (settingsEls.rewriteTextModelInput) settingsEls.rewriteTextModelInput.value = rewrite.text_model || 'qwen-plus';
+  if (settingsEls.rewriteImageModelInput) settingsEls.rewriteImageModelInput.value = rewrite.image_model || 'wan2.6-image';
+  if (settingsEls.rewriteRegionInput) settingsEls.rewriteRegionInput.value = rewrite.region || 'cn-beijing';
+  if (settingsEls.rewriteGenerateImagesInput) settingsEls.rewriteGenerateImagesInput.checked = Boolean(rewrite.generate_images);
 
   renderSettingsWeekdays();
   updateScheduleView();
@@ -811,18 +864,39 @@ function readSettingsDraft() {
       run_times: runTimes.length ? runTimes : ['09:00'],
       weekdays: state.settingsWeekdays,
     },
+    rewrite: {
+      enabled: Boolean(settingsEls.rewriteEnabledInput?.checked),
+      api_key: (settingsEls.rewriteApiKeyInput?.value || '').trim(),
+      topic: (settingsEls.rewriteTopicSettingsInput?.value || '创业沙龙').trim() || '创业沙龙',
+      text_model: (settingsEls.rewriteTextModelInput?.value || 'qwen-plus').trim() || 'qwen-plus',
+      image_model: (settingsEls.rewriteImageModelInput?.value || 'wan2.6-image').trim() || 'wan2.6-image',
+      region: settingsEls.rewriteRegionInput?.value || 'cn-beijing',
+      generate_image_prompts: true,
+      generate_images: Boolean(settingsEls.rewriteGenerateImagesInput?.checked),
+    },
   };
 }
 
 async function saveSettings() {
+  const draft = readSettingsDraft();
+  const submittedApiKey = Boolean(draft.rewrite?.api_key);
   const data = await api('/api/config', {
     method: 'POST',
-    body: JSON.stringify(readSettingsDraft()),
+    body: JSON.stringify(draft),
   });
   state.config = data.config;
   state.choices = data.config?.choices || state.choices;
   applySettingsConfig(data.config);
-  toast('设置已保存');
+  const rewrite = data.config?.rewrite || {};
+  if (submittedApiKey && rewrite.api_key_present) {
+    toast(`设置已保存，DashScope API Key 已更新${rewrite.api_key_preview ? `：${rewrite.api_key_preview}` : ''}`);
+    return;
+  }
+  if (rewrite.api_key_present) {
+    toast(`设置已保存，已保留 DashScope API Key${rewrite.api_key_preview ? `：${rewrite.api_key_preview}` : ''}`);
+    return;
+  }
+  toast('设置已保存，尚未配置 DashScope API Key');
 }
 
 async function pickOutputFolder() {
@@ -1058,7 +1132,10 @@ function jobStatusMeta(status) {
   return map[status] || { label: status || '未知', tone: 'idle' };
 }
 
-function jobSourceLabel(source) {
+function jobSourceLabel(source, type = 'collect') {
+  if (type === 'rewrite') {
+    return source === 'schedule' ? '自动仿写' : '手动仿写';
+  }
   return source === 'schedule' ? '定时任务' : '手动采集';
 }
 
@@ -1107,14 +1184,26 @@ function countJobLogIssues(job) {
   return logs.filter((item) => /失败|错误|异常|error|exception/i.test(String(item.message || ''))).length;
 }
 
-function jobKeywords(summary = {}) {
+function jobKeywords(summary = {}, job = {}) {
+  if ((job.type || 'collect') === 'rewrite') {
+    const topic = summary.rewrite_topic || job.result?.topic || 'AI仿写';
+    const names = Array.isArray(summary.target_names) ? summary.target_names.filter(Boolean) : [];
+    if (!names.length) return topic;
+    const shown = names.slice(0, 2).join('、');
+    return names.length > 2 ? `${topic} · ${shown} 等 ${names.length} 篇` : `${topic} · ${shown}`;
+  }
   const keywords = Array.isArray(summary.keywords) ? summary.keywords.filter(Boolean) : [];
   if (!keywords.length) return '未设置关键词';
   const shown = keywords.slice(0, 3).join('、');
   return keywords.length > 3 ? `${shown} 等 ${keywords.length} 个` : shown;
 }
 
-function jobScopeText(summary = {}) {
+function jobScopeText(summary = {}, job = {}) {
+  if ((job.type || 'collect') === 'rewrite') {
+    const count = summary.target_count || job.result?.target_count || 0;
+    const topic = summary.rewrite_topic || job.result?.topic || '默认主题';
+    return `${topic} · ${count || '—'} 篇`;
+  }
   const parts = [
     summary.sort_type,
     summary.content_type,
@@ -1125,6 +1214,15 @@ function jobScopeText(summary = {}) {
 }
 
 function jobProgress(job) {
+  const structured = job.progress || {};
+  const structuredValue = Number(structured.value);
+  if (Number.isFinite(structuredValue) && structured.label) {
+    return {
+      value: Math.max(0, Math.min(100, Math.round(structuredValue))),
+      label: String(structured.label),
+    };
+  }
+
   const status = job.status || '';
   if (status === 'success') {
     return { value: 100, label: '已完成' };
@@ -1155,8 +1253,23 @@ function jobProgress(job) {
 function jobPrimaryMessage(job) {
   const result = job.result || {};
   const latestLog = latestJobLog(job);
+  if ((job.type || 'collect') === 'rewrite') {
+    const targetCount = result.target_count || job.summary?.target_count || 0;
+    const successCount = result.success_count || 0;
+    const failedCount = result.failed_count || 0;
+    if (job.status === 'success') {
+      return `仿写完成：成功 ${successCount} 篇，失败 ${failedCount} 篇`;
+    }
+    if (job.status === 'failed' || job.status === 'interrupted') {
+      return truncateText(job.error || latestLog?.message || jobStatusMeta(job.status).label, 120);
+    }
+    return truncateText(latestLog?.message || `正在仿写：${successCount}/${targetCount || '—'}`, 120);
+  }
   if (job.status === 'success') {
-    return `保存 ${result.saved_count || 0} 篇，失败 ${result.failed_count || 0} 条`;
+    const rewriteText = result.rewrite?.article_count
+      ? `，仿写 ${result.rewrite.article_count} 篇`
+      : (result.rewrite_error ? `，仿写失败：${truncateText(result.rewrite_error, 36)}` : '');
+    return `保存 ${result.saved_count || 0} 篇，失败 ${result.failed_count || 0} 条${rewriteText}`;
   }
   if (job.status === 'failed' || job.status === 'interrupted') {
     return truncateText(job.error || latestLog?.message || jobStatusMeta(job.status).label, 120);
@@ -1167,6 +1280,17 @@ function jobPrimaryMessage(job) {
 function jobMetricItems(job) {
   const summary = job.summary || {};
   const result = job.result || {};
+  if ((job.type || 'collect') === 'rewrite') {
+    const targetCount = result.target_count ?? summary.target_count ?? '—';
+    const successCount = result.success_count ?? 0;
+    const failedCount = result.failed_count ?? countJobLogIssues(job);
+    return [
+      { label: '目标', value: targetCount === '—' ? targetCount : `${targetCount} 篇` },
+      { label: '成功', value: `${successCount || 0} 篇` },
+      { label: '异常', value: `${failedCount || 0} 篇` },
+      { label: '耗时', value: formatDuration(job.started_at || job.created_at, job.finished_at) },
+    ];
+  }
   const saved = result.saved_count ?? '—';
   const failed = result.failed_count ?? countJobLogIssues(job);
   return [
@@ -1214,8 +1338,10 @@ function renderJobStatusSummary(jobs) {
   }
 
   const meta = jobStatusMeta(latest.status);
-  const title = runningJobs.length ? '正在采集' : `最近任务${meta.label}`;
-  const subtitle = `${jobSourceLabel(latest.source)} · ${compactTime(latest.started_at || latest.created_at)} · ${jobPrimaryMessage(latest)}`;
+  const title = runningJobs.length
+    ? ((latest.type || 'collect') === 'rewrite' ? '正在仿写' : '正在采集')
+    : `最近任务${meta.label}`;
+  const subtitle = `${jobSourceLabel(latest.source, latest.type || 'collect')} · ${compactTime(latest.started_at || latest.created_at)} · ${jobPrimaryMessage(latest)}`;
   const successCount = jobs.filter((job) => job.status === 'success').length;
   const issueCount = jobs.filter((job) => ['failed', 'interrupted'].includes(job.status)).length;
 
@@ -1385,10 +1511,10 @@ function renderJobs(jobs) {
           <div class="job-title-block">
             <div class="job-title-row">
               <span class="job-status-dot ${escapeHtml(meta.tone)}" aria-hidden="true"></span>
-              <strong class="job-title">${escapeHtml(jobKeywords(summary))}</strong>
+              <strong class="job-title">${escapeHtml(jobKeywords(summary, job))}</strong>
               <span class="job-id">#${escapeHtml(job.id)}</span>
             </div>
-            <div class="job-subtitle">${escapeHtml(jobSourceLabel(job.source))} · ${escapeHtml(compactTime(job.started_at || job.created_at))} · ${escapeHtml(jobScopeText(summary))}</div>
+            <div class="job-subtitle">${escapeHtml(jobSourceLabel(job.source, job.type || 'collect'))} · ${escapeHtml(compactTime(job.started_at || job.created_at))} · ${escapeHtml(jobScopeText(summary, job))}</div>
           </div>
           <div class="job-card-actions">
             <button class="job-copy-id" type="button" data-job-id="${escapeHtml(job.id)}">复制ID</button>
@@ -1484,6 +1610,7 @@ function iconSvg(name) {
     trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14"/><path d="M9 7V5.8c0-.7.6-1.3 1.3-1.3h3.4c.7 0 1.3.6 1.3 1.3V7"/><path d="M8 10v8M12 10v8M16 10v8"/><path d="M7 7l.8 13h8.4L17 7"/></svg>',
     back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m11 6-6 6 6 6"/><path d="M5 12h14"/></svg>',
     refresh: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 8a7 7 0 0 0-12.2-2.4L5 7.5"/><path d="M5 4v3.5h3.5"/><path d="M5 16a7 7 0 0 0 12.2 2.4L19 16.5"/><path d="M19 20v-3.5h-3.5"/></svg>',
+    rewrite: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4.5 19.5 9.8-9.8 2 2-9.8 9.8h-2z"/><path d="m13.7 6.3 2-2 4 4-2 2"/><path d="M6 4.5v3M4.5 6h3M18 16.5v3M16.5 18h3"/></svg>',
   };
   return icons[name] || icons.file;
 }
@@ -1789,6 +1916,7 @@ function updateFileToolbarState() {
   const entries = state.currentFiles?.entries || [];
   const selectablePaths = entries.map((entry) => entry.path).filter(Boolean);
   const selectedCount = state.selectedFilePaths.size;
+  const rewriteableSelectedCount = selectedRewriteableEntries().length;
   const allVisibleSelected = selectablePaths.length > 0
     && selectablePaths.every((path) => state.selectedFilePaths.has(path));
 
@@ -1798,20 +1926,26 @@ function updateFileToolbarState() {
       : '未选择文件';
   }
   if (homeEls.deleteSelectedBtn) {
-    homeEls.deleteSelectedBtn.disabled = state.collectBusy || selectedCount === 0;
+    homeEls.deleteSelectedBtn.disabled = state.collectBusy || state.rewriteBusy || selectedCount === 0;
+  }
+  if (homeEls.rewriteSelectedBtn) {
+    homeEls.rewriteSelectedBtn.disabled = state.collectBusy || state.rewriteBusy || rewriteableSelectedCount === 0;
   }
   if (homeEls.refreshFilesBtn) {
-    homeEls.refreshFilesBtn.disabled = state.collectBusy;
+    homeEls.refreshFilesBtn.disabled = state.collectBusy || state.rewriteBusy;
   }
   if (homeEls.selectAllFilesBtn) {
-    homeEls.selectAllFilesBtn.disabled = state.collectBusy || selectablePaths.length === 0;
+    homeEls.selectAllFilesBtn.disabled = state.collectBusy || state.rewriteBusy || selectablePaths.length === 0;
     homeEls.selectAllFilesBtn.classList.toggle('is-active', allVisibleSelected);
   }
   if (homeEls.clearFileSelectionBtn) {
-    homeEls.clearFileSelectionBtn.disabled = state.collectBusy || selectedCount === 0;
+    homeEls.clearFileSelectionBtn.disabled = state.collectBusy || state.rewriteBusy || selectedCount === 0;
   }
   if (homeEls.openCurrentFolderBtn) {
-    homeEls.openCurrentFolderBtn.disabled = state.collectBusy;
+    homeEls.openCurrentFolderBtn.disabled = state.collectBusy || state.rewriteBusy;
+  }
+  if (homeEls.rewriteTopicInput) {
+    homeEls.rewriteTopicInput.disabled = state.collectBusy || state.rewriteBusy;
   }
 }
 
@@ -1995,6 +2129,16 @@ function selectAllVisibleFiles() {
   renderFiles(state.currentFiles);
 }
 
+function selectedRewriteableEntries() {
+  return Array.from(state.selectedFilePaths)
+    .map((path) => state.currentFileEntries.get(path))
+    .filter((entry) => entry?.path && entry.rewriteable)
+    .map((entry) => ({
+      path: entry.path,
+      name: entry.name || fileBaseName(entry.path),
+    }));
+}
+
 function shouldResetPreview(removedPaths) {
   if (!state.currentPreviewPath) return false;
   return removedPaths.some((path) => (
@@ -2025,6 +2169,57 @@ async function deleteEntries(paths, label = '') {
   toast(targets.length === 1 ? '已删除' : `已删除 ${data.deleted_count || targets.length} 项`);
 }
 
+async function rewriteEntry(path, name = '') {
+  await rewriteEntries([{ path, name: name || fileBaseName(path) }]);
+}
+
+async function rewriteSelectedEntries() {
+  const entries = selectedRewriteableEntries();
+  if (!entries.length) {
+    toast('请选择可仿写的笔记');
+    return;
+  }
+  await rewriteEntries(entries, { confirmBulk: true });
+}
+
+async function rewriteEntries(entries, { confirmBulk = false } = {}) {
+  const targets = (entries || [])
+    .map((entry) => ({
+      path: String(entry.path || '').trim(),
+      name: String(entry.name || '').trim(),
+    }))
+    .filter((entry) => entry.path);
+  if (!targets.length || state.rewriteBusy) return;
+  if (confirmBulk && targets.length > 1 && !window.confirm(`确定对已选 ${targets.length} 篇笔记执行 AI 仿写吗？`)) {
+    return;
+  }
+
+  const topic = (homeEls.rewriteTopicInput?.value || state.config?.rewrite?.topic || '创业沙龙').trim() || '创业沙龙';
+  state.rewriteBusy = true;
+  updateFileToolbarState();
+  if (state.currentFiles) renderFiles(state.currentFiles);
+
+  try {
+    toast(targets.length > 1 ? `正在创建 AI 仿写任务：${targets.length} 篇` : `正在创建 AI 仿写任务：${targets[0].name || fileBaseName(targets[0].path)}`);
+    const data = await api('/api/rewrite-job', {
+      method: 'POST',
+      body: JSON.stringify({ targets, topic }),
+    });
+    const jobId = data.job?.id || '';
+    await loadJobs();
+    if (jobId) {
+      await waitForJobCard(jobId);
+      highlightJobCard(jobId);
+      scrollToJobCard(jobId);
+    }
+    toast(jobId ? `AI 仿写任务已启动：${jobId}` : 'AI 仿写任务已启动');
+  } finally {
+    state.rewriteBusy = false;
+    updateFileToolbarState();
+    if (state.currentFiles) renderFiles(state.currentFiles);
+  }
+}
+
 function renderFiles(files) {
   if (!homeEls.fileList) return;
   setCurrentFiles(files);
@@ -2032,7 +2227,7 @@ function renderFiles(files) {
   renderFileListMeta(files);
   updateFileToolbarState();
 
-  const disabledAttr = state.collectBusy ? 'disabled' : '';
+  const disabledAttr = (state.collectBusy || state.rewriteBusy) ? 'disabled' : '';
   const entries = Array.isArray(files.entries) ? files.entries : [];
   const parentButton = files.cwd
     ? `<button class="file-parent-item" data-kind="directory" data-path="${escapeHtml(files.parent || '')}" type="button" ${disabledAttr}>
@@ -2066,6 +2261,7 @@ function renderFiles(files) {
         </span>
       </button>
       <div class="file-actions">
+        ${entry.rewriteable ? `<button class="btn btn-ghost file-action-btn file-rewrite-btn" data-action="rewrite" data-path="${escapeHtml(entry.path)}" data-name="${escapeHtml(entry.name)}" type="button" title="仿写" aria-label="仿写 ${escapeHtml(entry.name)}" ${disabledAttr}>${iconSvg('rewrite')}</button>` : ''}
         ${entry.type === 'file' && canPreviewEntry(entry) ? `<button class="btn btn-ghost file-action-btn" data-action="preview" data-path="${escapeHtml(entry.path)}" data-name="${escapeHtml(entry.name)}" type="button" title="预览" aria-label="预览 ${escapeHtml(entry.name)}" ${disabledAttr}>${iconSvg(fileIconName(entry))}</button>` : ''}
         <button class="btn btn-ghost file-action-btn" data-action="open-folder" data-path="${escapeHtml(entry.path)}" type="button" title="打开所在文件夹" aria-label="打开 ${escapeHtml(entry.name)} 所在文件夹" ${disabledAttr}>${iconSvg('open')}</button>
         <button class="btn btn-ghost file-action-btn file-delete-btn" data-action="delete" data-path="${escapeHtml(entry.path)}" data-name="${escapeHtml(entry.name)}" type="button" title="删除" aria-label="删除 ${escapeHtml(entry.name)}" ${disabledAttr}>${iconSvg('trash')}</button>
@@ -2156,6 +2352,10 @@ function renderFiles(files) {
         event.stopPropagation();
         const path = button.dataset.path || '';
         if (!path) return;
+        if (button.dataset.action === 'rewrite') {
+          await rewriteEntry(path, button.dataset.name || fileBaseName(path));
+          return;
+        }
         if (button.dataset.action === 'open-folder') {
           await openFolder(path);
           return;
@@ -2287,6 +2487,11 @@ function bindHomeEvents() {
   if (homeEls.deleteSelectedBtn) {
     homeEls.deleteSelectedBtn.addEventListener('click', () => {
       deleteEntries(Array.from(state.selectedFilePaths)).catch((error) => toast(error.message));
+    });
+  }
+  if (homeEls.rewriteSelectedBtn) {
+    homeEls.rewriteSelectedBtn.addEventListener('click', () => {
+      rewriteSelectedEntries().catch((error) => toast(error.message));
     });
   }
   if (homeEls.selectAllFilesBtn) {

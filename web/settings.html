@@ -26,11 +26,19 @@
 <body data-page="settings">
   <header class="topbar">
     <div class="topbar-inner">
-      <a class="brand" href="/">Spider_XHS</a>
+      <a class="brand" href="/" aria-label="Spider_XHS 采集台">
+        <span class="brand-mark">SX</span>
+        <span class="brand-copy">
+          <span class="brand-name">Spider_XHS</span>
+          <span class="brand-subtitle">Business Console</span>
+        </span>
+      </a>
       <div class="topbar-actions">
         <nav class="topnav" aria-label="主导航">
           <a class="nav-link" href="/">采集台</a>
+          <a class="nav-link" href="/#fileSection">AI仿写</a>
           <a class="nav-link active" href="/settings" aria-current="page">设置</a>
+          <a class="nav-link" href="#modelConfig">大模型配置</a>
         </nav>
         <div class="theme-switch" role="group" aria-label="主题模式">
           <button class="theme-option" data-theme-option="light" type="button">浅色</button>
@@ -42,40 +50,56 @@
   </header>
 
   <main class="page-shell">
-    <section class="surface hero reveal">
+    <section class="surface hero settings-hero reveal">
       <div class="hero-copy">
-        <p class="eyebrow eyebrow-muted">Spider_XHS Settings</p>
-        <h1>系统设置页</h1>
-        <p class="hero-lead">关键词、采集参数、筛选条件、登录和自动调度统一在这里维护。</p>
+        <p class="eyebrow eyebrow-muted">Strategy Center</p>
+        <h1>策略配置中心</h1>
+        <p class="hero-lead">统一管理关键词矩阵、采集口径、账号凭证与自动化节奏，确保任务输出稳定一致。</p>
+        <div class="settings-summary-grid" aria-label="设置模块">
+          <span><strong>01</strong> 采集策略</span>
+          <span><strong>02</strong> 内容筛选</span>
+          <span><strong>03</strong> 账号凭证</span>
+          <span><strong>04</strong> 大模型配置</span>
+          <span><strong>05</strong> 调度治理</span>
+        </div>
       </div>
       <div class="hero-actions">
-        <a class="btn btn-ghost" href="/">返回采集台</a>
-        <button id="saveConfigBtn" class="btn btn-primary" type="button">保存设置</button>
+        <a class="btn btn-secondary btn-icon-text" href="/">
+          <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m11 6-6 6 6 6"/><path d="M5 12h14"/></svg>
+          返回采集台
+        </a>
+        <button id="saveConfigBtn" class="btn btn-primary btn-icon-text" type="button">
+          <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5 9.2 17 19 7"/></svg>
+          保存设置
+        </button>
       </div>
     </section>
 
     <section class="grid two-columns">
-      <article class="surface reveal">
+      <article class="surface reveal priority-card">
         <div class="section-title">
           <span class="section-index">01</span>
           <div>
-            <h2>关键词</h2>
-            <p class="muted">一行一个，按顺序执行。</p>
+            <h2>关键词矩阵</h2>
+            <p class="muted">按业务优先级组织采集对象。</p>
           </div>
         </div>
         <div class="field">
           <span>关键词列表</span>
           <div id="keywordList" class="keyword-list" aria-live="polite"></div>
         </div>
-        <button id="addKeywordBtn" class="btn btn-secondary keyword-add-btn" type="button">新增关键词</button>
+        <button id="addKeywordBtn" class="btn btn-secondary btn-icon-text keyword-add-btn" type="button">
+          <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+          新增关键词
+        </button>
       </article>
 
       <article class="surface reveal">
         <div class="section-title">
           <span class="section-index">02</span>
           <div>
-            <h2>采集参数</h2>
-            <p class="muted">控制采集数量、点赞筛选和结果目录。</p>
+            <h2>采集口径</h2>
+            <p class="muted">数量、热度筛选与结果目录。</p>
           </div>
         </div>
         <div class="field-grid field-grid-2">
@@ -87,8 +111,14 @@
                 <div id="outputDirText" class="directory-path">加载中...</div>
               </div>
               <div class="button-pair directory-actions">
-                <button id="pickOutputDirBtn" class="btn btn-secondary" type="button">选择文件夹</button>
-                <button id="resetOutputDirBtn" class="btn btn-ghost" type="button">恢复默认</button>
+                <button id="pickOutputDirBtn" class="btn btn-secondary btn-icon-text" type="button">
+                  <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l1.7 2h9.3v7.8a2.2 2.2 0 0 1-2.2 2.2H5.7a2.2 2.2 0 0 1-2.2-2.2z"/><path d="M3.5 9.5V6.7c0-1.2 1-2.2 2.2-2.2h4.1l1.7 2h6.8c1.2 0 2.2 1 2.2 2.2v.8"/></svg>
+                  选择目录
+                </button>
+                <button id="resetOutputDirBtn" class="btn btn-ghost btn-icon-text" type="button">
+                  <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 8a7 7 0 0 0-12.2-2.4L5 7.5"/><path d="M5 4v3.5h3.5"/></svg>
+                  恢复默认
+                </button>
               </div>
             </div>
           </div>
@@ -109,38 +139,40 @@
       </article>
     </section>
 
-    <section class="surface reveal">
+    <section class="surface reveal settings-filter-card">
       <div class="section-title">
         <span class="section-index">03</span>
         <div>
-          <h2>筛选条件</h2>
+          <h2>内容筛选</h2>
           <p class="muted">排序、类型、时间、范围和位置。</p>
         </div>
       </div>
 
-      <div class="choice-section">
-        <h3>排序依据</h3>
-        <div id="sortTypeChoices" class="choice-grid"></div>
-      </div>
+      <div class="settings-filter-grid">
+        <div class="choice-section">
+          <h3>排序依据</h3>
+          <div id="sortTypeChoices" class="choice-grid"></div>
+        </div>
 
-      <div class="choice-section">
-        <h3>笔记类型</h3>
-        <div id="contentTypeChoices" class="choice-grid compact"></div>
-      </div>
+        <div class="choice-section">
+          <h3>笔记类型</h3>
+          <div id="contentTypeChoices" class="choice-grid compact"></div>
+        </div>
 
-      <div class="choice-section">
-        <h3>发布时间</h3>
-        <div id="publishTimeChoices" class="choice-grid"></div>
-      </div>
+        <div class="choice-section">
+          <h3>发布时间</h3>
+          <div id="publishTimeChoices" class="choice-grid"></div>
+        </div>
 
-      <div class="choice-section">
-        <h3>搜索范围</h3>
-        <div id="noteRangeChoices" class="choice-grid compact"></div>
-      </div>
+        <div class="choice-section">
+          <h3>搜索范围</h3>
+          <div id="noteRangeChoices" class="choice-grid compact"></div>
+        </div>
 
-      <div class="choice-section">
-        <h3>位置距离</h3>
-        <div id="posDistanceChoices" class="choice-grid compact"></div>
+        <div class="choice-section">
+          <h3>位置距离</h3>
+          <div id="posDistanceChoices" class="choice-grid compact"></div>
+        </div>
       </div>
     </section>
 
@@ -149,7 +181,7 @@
         <div class="section-title">
           <span class="section-index">04</span>
           <div>
-            <h2>账号与登录</h2>
+            <h2>账号凭证</h2>
             <p class="muted">采集依赖登录 Cookie。</p>
           </div>
         </div>
@@ -157,9 +189,18 @@
         <div id="cookieStatus" class="status-panel muted">正在读取配置...</div>
 
         <div class="button-pair">
-          <button id="openLoginBrowserBtn" class="btn btn-primary" type="button">打开浏览器登录</button>
-          <button id="openExternalLoginBrowserBtn" class="btn btn-ghost is-hidden" type="button">使用外部浏览器</button>
-          <button id="checkLoginBtn" class="btn btn-secondary" type="button">检查登录</button>
+          <button id="openLoginBrowserBtn" class="btn btn-primary btn-icon-text" type="button">
+            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12.5a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>
+            <span class="btn-label">打开浏览器登录</span>
+          </button>
+          <button id="openExternalLoginBrowserBtn" class="btn btn-ghost btn-icon-text is-hidden" type="button">
+            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h8v8"/><path d="m8 16 8-8"/><path d="M5 5h5"/><path d="M5 5v14h14v-5"/></svg>
+            使用外部浏览器
+          </button>
+          <button id="checkLoginBtn" class="btn btn-secondary btn-icon-text" type="button">
+            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5 9.2 17 19 7"/></svg>
+            检查登录
+          </button>
         </div>
       </article>
 
@@ -167,7 +208,7 @@
         <div class="section-title">
           <span class="section-index">05</span>
           <div>
-            <h2>拉取节奏</h2>
+            <h2>请求节奏</h2>
             <p class="muted">控制搜索和详情请求间隔。</p>
           </div>
         </div>
@@ -240,6 +281,66 @@
       <div id="weekdaySection" class="choice-section">
         <h3>每周执行日</h3>
         <div id="weekdayChoices" class="choice-grid compact"></div>
+      </div>
+    </section>
+
+    <section id="modelConfig" class="surface reveal model-config-section">
+      <div class="section-title">
+        <span class="section-index">07</span>
+        <div>
+          <h2>大模型配置</h2>
+          <p class="muted">阿里百炼 API Key、文本模型、图片模型与仿写生成。</p>
+        </div>
+      </div>
+
+      <div class="row spread switch-row">
+        <div>
+          <strong>采集完成后自动仿写</strong>
+          <p class="muted">关闭后仍可在单篇笔记上手动仿写。</p>
+        </div>
+        <label class="switch">
+          <input id="rewriteEnabledInput" type="checkbox">
+          <span></span>
+        </label>
+      </div>
+
+      <div id="rewriteApiStatus" class="status-panel muted">正在读取模型配置...</div>
+
+      <div class="field-grid field-grid-2">
+        <label class="field full-width">
+          <span>DashScope API Key</span>
+          <input id="rewriteApiKeyInput" type="password" autocomplete="off" placeholder="留空保留已保存密钥，粘贴新 Key 后覆盖">
+        </label>
+        <label class="field full-width">
+          <span>默认仿写主题</span>
+          <input id="rewriteTopicSettingsInput" type="text" value="创业沙龙" placeholder="创业沙龙">
+        </label>
+        <label class="field">
+          <span>文本模型</span>
+          <input id="rewriteTextModelInput" type="text" value="qwen-plus">
+        </label>
+        <label class="field">
+          <span>图片模型</span>
+          <input id="rewriteImageModelInput" type="text" value="wan2.6-image">
+        </label>
+        <label class="field">
+          <span>服务区域</span>
+          <select id="rewriteRegionInput">
+            <option value="cn-beijing">北京</option>
+            <option value="ap-southeast-1">新加坡</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="row spread switch-row">
+        <div>
+          <strong>同时调用图片模型</strong>
+          <p class="muted">关闭时只生成图片提示词。</p>
+        </div>
+        <label class="switch">
+          <input id="rewriteGenerateImagesInput" type="checkbox">
+          <span></span>
+        </label>
       </div>
     </section>
   </main>

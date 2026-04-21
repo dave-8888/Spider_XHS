@@ -24,6 +24,7 @@ from collector_service import (
     ConfigStore,
     DATA_ROOT,
     JobManager,
+    RewriteService,
     SimpleScheduler,
     create_output_directory,
     delete_output_entries,
@@ -544,6 +545,33 @@ def pick_output_folder(current_path: str = "") -> Dict[str, Any]:
     }
 
 
+def run_manual_rewrite(payload: Dict[str, Any]) -> Dict[str, Any]:
+    relative_path = str(payload.get("path") or "").strip()
+    if not relative_path:
+        raise ValueError("请选择要仿写的笔记")
+    config = config_store.load()
+    rewrite_config = dict(config.get("rewrite", {}) if isinstance(config.get("rewrite"), dict) else {})
+    topic = str(payload.get("topic") or rewrite_config.get("topic") or "创业沙龙").strip()
+    if topic:
+        rewrite_config["topic"] = topic
+    if "generate_images" in payload:
+        rewrite_config["generate_images"] = bool(payload.get("generate_images"))
+    service = RewriteService(resolve_output_root(config), rewrite_config)
+    return service.rewrite_note(relative_path, topic=topic)
+
+
+def run_manual_rewrite_job(payload: Dict[str, Any]) -> Dict[str, Any]:
+    raw_targets = payload.get("targets")
+    if raw_targets is None:
+        raw_targets = [{"path": payload.get("path"), "name": payload.get("name")}]
+    if not isinstance(raw_targets, list):
+        raise ValueError("仿写目标格式不正确")
+    config = config_store.load()
+    rewrite_config = config.get("rewrite", {}) if isinstance(config.get("rewrite"), dict) else {}
+    topic = str(payload.get("topic") or rewrite_config.get("topic") or "创业沙龙").strip() or "创业沙龙"
+    return job_manager.start_rewrite(raw_targets, topic=topic, config=config)
+
+
 class AppHandler(BaseHTTPRequestHandler):
     server_version = "SpiderXHSWeb/1.0"
 
@@ -612,6 +640,10 @@ class AppHandler(BaseHTTPRequestHandler):
                     config = config_store.load()
                 job = job_manager.start(source="manual", config=config)
                 json_response(self, {"success": True, "job": job})
+            elif path == "/api/rewrite-job":
+                json_response(self, {"success": True, "job": run_manual_rewrite_job(payload)})
+            elif path == "/api/rewrite":
+                json_response(self, {"success": True, "rewrite": run_manual_rewrite(payload)})
             elif path == "/api/login/check":
                 self._check_login(payload)
             elif path == "/api/login/browser/start":

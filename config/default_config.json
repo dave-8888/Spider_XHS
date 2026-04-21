@@ -25,6 +25,16 @@
   "storage": {
     "output_dir": ""
   },
+  "rewrite": {
+    "enabled": false,
+    "topic": "创业沙龙",
+    "api_key": "",
+    "text_model": "qwen-plus",
+    "image_model": "wan2.6-image",
+    "region": "cn-beijing",
+    "generate_image_prompts": true,
+    "generate_images": false
+  },
   "schedule": {
     "enabled": false,
     "cycle": "daily",
