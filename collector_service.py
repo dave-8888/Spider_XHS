@@ -1071,11 +1071,13 @@ class RewriteService:
             "要求：只学习结构、节奏、选题角度和视觉风格，不照抄原文，不复用原文连续 8 个字以上。"
             "如果 mode=batch，请给每篇参考笔记生成一篇不同风格的最终文案；如果 mode=single，只围绕 target_note_id 的套路生成一篇。"
             "每篇最终文案必须和 topic 一致，目标是引导用户参加或咨询该主题对应活动/项目。"
+            "图片提示词要求：image_prompt 必须使用中文撰写，不要输出英文句子或英文关键词；"
+            "可以保留数字比例，例如 3:4。提示词需包含画面主体、场景、构图、光线、风格和负面要求。"
             "输出必须是合法 JSON，不要使用 Markdown 代码块。JSON 结构为："
             "{\"analysis_report\":\"Markdown格式爆款分析报告\",\"articles\":[{\"source_note_id\":\"参考笔记ID\","
             "\"source_title\":\"参考标题\",\"strategy\":\"仿写策略\",\"title_options\":[\"标题1\",\"标题2\",\"标题3\"],"
             "\"body\":\"完整小红书正文，含自然转化引导\",\"hashtags\":[\"#话题#\"],"
-            "\"comment_cta\":\"评论区引导话术\",\"image_prompt\":\"阿里通义万相图片生成提示词\"}]}"
+            "\"comment_cta\":\"评论区引导话术\",\"image_prompt\":\"中文阿里通义万相图片生成提示词\"}]}"
             f"\n\n输入数据：{json.dumps(prompt, ensure_ascii=False)}"
         )
         response = requests.post(
@@ -1139,6 +1141,7 @@ class RewriteService:
             source_note = target_note if target_note and index == 0 else notes[index % len(notes)]
             item = raw_articles[index] if index < len(raw_articles) and isinstance(raw_articles[index], dict) else {}
             title_options = item.get("title_options") if isinstance(item.get("title_options"), list) else []
+            image_prompt = self._normalize_image_prompt(item.get("image_prompt"), source_note)
             normalized.append({
                 "source_note_id": str(item.get("source_note_id") or source_note.get("note_id") or ""),
                 "source_title": str(item.get("source_title") or source_note.get("title") or ""),
@@ -1152,9 +1155,29 @@ class RewriteService:
                     "#商业思维[话题]#",
                 ],
                 "comment_cta": str(item.get("comment_cta") or "想了解活动安排，可以评论“沙龙”。"),
-                "image_prompt": str(item.get("image_prompt") or self._fallback_image_prompt(source_note)),
+                "image_prompt": image_prompt,
             })
         return normalized
+
+    def _normalize_image_prompt(self, value: Any, note: Dict[str, Any]) -> str:
+        prompt = re.sub(r"\s+", " ", str(value or "").strip())
+        if not prompt:
+            return self._fallback_image_prompt(note)
+
+        # 文本模型偶尔会返回英文图片提示词；落盘和生成图片前统一兜底成中文。
+        chinese_count = len(re.findall(r"[\u3400-\u9fff]", prompt))
+        allowed_latin_tokens = {
+            token.lower()
+            for token in re.findall(r"[A-Za-z][A-Za-z0-9+-]*", self.topic)
+        }
+        extra_latin_tokens = [
+            token
+            for token in re.findall(r"[A-Za-z][A-Za-z0-9+-]*", prompt)
+            if token.lower() not in allowed_latin_tokens
+        ]
+        if chinese_count < 8 or extra_latin_tokens:
+            return self._fallback_image_prompt(note)
+        return prompt
 
     def _fallback_analysis(self, notes: List[Dict[str, Any]]) -> str:
         titles = "、".join(str(note.get("title") or "") for note in notes[:5])
@@ -1185,7 +1208,7 @@ class RewriteService:
         return (
             f"小红书创业主题封面图，主题为{self.topic}，真实线下创业交流沙龙场景，"
             "年轻创业者围坐讨论，白板、笔记本电脑、咖啡、暖色自然光，竖版 3:4，"
-            "画面干净、有真实感、适合小红书封面，不出现品牌 logo，不出现小红书界面。"
+            "画面干净、有真实感、适合小红书封面，不出现品牌标志，不出现小红书界面。"
         )
 
     def _write_result_files(self, output_dir: Path, result: Dict[str, Any]) -> None:
