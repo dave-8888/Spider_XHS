@@ -748,6 +748,7 @@ class ContentCollector:
             result["keywords"].append(keyword_result)
 
         result["finished_at"] = now_text()
+        clean_empty_batch_dirs(batch_dir, include_root=True)
         self._progress(progress, f"采集完成：保存 {result['saved_count']} 篇，失败 {result['failed_count']} 条")
         return result
 
@@ -1969,6 +1970,27 @@ def ensure_manageable_output_target(output_root: Path, target: Path) -> Path:
     return resolved
 
 
+def is_hidden_output_entry(path: Path) -> bool:
+    return path.name.startswith(".") or path.name in INTERNAL_DATA_FILES
+
+
+def has_visible_output_content(path: Path) -> bool:
+    if path.is_file():
+        return True
+    if not path.is_dir():
+        return False
+    try:
+        children = list(path.iterdir())
+    except OSError:
+        return False
+    for child in children:
+        if is_hidden_output_entry(child):
+            continue
+        if child.is_file() or (child.is_dir() and has_visible_output_content(child)):
+            return True
+    return False
+
+
 def list_output_files(output_root: Path, relative_path: str = "") -> Dict[str, Any]:
     ensure_data_dirs()
     output_root.mkdir(parents=True, exist_ok=True)
@@ -1979,7 +2001,9 @@ def list_output_files(output_root: Path, relative_path: str = "") -> Dict[str, A
         target = target.parent
     sortable_entries = []
     for child in target.iterdir():
-        if child.name.startswith(".") or child.name in INTERNAL_DATA_FILES:
+        if is_hidden_output_entry(child):
+            continue
+        if child.is_dir() and not has_visible_output_content(child):
             continue
         stat = child.stat()
         rewriteable = (
@@ -2111,9 +2135,23 @@ def read_output_text_file(output_root: Path, relative_path: str, limit: int = 30
     }
 
 
-def clean_empty_batch_dirs(output_root: Path) -> None:
+def clean_empty_batch_dirs(output_root: Path, include_root: bool = False) -> None:
     if not output_root.exists():
         return
-    for child in output_root.iterdir():
-        if child.is_dir() and not any(child.iterdir()):
-            shutil.rmtree(child, ignore_errors=True)
+    root = output_root.resolve()
+
+    def prune(path: Path) -> None:
+        try:
+            children = list(path.iterdir())
+        except OSError:
+            return
+        for child in children:
+            if child.is_dir() and not is_hidden_output_entry(child):
+                prune(child)
+        try:
+            if (include_root or path.resolve() != root) and not any(path.iterdir()):
+                path.rmdir()
+        except OSError:
+            return
+
+    prune(output_root)
