@@ -11,7 +11,8 @@
     "build:backend:arm64": "python3 scripts/build_backend.py arm64",
     "build:backend:x64": "python3 scripts/build_backend.py x64",
     "build:desktop": "node scripts/build_desktop.mjs",
-    "build:desktop:arm64": "SPIDER_XHS_DESKTOP_ARCH=arm64 node scripts/build_desktop.mjs"
+    "build:desktop:arm64": "SPIDER_XHS_DESKTOP_ARCH=arm64 node scripts/build_desktop.mjs",
+    "build:desktop:dir": "SPIDER_XHS_DESKTOP_ARCH=arm64 SPIDER_XHS_DESKTOP_TARGET=dir node scripts/build_desktop.mjs"
   },
   "dependencies": {
     "crypto-js": "^4.2.0",
@@ -24,6 +25,7 @@
   "build": {
     "appId": "com.spiderxhs.desktop",
     "productName": "Spider_XHS",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
     "directories": {
       "output": "dist"
     },
@@ -62,10 +64,26 @@
       "category": "public.app-category.utilities",
       "target": [
         {
-          "target": "dir",
+          "target": "dmg",
           "arch": [
-            "universal"
+            "arm64"
           ]
+        }
+      ]
+    },
+    "dmg": {
+      "title": "${productName}",
+      "contents": [
+        {
+          "x": 130,
+          "y": 150,
+          "type": "file"
+        },
+        {
+          "x": 410,
+          "y": 150,
+          "type": "link",
+          "path": "/Applications"
         }
       ]
     }

@@ -1,10 +1,10 @@
 import os
 from loguru import logger
 from dotenv import load_dotenv
-from runtime_paths import DATA_ROOT
+from runtime_paths import DATA_ROOT, PROJECT_ROOT
 
 def load_env():
-    load_dotenv()
+    load_dotenv(dotenv_path=PROJECT_ROOT / ".env")
     cookies_str = os.getenv('COOKIES')
     return cookies_str
 

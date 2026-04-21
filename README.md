@@ -215,6 +215,28 @@ datas/markdown_datas/<运行批次>/<关键词>/<笔记标题>/
 
 如果本地没有可用 Cookie，控制台会弹出独立 Chrome / Edge / Chromium 浏览器。你在浏览器里完成小红书登录后，系统会自动读取并保存 Cookie，页面不再展示 Cookie 输入框。
 
+### 📦 打包 macOS 桌面安装包
+
+当前桌面版默认打包为 Apple Silicon 专用 DMG 安装包：
+
+```bash
+npm run build:desktop
+```
+
+打包完成后会生成：
+
+```text
+dist/Spider_XHS-1.0.0-arm64.dmg
+```
+
+如果只想生成可调试的 `.app` 目录，可以运行：
+
+```bash
+npm run build:desktop:dir
+```
+
+默认构建不会做 Apple Developer ID 签名和公证。本机可直接安装运行；如果分发给其他 Mac，系统可能会显示安全提示，需要在“系统设置 → 隐私与安全性”中允许打开。
+
 ### 🐳 Docker 部署（可选）
 
 ```bash
