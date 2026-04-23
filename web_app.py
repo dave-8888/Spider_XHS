@@ -359,6 +359,8 @@ def read_body(handler: BaseHTTPRequestHandler) -> Dict[str, Any]:
 def safe_web_path(url_path: str) -> Path:
     if url_path == "/":
         target = WEB_ROOT / "index.html"
+    elif url_path in ["/rewrite", "/rewrite/"]:
+        target = WEB_ROOT / "rewrite.html"
     elif url_path in ["/settings", "/settings/"]:
         target = WEB_ROOT / "settings.html"
     else:

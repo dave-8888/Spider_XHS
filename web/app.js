@@ -68,7 +68,9 @@ const settingsEls = {
   weekdaySection: document.querySelector('#weekdaySection'),
   rewriteEnabledInput: document.querySelector('#rewriteEnabledInput'),
   rewriteApiKeyInput: document.querySelector('#rewriteApiKeyInput'),
+  rewriteApiKeyToggleBtn: document.querySelector('#rewriteApiKeyToggleBtn'),
   rewriteTopicSettingsInput: document.querySelector('#rewriteTopicSettingsInput'),
+  rewriteRequirementSummary: document.querySelector('#rewriteRequirementSummary'),
   rewriteTextModelInput: document.querySelector('#rewriteTextModelInput'),
   rewriteImageModelInput: document.querySelector('#rewriteImageModelInput'),
   rewriteRegionInput: document.querySelector('#rewriteRegionInput'),
@@ -116,6 +118,7 @@ const state = {
   currentJobs: [],
   collectBusy: false,
   rewriteBusy: false,
+  savedRewriteApiKey: '',
   collectOverlayState: {
     status: 'idle',
     title: '',
@@ -750,25 +753,48 @@ function applyLoginSummary(config) {
 function applyRewriteSummary(config) {
   if (!settingsEls.rewriteApiStatus) return;
   const rewrite = config.rewrite || {};
-  const topic = rewrite.topic || '创业沙龙';
+  const requirement = rewrite.topic || '创业沙龙';
   const source = rewrite.api_key_source ? ` · 来源：${rewrite.api_key_source}` : '';
   const preview = rewrite.api_key_preview ? ` · ${rewrite.api_key_preview}` : '';
   const textModel = rewrite.text_model || 'qwen-plus';
   const imageModel = rewrite.image_model || 'wan2.6-image';
   const message = rewrite.api_key_present
-    ? `模型配置可用${source}${preview} · ${textModel} / ${imageModel} · 默认主题：${topic}`
+    ? `模型配置可用${source}${preview} · ${textModel} / ${imageModel} · 默认要求：${truncateText(requirement, 36)}`
     : '未配置 DashScope API Key，仿写接口会等待模型密钥';
   settingsEls.rewriteApiStatus.textContent = message;
   settingsEls.rewriteApiStatus.className = `status-panel ${rewrite.api_key_present ? 'good' : 'muted'}`;
 }
 
-function applyRewriteApiKeyPlaceholder(rewrite) {
+function updateRewriteRequirementSummary() {
+  if (!settingsEls.rewriteRequirementSummary) return;
+  const requirement = (settingsEls.rewriteTopicSettingsInput?.value || '').trim() || '创业沙龙';
+  settingsEls.rewriteRequirementSummary.textContent = truncateText(requirement.replace(/\s+/g, ' '), 34);
+}
+
+function setRewriteApiKeyVisible(visible) {
+  const input = settingsEls.rewriteApiKeyInput;
+  const toggle = settingsEls.rewriteApiKeyToggleBtn;
+  if (!input) return;
+  const hasValue = Boolean(input.value);
+  const nextVisible = hasValue && visible;
+  input.type = nextVisible ? 'text' : 'password';
+  if (!toggle) return;
+  toggle.disabled = !hasValue;
+  toggle.classList.toggle('is-visible', nextVisible);
+  toggle.title = nextVisible ? '隐藏 API Key' : '显示 API Key';
+  toggle.setAttribute('aria-label', nextVisible ? '隐藏 DashScope API Key' : '显示 DashScope API Key');
+  toggle.setAttribute('aria-pressed', String(nextVisible));
+}
+
+function applyRewriteApiKeyField(rewrite) {
   if (!settingsEls.rewriteApiKeyInput) return;
-  const preview = rewrite.api_key_preview ? `（${rewrite.api_key_preview}）` : '';
-  settingsEls.rewriteApiKeyInput.value = '';
+  const apiKey = typeof rewrite.api_key === 'string' ? rewrite.api_key.trim() : '';
+  state.savedRewriteApiKey = apiKey;
+  settingsEls.rewriteApiKeyInput.value = apiKey;
   settingsEls.rewriteApiKeyInput.placeholder = rewrite.api_key_present
-    ? `已保存 DashScope API Key${preview}，留空保留，粘贴新 Key 后覆盖`
+    ? '已保存 DashScope API Key，可直接修改或粘贴新 Key 覆盖'
     : '粘贴 DashScope API Key 后保存';
+  setRewriteApiKeyVisible(false);
 }
 
 function applySettingsConfig(config) {
@@ -791,8 +817,9 @@ function applySettingsConfig(config) {
   settingsEls.runTimesInput.value = (schedule.run_times || ['09:00']).join(', ');
   state.settingsWeekdays = (schedule.weekdays || [1, 2, 3, 4, 5, 6, 7]).map(Number);
   if (settingsEls.rewriteEnabledInput) settingsEls.rewriteEnabledInput.checked = Boolean(rewrite.enabled);
-  applyRewriteApiKeyPlaceholder(rewrite);
+  applyRewriteApiKeyField(rewrite);
   if (settingsEls.rewriteTopicSettingsInput) settingsEls.rewriteTopicSettingsInput.value = rewrite.topic || '创业沙龙';
+  updateRewriteRequirementSummary();
   if (settingsEls.rewriteTextModelInput) settingsEls.rewriteTextModelInput.value = rewrite.text_model || 'qwen-plus';
   if (settingsEls.rewriteImageModelInput) settingsEls.rewriteImageModelInput.value = rewrite.image_model || 'wan2.6-image';
   if (settingsEls.rewriteRegionInput) settingsEls.rewriteRegionInput.value = rewrite.region || 'cn-beijing';
@@ -845,6 +872,8 @@ function readHomeDraft() {
 function readSettingsDraft() {
   const collectionDraft = readHomeDraft();
   const runTimes = readRunTimes();
+  const rewriteApiKeyValue = (settingsEls.rewriteApiKeyInput?.value || '').trim();
+  const rewriteApiKeyChanged = Boolean(rewriteApiKeyValue && rewriteApiKeyValue !== state.savedRewriteApiKey);
   return {
     keywords: collectionDraft.keywords,
     collect: {
@@ -866,7 +895,7 @@ function readSettingsDraft() {
     },
     rewrite: {
       enabled: Boolean(settingsEls.rewriteEnabledInput?.checked),
-      api_key: (settingsEls.rewriteApiKeyInput?.value || '').trim(),
+      api_key: rewriteApiKeyChanged ? rewriteApiKeyValue : '',
       topic: (settingsEls.rewriteTopicSettingsInput?.value || '创业沙龙').trim() || '创业沙龙',
       text_model: (settingsEls.rewriteTextModelInput?.value || 'qwen-plus').trim() || 'qwen-plus',
       image_model: (settingsEls.rewriteImageModelInput?.value || 'wan2.6-image').trim() || 'wan2.6-image',
@@ -921,7 +950,6 @@ function resetOutputFolder() {
 
 async function startCollect() {
   if (!homeEls.collectBtn || state.collectBusy) return;
-  const previousRoot = state.currentOutputRoot;
   setCollectOverlay({
     open: true,
     status: 'validating',
@@ -956,14 +984,6 @@ async function startCollect() {
     });
 
     await loadHomeConfig();
-    if (previousRoot !== state.currentOutputRoot) {
-      state.currentPath = '';
-      setPreviewState(defaultPreviewState({
-        meta: '目录已刷新。',
-      }));
-      await loadFiles('');
-    }
-
     await waitForJobCard(data.job.id);
     highlightJobCard(data.job.id);
     await loadJobs();
@@ -1174,19 +1194,87 @@ function truncateText(value, maxLength = 84) {
   return `${text.slice(0, maxLength - 1)}…`;
 }
 
-function latestJobLog(job) {
+const JOB_LOG_GROUPS = {
+  crawl: { label: '爬取日志' },
+  rewrite: { label: '仿写日志' },
+};
+
+function normalizeJobLogEntry(item, fallbackType = '') {
+  if (item && typeof item === 'object') {
+    const type = ['crawl', 'rewrite'].includes(item.type) ? item.type : fallbackType;
+    return {
+      time: String(item.time || ''),
+      message: String(item.message || ''),
+      type,
+    };
+  }
+  return {
+    time: '',
+    message: String(item || ''),
+    type: fallbackType,
+  };
+}
+
+function looksLikeRewriteLog(message) {
+  return /仿写|文本模型|配图|DashScope|DASHSCOPE|阿里百炼|图片任务|图片生成/.test(String(message || ''));
+}
+
+function jobLogGroups(job) {
+  const groups = { crawl: [], rewrite: [] };
+  const storedGroups = job.log_groups || job.logGroups;
+  if (storedGroups && typeof storedGroups === 'object') {
+    Object.keys(groups).forEach((key) => {
+      const entries = Array.isArray(storedGroups[key]) ? storedGroups[key] : [];
+      groups[key] = entries.map((item) => normalizeJobLogEntry(item, key));
+    });
+  }
+
+  if (!groups.crawl.length && !groups.rewrite.length) {
+    let rewriteActive = (job.type || 'collect') === 'rewrite';
+    const logs = Array.isArray(job.logs) ? job.logs : [];
+    logs.forEach((item) => {
+      const entry = normalizeJobLogEntry(item);
+      let type = ['crawl', 'rewrite'].includes(entry.type) ? entry.type : '';
+      if (!type) {
+        type = rewriteActive || looksLikeRewriteLog(entry.message) ? 'rewrite' : 'crawl';
+        entry.type = type;
+      }
+      if (type === 'rewrite') rewriteActive = true;
+      groups[type].push(entry);
+    });
+  }
+
+  const order = (job.type || 'collect') === 'rewrite'
+    ? ['rewrite', 'crawl']
+    : ['crawl', 'rewrite'];
+  return order
+    .map((key) => ({
+      id: key,
+      label: JOB_LOG_GROUPS[key]?.label || '运行日志',
+      logs: groups[key] || [],
+    }))
+    .filter((group) => group.logs.length);
+}
+
+function jobAllLogs(job) {
   const logs = Array.isArray(job.logs) ? job.logs : [];
+  if (logs.length) return logs.map((item) => normalizeJobLogEntry(item));
+  return jobLogGroups(job).flatMap((group) => group.logs);
+}
+
+function latestJobLog(job) {
+  const logs = jobAllLogs(job);
   return logs.length ? logs[logs.length - 1] : null;
 }
 
 function countJobLogIssues(job) {
-  const logs = Array.isArray(job.logs) ? job.logs : [];
+  const logs = jobAllLogs(job);
   return logs.filter((item) => /失败|错误|异常|error|exception/i.test(String(item.message || ''))).length;
 }
 
 function jobKeywords(summary = {}, job = {}) {
   if ((job.type || 'collect') === 'rewrite') {
-    const topic = summary.rewrite_topic || job.result?.topic || 'AI仿写';
+    const topic = summary.rewrite_topic || job.result?.topic || 'AI仿写要求';
     const names = Array.isArray(summary.target_names) ? summary.target_names.filter(Boolean) : [];
     if (!names.length) return topic;
     const shown = names.slice(0, 2).join('、');
@@ -1201,7 +1289,7 @@ function jobKeywords(summary = {}, job = {}) {
 function jobScopeText(summary = {}, job = {}) {
   if ((job.type || 'collect') === 'rewrite') {
     const count = summary.target_count || job.result?.target_count || 0;
-    const topic = summary.rewrite_topic || job.result?.topic || '默认主题';
+    const topic = summary.rewrite_topic || job.result?.topic || '默认要求';
     return `${topic} · ${count || '—'} 篇`;
   }
   const parts = [
@@ -1231,7 +1319,7 @@ function jobProgress(job) {
     return { value: 100, label: jobStatusMeta(status).label };
   }
 
-  const logs = Array.isArray(job.logs) ? job.logs : [];
+  const logs = jobAllLogs(job);
   for (let index = logs.length - 1; index >= 0; index -= 1) {
     const message = String(logs[index].message || '');
     const match = message.match(/拉取详情.+?(\d+)\s*\/\s*(\d+)/);
@@ -1387,44 +1475,44 @@ function renderJobFilters(jobs) {
 
 function saveJobLogOpenState() {
   if (!homeEls.jobList) return;
-  homeEls.jobList.querySelectorAll('.job-detail[data-job-id]').forEach((element) => {
-    state.jobLogOpenState.set(element.dataset.jobId, element.open);
+  homeEls.jobList.querySelectorAll('.job-detail[data-log-key]').forEach((element) => {
+    state.jobLogOpenState.set(element.dataset.logKey, element.open);
   });
 }
 
 function saveJobLogScrollState() {
   if (!homeEls.jobList) return;
-  homeEls.jobList.querySelectorAll('.job-log[data-job-id]').forEach((element) => {
-    const jobId = element.dataset.jobId;
-    state.jobLogScrollState.set(jobId, {
+  homeEls.jobList.querySelectorAll('.job-log[data-log-key]').forEach((element) => {
+    const logKey = element.dataset.logKey;
+    state.jobLogScrollState.set(logKey, {
       stickToBottom: isNearBottom(element),
       offsetFromBottom: Math.max(0, element.scrollHeight - element.clientHeight - element.scrollTop),
     });
   });
 }
 
-function pruneJobUiState(visibleJobIds) {
-  Array.from(state.jobLogScrollState.keys()).forEach((jobId) => {
-    if (!visibleJobIds.has(jobId)) {
-      state.jobLogScrollState.delete(jobId);
+function pruneJobUiState(visibleLogKeys) {
+  Array.from(state.jobLogScrollState.keys()).forEach((logKey) => {
+    if (!visibleLogKeys.has(logKey)) {
+      state.jobLogScrollState.delete(logKey);
     }
   });
-  Array.from(state.jobLogOpenState.keys()).forEach((jobId) => {
-    if (!visibleJobIds.has(jobId)) {
-      state.jobLogOpenState.delete(jobId);
+  Array.from(state.jobLogOpenState.keys()).forEach((logKey) => {
+    if (!visibleLogKeys.has(logKey)) {
+      state.jobLogOpenState.delete(logKey);
     }
   });
 }
 
 function bindJobLogAutoScroll() {
   if (!homeEls.jobList) return;
-  const visibleJobIds = new Set();
+  const visibleLogKeys = new Set();
 
-  homeEls.jobList.querySelectorAll('.job-log[data-job-id]').forEach((element) => {
-    const jobId = element.dataset.jobId;
-    const previous = state.jobLogScrollState.get(jobId);
+  homeEls.jobList.querySelectorAll('.job-log[data-log-key]').forEach((element) => {
+    const logKey = element.dataset.logKey;
+    const previous = state.jobLogScrollState.get(logKey);
     const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
-    visibleJobIds.add(jobId);
+    visibleLogKeys.add(logKey);
 
     if (!previous || previous.stickToBottom) {
       element.scrollTop = element.scrollHeight;
@@ -1433,22 +1521,22 @@ function bindJobLogAutoScroll() {
     }
 
     element.addEventListener('scroll', () => {
-      state.jobLogScrollState.set(jobId, {
+      state.jobLogScrollState.set(logKey, {
         stickToBottom: isNearBottom(element),
         offsetFromBottom: Math.max(0, element.scrollHeight - element.clientHeight - element.scrollTop),
       });
     }, { passive: true });
   });
 
-  homeEls.jobList.querySelectorAll('.job-detail[data-job-id]').forEach((element) => {
-    const jobId = element.dataset.jobId;
-    visibleJobIds.add(jobId);
+  homeEls.jobList.querySelectorAll('.job-detail[data-log-key]').forEach((element) => {
+    const logKey = element.dataset.logKey;
+    visibleLogKeys.add(logKey);
     element.addEventListener('toggle', () => {
-      state.jobLogOpenState.set(jobId, element.open);
+      state.jobLogOpenState.set(logKey, element.open);
     });
   });
 
-  pruneJobUiState(visibleJobIds);
+  pruneJobUiState(visibleLogKeys);
 }
 
 function renderJobEmptyState(message) {
@@ -1483,27 +1571,30 @@ function renderJobs(jobs) {
   homeEls.jobList.innerHTML = visibleJobs.map((job) => {
     const meta = jobStatusMeta(job.status);
     const summary = job.summary || {};
-    const logs = Array.isArray(job.logs) ? job.logs : [];
-    const logText = logs.map((item) => `[${item.time}] ${item.message}`).join('\n');
+    const logGroups = jobLogGroups(job);
     const progress = jobProgress(job);
     const highlight = job.id === state.highlightedJobId ? ' job-card-highlight' : '';
-    const storedOpen = state.jobLogOpenState.get(job.id);
-    const shouldOpen = storedOpen !== undefined ? storedOpen : (job.status === 'running' || job.id === state.highlightedJobId);
     const metricHtml = jobMetricItems(job).map((item) => `
       <div class="job-metric">
         <span>${escapeHtml(item.label)}</span>
         <strong>${escapeHtml(item.value)}</strong>
       </div>
     `).join('');
-    const detailHtml = logs.length ? `
-      <details class="job-detail" data-job-id="${escapeHtml(job.id)}"${shouldOpen ? ' open' : ''}>
-        <summary>
-          <span>运行日志</span>
-          <strong>${escapeHtml(logs.length)} 条</strong>
-        </summary>
-        <pre class="job-log" data-job-id="${escapeHtml(job.id)}">${escapeHtml(logText)}</pre>
-      </details>
-    ` : '';
+    const detailHtml = logGroups.map((group) => {
+      const logKey = `${job.id}:${group.id}`;
+      const storedOpen = state.jobLogOpenState.get(logKey);
+      const shouldOpen = storedOpen !== undefined ? storedOpen : (job.status === 'running' || job.id === state.highlightedJobId);
+      const logText = group.logs.map((item) => `${item.time ? `[${item.time}] ` : ''}${item.message}`).join('\n');
+      return `
+        <details class="job-detail" data-job-id="${escapeHtml(job.id)}" data-log-key="${escapeHtml(logKey)}"${shouldOpen ? ' open' : ''}>
+          <summary>
+            <span>${escapeHtml(group.label)}</span>
+            <strong>${escapeHtml(group.logs.length)} 条</strong>
+          </summary>
+          <pre class="job-log" data-job-id="${escapeHtml(job.id)}" data-log-key="${escapeHtml(logKey)}">${escapeHtml(logText)}</pre>
+        </details>
+      `;
+    }).join('');
 
     return `
       <article class="job-card job-status-${escapeHtml(meta.tone)}${highlight}" data-job-card-id="${escapeHtml(job.id)}">
@@ -2206,8 +2297,10 @@ async function rewriteEntries(entries, { confirmBulk = false } = {}) {
       body: JSON.stringify({ targets, topic }),
     });
     const jobId = data.job?.id || '';
-    await loadJobs();
-    if (jobId) {
+    if (homeEls.jobList) {
+      await loadJobs();
+    }
+    if (jobId && homeEls.jobList) {
       await waitForJobCard(jobId);
       highlightJobCard(jobId);
       scrollToJobCard(jobId);
@@ -2541,6 +2634,19 @@ function bindSettingsEvents() {
       saveSettings().catch((error) => toast(error.message));
     });
   }
+  if (settingsEls.rewriteApiKeyToggleBtn) {
+    settingsEls.rewriteApiKeyToggleBtn.addEventListener('click', () => {
+      setRewriteApiKeyVisible(settingsEls.rewriteApiKeyInput?.type !== 'text');
+    });
+  }
+  if (settingsEls.rewriteApiKeyInput) {
+    settingsEls.rewriteApiKeyInput.addEventListener('input', () => {
+      setRewriteApiKeyVisible(settingsEls.rewriteApiKeyInput.type === 'text');
+    });
+  }
+  if (settingsEls.rewriteTopicSettingsInput) {
+    settingsEls.rewriteTopicSettingsInput.addEventListener('input', updateRewriteRequirementSummary);
+  }
   if (settingsEls.checkLoginBtn) {
     settingsEls.checkLoginBtn.addEventListener('click', () => {
       checkLogin().catch((error) => toast(error.message));
@@ -2564,12 +2670,17 @@ function bindSettingsEvents() {
 async function bootHome() {
   bindHomeEvents();
   await loadHomeConfig();
-  setPreviewState(defaultPreviewState());
   await loadJobs();
-  await loadFiles('');
   state.jobPoller = window.setInterval(() => {
     loadJobs().catch(() => {});
   }, 5000);
+}
+
+async function bootRewrite() {
+  bindHomeEvents();
+  await loadHomeConfig();
+  setPreviewState(defaultPreviewState());
+  await loadFiles('');
 }
 
 async function bootSettings() {
@@ -2590,6 +2701,10 @@ async function boot() {
   bindThemeEvents();
   if (page === 'settings') {
     await bootSettings();
+    return;
+  }
+  if (page === 'rewrite') {
+    await bootRewrite();
     return;
   }
   await bootHome();

@@ -160,24 +160,40 @@ pid_file.write_text(f"{process.pid}\n", encoding="utf-8")
 PY
 }
 
+refresh_pid_file_from_port() {
+  local pid
+
+  command -v lsof >/dev/null 2>&1 || return 0
+
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    if is_our_process "$pid"; then
+      printf '%s\n' "$pid" > "$PID_FILE"
+      return 0
+    fi
+  done < <(lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)
+}
+
 wait_until_ready() {
   local python_bin="$1"
   local pid="$2"
   local attempt=0
 
   while (( attempt < 40 )); do
+    if command -v curl >/dev/null 2>&1; then
+      if curl -fsS "http://$HOST:$PORT/api/health" >/dev/null 2>&1; then
+        refresh_pid_file_from_port
+        return 0
+      fi
+    elif python_healthcheck "$python_bin"; then
+      refresh_pid_file_from_port
+      return 0
+    fi
+
     if ! kill -0 "$pid" 2>/dev/null; then
       echo "Spider_XHS failed to start. See log: $LOG_FILE" >&2
       tail -n 40 "$LOG_FILE" 2>/dev/null || true
       exit 1
-    fi
-
-    if command -v curl >/dev/null 2>&1; then
-      if curl -fsS "http://$HOST:$PORT/api/health" >/dev/null 2>&1; then
-        return 0
-      fi
-    elif python_healthcheck "$python_bin"; then
-      return 0
     fi
 
     sleep 0.5

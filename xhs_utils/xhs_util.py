@@ -9,8 +9,20 @@ apply_node_runtime_env()
 import execjs
 from xhs_utils.cookie_util import trans_cookies
 
-js = execjs.compile(resolve_static_path('xhs_main_260411.js').read_text(encoding='utf-8'), cwd=str(RESOURCE_ROOT))
-xray_js = execjs.compile(resolve_static_path('xhs_xray.js').read_text(encoding='utf-8'), cwd=str(RESOURCE_ROOT))
+
+def _node_runtime():
+    try:
+        return execjs.get("Node")
+    except Exception as exc:
+        raise RuntimeError(
+            "未找到可用的 Node.js 运行时，无法生成小红书请求签名。"
+            "请安装 Node.js，或运行 npm run prepare:node-runtime 准备项目内置 Node。"
+        ) from exc
+
+
+_execjs_runtime = _node_runtime()
+js = _execjs_runtime.compile(resolve_static_path('xhs_main_260411.js').read_text(encoding='utf-8'), cwd=str(RESOURCE_ROOT))
+xray_js = _execjs_runtime.compile(resolve_static_path('xhs_xray.js').read_text(encoding='utf-8'), cwd=str(RESOURCE_ROOT))
 
 def generate_x_b3_traceid(len=16):
     x_b3_traceid = ""

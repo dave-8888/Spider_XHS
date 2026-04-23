@@ -527,6 +527,119 @@ select {
   padding: 0 12px;
 }
 
+.secret-input-wrap {
+  position: relative;
+}
+
+.secret-input-wrap input {
+  padding-right: 46px;
+}
+
+.secret-toggle-btn {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-faint);
+  background: transparent;
+  transform: translateY(-50%);
+  transition: color 0.18s ease, background 0.18s ease, opacity 0.18s ease;
+}
+
+.secret-toggle-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--panel-muted-bg);
+}
+
+.secret-toggle-btn:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+.secret-toggle-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.secret-toggle-btn.is-visible {
+  color: var(--accent);
+}
+
+.secret-toggle-icon-hide,
+.secret-toggle-btn.is-visible .secret-toggle-icon-show {
+  display: none;
+}
+
+.secret-toggle-btn.is-visible .secret-toggle-icon-hide {
+  display: block;
+}
+
+.collapsible-field {
+  display: block;
+}
+
+.collapsible-field summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-md);
+  color: var(--text-soft);
+  background: var(--field-bg);
+  cursor: pointer;
+  list-style: none;
+}
+
+.collapsible-field summary::-webkit-details-marker {
+  display: none;
+}
+
+.collapsible-field summary::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-right: 1.8px solid currentColor;
+  border-bottom: 1.8px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.18s ease;
+}
+
+.collapsible-field[open] summary::before {
+  transform: rotate(45deg);
+}
+
+.collapsible-field summary > span {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.collapsible-field summary > strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.collapsible-field textarea {
+  margin-top: 10px;
+  min-height: 128px;
+}
+
 .inline-field input {
   width: min(280px, 32vw);
   min-width: 150px;
@@ -1076,9 +1189,13 @@ select:focus {
   align-items: center;
 }
 
-.job-section-title > div {
+.job-title-copy {
   min-width: 0;
   flex: 1;
+}
+
+.job-title-actions {
+  flex: 0 0 auto;
 }
 
 .job-refresh-btn {
@@ -1439,6 +1556,10 @@ select:focus {
 .job-detail {
   border-top: 1px solid var(--line-soft);
   padding-top: 10px;
+}
+
+.job-detail + .job-detail {
+  margin-top: 10px;
 }
 
 .job-detail summary {

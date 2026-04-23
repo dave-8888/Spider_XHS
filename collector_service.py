@@ -39,6 +39,19 @@ INTERNAL_DATA_FILES = {
     "scheduler_state.json",
     "login_browser_profile",
 }
+JOB_LOG_TYPES = {"crawl", "rewrite"}
+REWRITE_LOG_MARKERS = (
+    "仿写",
+    "文本模型",
+    "配图",
+    "DashScope",
+    "DASHSCOPE",
+    "阿里百炼",
+    "图片任务",
+    "图片生成",
+)
+DEFAULT_REWRITE_REQUIREMENTS = "创业沙龙"
+MAX_REWRITE_REQUIREMENTS_LENGTH = 2000
 
 SORT_LABELS = {
     0: "综合",
@@ -220,6 +233,19 @@ def redact_secret(value: str) -> str:
     if len(text) <= 12:
         return "已配置"
     return f"{text[:6]}...{text[-4:]}"
+
+
+def normalize_rewrite_requirements(value: Any, max_len: int = MAX_REWRITE_REQUIREMENTS_LENGTH) -> str:
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text[:max_len].strip() or DEFAULT_REWRITE_REQUIREMENTS
+
+
+def rewrite_requirements_label(value: Any, max_len: int = 48) -> str:
+    text = normalize_rewrite_requirements(value)
+    first_line = re.split(r"[\n。！？!?；;]", text, maxsplit=1)[0].strip()
+    label = first_line or DEFAULT_REWRITE_REQUIREMENTS
+    return label[:max_len].strip() or DEFAULT_REWRITE_REQUIREMENTS
 
 
 def pick_extension(url: str, content_type: str, default_ext: str) -> str:
@@ -442,7 +468,7 @@ def summarize_config(config: Dict[str, Any]) -> Dict[str, Any]:
         "pos_distance": POS_DISTANCE_LABELS.get(to_int(filters.get("pos_distance"), 0), "未知"),
         "schedule_enabled": bool(schedule.get("enabled")),
         "rewrite_enabled": bool(config.get("rewrite", {}).get("enabled")),
-        "rewrite_topic": config.get("rewrite", {}).get("topic") or "创业沙龙",
+        "rewrite_topic": rewrite_requirements_label(config.get("rewrite", {}).get("topic")),
         "output_root": str(resolve_output_root(config)),
     }
 
@@ -480,7 +506,7 @@ class ConfigStore:
             },
             "rewrite": {
                 "enabled": False,
-                "topic": "创业沙龙",
+                "topic": DEFAULT_REWRITE_REQUIREMENTS,
                 "api_key": "",
                 "text_model": "qwen-plus",
                 "image_model": "wan2.6-image",
@@ -558,7 +584,7 @@ class ConfigStore:
         env_api_key = os.getenv("DASHSCOPE_API_KEY", "").strip()
         api_key = stored_api_key or env_api_key
         public_rewrite = public_config.setdefault("rewrite", {})
-        public_rewrite["api_key"] = ""
+        public_rewrite["api_key"] = api_key
         public_rewrite["api_key_present"] = bool(api_key)
         public_rewrite["api_key_preview"] = redact_secret(api_key)
         public_rewrite["api_key_source"] = "配置文件" if stored_api_key else ("环境变量" if env_api_key else "")
@@ -613,7 +639,7 @@ class ConfigStore:
 
         rewrite = sanitized.setdefault("rewrite", {})
         rewrite["enabled"] = bool(rewrite.get("enabled"))
-        rewrite["topic"] = str(rewrite.get("topic") or "创业沙龙").strip()[:80] or "创业沙龙"
+        rewrite["topic"] = normalize_rewrite_requirements(rewrite.get("topic"))
         rewrite["api_key"] = str(rewrite.get("api_key") or "").strip().strip("'").strip('"')[:300]
         rewrite["text_model"] = str(rewrite.get("text_model") or "qwen-plus").strip()[:80] or "qwen-plus"
         rewrite["image_model"] = str(rewrite.get("image_model") or "wan2.6-image").strip()[:80] or "wan2.6-image"
@@ -818,7 +844,7 @@ class RewriteService:
     def __init__(self, output_root: Path, config: Optional[Dict[str, Any]] = None) -> None:
         self.output_root = output_root.resolve()
         self.config = config or {}
-        self.topic = str(self.config.get("topic") or "创业沙龙").strip() or "创业沙龙"
+        self.topic = normalize_rewrite_requirements(self.config.get("topic"))
         self.text_model = str(self.config.get("text_model") or "qwen-plus").strip() or "qwen-plus"
         self.image_model = str(self.config.get("image_model") or "wan2.6-image").strip() or "wan2.6-image"
         self.region = str(self.config.get("region") or "cn-beijing").strip() or "cn-beijing"
@@ -844,16 +870,19 @@ class RewriteService:
         progress: Optional[Callable[[str], None]] = None,
     ) -> Dict[str, Any]:
         if topic:
-            self.topic = str(topic).strip()[:80] or self.topic
+            self.topic = normalize_rewrite_requirements(topic)
         note_folder = self._resolve_note_folder(relative_path)
         target_note = self._load_note_folder(note_folder)
         peers = self._peer_notes(note_folder)
         notes = [target_note] + [note for note in peers if note.get("note_id") != target_note.get("note_id")]
         target_dir = available_child_path(
             note_folder,
-            f"AI仿写_{safe_filename(self.topic, fallback='topic', max_len=28)}_{batch_name()}",
+            f"AI仿写_{safe_filename(self.topic_label(), fallback='requirements', max_len=28)}_{batch_name()}",
         )
         return self.generate(notes[:10], target_dir, mode="single", target_note=target_note, progress=progress)
+
+    def topic_label(self, max_len: int = 48) -> str:
+        return rewrite_requirements_label(self.topic, max_len=max_len)
 
     def generate(
         self,
@@ -967,7 +996,7 @@ class RewriteService:
             batch_dir = first_folder.parent.parent if len(first_folder.parents) >= 2 else first_folder.parent
         return available_child_path(
             batch_dir,
-            f"AI仿写_{safe_filename(self.topic, fallback='topic', max_len=28)}_{batch_name()}",
+            f"AI仿写_{safe_filename(self.topic_label(), fallback='requirements', max_len=28)}_{batch_name()}",
         )
 
     def _resolve_note_folder(self, relative_path: str) -> Path:
@@ -1060,17 +1089,18 @@ class RewriteService:
             })
         article_count = 1 if mode == "single" else min(10, len(request_notes))
         prompt = {
-            "topic": self.topic,
+            "topic": self.topic_label(),
+            "rewrite_requirements": self.topic,
             "mode": mode,
             "article_count": article_count,
             "target_note_id": target_note.get("note_id") if target_note else "",
             "notes": request_notes,
         }
         user_prompt = (
-            "请基于以下小红书创业类爆款样本做爆款拆解，并围绕 topic 生成仿写文案。"
+            "请基于以下小红书创业类爆款样本做爆款拆解，并根据 rewrite_requirements 生成仿写文案。"
             "要求：只学习结构、节奏、选题角度和视觉风格，不照抄原文，不复用原文连续 8 个字以上。"
             "如果 mode=batch，请给每篇参考笔记生成一篇不同风格的最终文案；如果 mode=single，只围绕 target_note_id 的套路生成一篇。"
-            "每篇最终文案必须和 topic 一致，目标是引导用户参加或咨询该主题对应活动/项目。"
+            "每篇最终文案必须符合 rewrite_requirements；如果要求里包含目标人群、风格、禁用表达、转化目标或主题，请全部遵守。"
             "图片提示词要求：image_prompt 必须使用中文撰写，不要输出英文句子或英文关键词；"
             "可以保留数字比例，例如 3:4。提示词需包含画面主体、场景、构图、光线、风格和负面要求。"
             "输出必须是合法 JSON，不要使用 Markdown 代码块。JSON 结构为："
@@ -1187,16 +1217,18 @@ class RewriteService:
         )
 
     def _fallback_titles(self, note: Dict[str, Any]) -> List[str]:
+        label = self.topic_label()
         return [
-            f"想创业的人，真的该来一次{self.topic}",
-            f"我建议你创业前先参加一次{self.topic}",
-            f"别一个人硬扛，来{self.topic}聊聊",
+            f"想创业的人，真的该来一次{label}",
+            f"我建议你创业前先参加一次{label}",
+            f"别一个人硬扛，来{label}聊聊",
         ]
 
     def _fallback_body(self, note: Dict[str, Any]) -> str:
+        label = self.topic_label()
         return (
             f"最近越来越感觉，创业最难的不是努力，而是没人帮你拆清楚方向。\n\n"
-            f"所以这次我们准备了一场「{self.topic}」，不讲虚的，主要聊三个问题：\n"
+            f"所以这次我们准备了一场「{label}」，不讲虚的，主要聊三个问题：\n"
             "1. 你的项目到底适不适合继续做\n"
             "2. 普通人怎么找到第一批用户和资源\n"
             "3. 怎么避开那些很贵的试错\n\n"
@@ -1205,19 +1237,21 @@ class RewriteService:
         )
 
     def _fallback_image_prompt(self, note: Dict[str, Any]) -> str:
+        label = self.topic_label()
         return (
-            f"小红书创业主题封面图，主题为{self.topic}，真实线下创业交流沙龙场景，"
+            f"小红书创业主题封面图，主题为{label}，真实线下创业交流沙龙场景，"
             "年轻创业者围坐讨论，白板、笔记本电脑、咖啡、暖色自然光，竖版 3:4，"
             "画面干净、有真实感、适合小红书封面，不出现品牌标志，不出现小红书界面。"
         )
 
     def _write_result_files(self, output_dir: Path, result: Dict[str, Any]) -> None:
+        label = self.topic_label()
         (output_dir / "爆款分析报告.md").write_text(
-            f"# {self.topic} 爆款分析报告\n\n{result['analysis_report'].strip()}\n",
+            f"# {label} 爆款分析报告\n\n{result['analysis_report'].strip()}\n",
             encoding="utf-8",
         )
-        article_lines = [f"# {self.topic} 仿写文案", ""]
-        prompt_lines = [f"# {self.topic} 图片提示词", ""]
+        article_lines = [f"# {label} 仿写文案", ""]
+        prompt_lines = [f"# {label} 图片提示词", ""]
         for index, article in enumerate(result.get("articles") or [], start=1):
             article_lines.extend([
                 f"## {index:02d}. {article.get('source_title') or '参考笔记'}",
@@ -1268,13 +1302,13 @@ class RewriteService:
         source_notes = [target_note] if target_note else notes
         source_notes = [note for note in source_notes if note]
         lines = [
-            f"# {self.topic} 仿写日志",
+            f"# {self.topic_label()} 仿写日志",
             "",
             "## 运行信息",
             "",
             f"- 开始时间：{result.get('started_at') or ''}",
             f"- 结束时间：{result.get('finished_at') or ''}",
-            f"- 仿写主题：{self.topic}",
+            f"- 仿写要求：{self.topic}",
             f"- 生成模式：{result.get('mode') or ''}",
             f"- 文本模型：{self.text_model}",
             f"- 图片模型：{self.image_model}",
@@ -1465,6 +1499,7 @@ class JobManager:
                 "summary": summarize_config(config_snapshot),
                 "progress": {"value": 3, "label": "等待采集启动", "phase": "starting"},
                 "logs": [],
+                "log_groups": {"crawl": [], "rewrite": []},
                 "result": None,
                 "error": None,
             }
@@ -1484,14 +1519,15 @@ class JobManager:
     ) -> Dict[str, Any]:
         normalized_targets = self._normalize_rewrite_targets(targets)
         config_snapshot = deepcopy(config or self.config_store.load())
-        topic_text = str(topic or config_snapshot.get("rewrite", {}).get("topic") or "创业沙龙").strip()[:80] or "创业沙龙"
+        topic_text = normalize_rewrite_requirements(topic or config_snapshot.get("rewrite", {}).get("topic"))
+        topic_label = rewrite_requirements_label(topic_text)
         config_snapshot.setdefault("rewrite", {})["topic"] = topic_text
         target_names = [target.get("name") or Path(target.get("path", "")).name for target in normalized_targets]
         summary = summarize_config(config_snapshot)
         summary.update({
             "target_count": len(normalized_targets),
             "target_names": target_names[:5],
-            "rewrite_topic": topic_text,
+            "rewrite_topic": topic_label,
         })
 
         with self.lock:
@@ -1515,6 +1551,7 @@ class JobManager:
                     "total": len(normalized_targets),
                 },
                 "logs": [],
+                "log_groups": {"crawl": [], "rewrite": []},
                 "result": None,
                 "error": None,
             }
@@ -1534,7 +1571,7 @@ class JobManager:
         with self.lock:
             jobs = deepcopy(self.jobs)
         for job in jobs:
-            job.setdefault("type", "collect")
+            self._prepare_job_for_response(job)
         return jobs
 
     def has_running(self) -> bool:
@@ -1542,12 +1579,12 @@ class JobManager:
             return self._running_job_unlocked() is not None
 
     def _run_job(self, job_id: str, config: Dict[str, Any]) -> None:
-        def progress(message: str) -> None:
+        def progress(message: str, log_type: str = "crawl") -> None:
             with self.lock:
                 job = self._find_job_unlocked(job_id)
                 if not job:
                     return
-                self._append_job_log_unlocked(job, message)
+                self._append_job_log_unlocked(job, message, log_type)
                 self._update_collect_progress_unlocked(job, message)
                 self._persist_unlocked()
 
@@ -1556,10 +1593,14 @@ class JobManager:
             rewrite_config = config.get("rewrite", {}) if isinstance(config.get("rewrite"), dict) else {}
             if rewrite_config.get("enabled") and result.get("saved_count"):
                 try:
-                    progress("开始自动生成仿写文案")
+                    progress("开始自动生成仿写文案", "rewrite")
+
+                    def rewrite_progress(message: str) -> None:
+                        progress(message, "rewrite")
+
                     rewrite_result = RewriteService(resolve_output_root(config), rewrite_config).rewrite_from_collection(
                         result,
-                        progress=progress,
+                        progress=rewrite_progress,
                     )
                     if rewrite_result:
                         result["rewrite"] = {
@@ -1574,7 +1615,7 @@ class JobManager:
                         }
                 except Exception as exc:
                     result["rewrite_error"] = str(exc)
-                    progress(f"自动仿写失败：{exc}")
+                    progress(f"自动仿写失败：{exc}", "rewrite")
                     logger.exception(exc)
             with self.lock:
                 job = self._find_job_unlocked(job_id)
@@ -1592,7 +1633,7 @@ class JobManager:
                     job["status"] = "failed"
                     job["finished_at"] = now_text()
                     job["error"] = str(exc)
-                    self._append_job_log_unlocked(job, f"任务失败：{exc}")
+                    self._append_job_log_unlocked(job, f"任务失败：{exc}", "crawl")
                     self._set_job_progress_unlocked(job, 100, "失败", "failed")
                     self._persist_unlocked()
 
@@ -1623,7 +1664,7 @@ class JobManager:
                 job = self._find_job_unlocked(job_id)
                 if job:
                     job["result"] = deepcopy(result)
-                    self._append_job_log_unlocked(job, f"开始 AI 仿写任务：共 {total} 篇，主题「{topic}」")
+                    self._append_job_log_unlocked(job, f"开始 AI 仿写任务：共 {total} 篇，要求「{rewrite_requirements_label(topic)}」", "rewrite")
                     self._set_job_progress_unlocked(job, 2, f"开始仿写 0/{total}", "starting", 0, total)
                     self._persist_unlocked()
 
@@ -1635,7 +1676,7 @@ class JobManager:
                 with self.lock:
                     job = self._find_job_unlocked(job_id)
                     if job:
-                        self._append_job_log_unlocked(job, f"开始仿写 {index}/{total}：{target_name}")
+                        self._append_job_log_unlocked(job, f"开始仿写 {index}/{total}：{target_name}", "rewrite")
                         self._set_rewrite_item_progress_unlocked(job, index, total, "开始仿写", "rewriting")
                         self._persist_unlocked()
 
@@ -1644,7 +1685,7 @@ class JobManager:
                         job = self._find_job_unlocked(job_id)
                         if not job:
                             return
-                        self._append_job_log_unlocked(job, message)
+                        self._append_job_log_unlocked(job, message, "rewrite")
                         self._set_rewrite_item_progress_unlocked(job, item_index, total, message, "rewriting")
                         self._persist_unlocked()
 
@@ -1665,7 +1706,7 @@ class JobManager:
                         job = self._find_job_unlocked(job_id)
                         if job:
                             job["result"] = deepcopy(result)
-                            self._append_job_log_unlocked(job, f"单篇仿写完成 {index}/{total}：{target_name}")
+                            self._append_job_log_unlocked(job, f"单篇仿写完成 {index}/{total}：{target_name}", "rewrite")
                             self._set_job_progress_unlocked(
                                 job,
                                 round((index / total) * 100),
@@ -1684,7 +1725,7 @@ class JobManager:
                         job = self._find_job_unlocked(job_id)
                         if job:
                             job["result"] = deepcopy(result)
-                            self._append_job_log_unlocked(job, f"单篇仿写失败 {index}/{total}：{target_name}，{exc}")
+                            self._append_job_log_unlocked(job, f"单篇仿写失败 {index}/{total}：{target_name}，{exc}", "rewrite")
                             self._set_job_progress_unlocked(
                                 job,
                                 round((index / total) * 100),
@@ -1712,6 +1753,7 @@ class JobManager:
                     self._append_job_log_unlocked(
                         job,
                         f"AI 仿写任务结束：成功 {result['success_count']} 篇，失败 {result['failed_count']} 篇",
+                        "rewrite",
                     )
                     self._set_job_progress_unlocked(
                         job,
@@ -1730,7 +1772,7 @@ class JobManager:
                     job["status"] = "failed"
                     job["finished_at"] = now_text()
                     job["error"] = str(exc)
-                    self._append_job_log_unlocked(job, f"AI 仿写任务失败：{exc}")
+                    self._append_job_log_unlocked(job, f"AI 仿写任务失败：{exc}", "rewrite")
                     self._set_job_progress_unlocked(job, 100, "仿写失败", "failed", 0, total)
                     self._persist_unlocked()
 
@@ -1756,9 +1798,80 @@ class JobManager:
             raise ValueError("请选择要仿写的笔记")
         return normalized
 
-    def _append_job_log_unlocked(self, job: Dict[str, Any], message: str) -> None:
-        job.setdefault("logs", []).append({"time": now_text(), "message": str(message)})
+    def _prepare_job_for_response(self, job: Dict[str, Any]) -> None:
+        job.setdefault("type", "collect")
+        job["log_groups"] = self._job_log_groups(job)
+
+    def _normalize_job_log_type(self, job: Dict[str, Any], log_type: Optional[str] = None) -> str:
+        raw = str(log_type or "").strip().lower()
+        if raw in {"crawl", "collect", "spider", "scrape"}:
+            return "crawl"
+        if raw in {"rewrite", "ai_rewrite"}:
+            return "rewrite"
+        return "rewrite" if job.get("type") == "rewrite" else "crawl"
+
+    def _normalize_log_entry(self, item: Any, fallback_type: str = "") -> Dict[str, str]:
+        if isinstance(item, dict):
+            entry = {
+                "time": str(item.get("time") or ""),
+                "message": str(item.get("message") or ""),
+            }
+            log_type = str(item.get("type") or fallback_type or "").strip().lower()
+        else:
+            entry = {"time": "", "message": str(item)}
+            log_type = str(fallback_type or "").strip().lower()
+        if log_type in JOB_LOG_TYPES:
+            entry["type"] = log_type
+        return entry
+
+    def _is_rewrite_log_message(self, message: str) -> bool:
+        return any(marker in str(message or "") for marker in REWRITE_LOG_MARKERS)
+
+    def _empty_log_groups(self) -> Dict[str, List[Dict[str, str]]]:
+        return {"crawl": [], "rewrite": []}
+
+    def _job_log_groups(self, job: Dict[str, Any]) -> Dict[str, List[Dict[str, str]]]:
+        groups = self._empty_log_groups()
+        stored_groups = job.get("log_groups")
+        if isinstance(stored_groups, dict):
+            for log_type in JOB_LOG_TYPES:
+                entries = stored_groups.get(log_type)
+                if isinstance(entries, list):
+                    groups[log_type] = [
+                        self._normalize_log_entry(item, log_type)
+                        for item in entries
+                    ][-120:]
+        if groups["crawl"] or groups["rewrite"]:
+            return groups
+
+        rewrite_active = job.get("type") == "rewrite"
+        for item in job.get("logs") or []:
+            entry = self._normalize_log_entry(item)
+            log_type = entry.get("type")
+            if log_type not in JOB_LOG_TYPES:
+                log_type = "rewrite" if rewrite_active or self._is_rewrite_log_message(entry.get("message", "")) else "crawl"
+                entry["type"] = log_type
+            if log_type == "rewrite":
+                rewrite_active = True
+            groups[log_type].append(entry)
+        for log_type in JOB_LOG_TYPES:
+            groups[log_type] = groups[log_type][-120:]
+        return groups
+
+    def _append_job_log_unlocked(self, job: Dict[str, Any], message: str, log_type: Optional[str] = None) -> None:
+        normalized_type = self._normalize_job_log_type(job, log_type)
+        entry = {"time": now_text(), "message": str(message), "type": normalized_type}
+        job.setdefault("logs", []).append(entry)
         job["logs"] = job["logs"][-120:]
+        groups = job.setdefault("log_groups", self._empty_log_groups())
+        if not isinstance(groups, dict):
+            groups = self._empty_log_groups()
+            job["log_groups"] = groups
+        for key in JOB_LOG_TYPES:
+            if not isinstance(groups.get(key), list):
+                groups[key] = []
+        groups[normalized_type].append(entry)
+        groups[normalized_type] = groups[normalized_type][-120:]
 
     def _set_job_progress_unlocked(
         self,

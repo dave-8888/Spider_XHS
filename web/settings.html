@@ -36,9 +36,8 @@
       <div class="topbar-actions">
         <nav class="topnav" aria-label="主导航">
           <a class="nav-link" href="/">采集台</a>
-          <a class="nav-link" href="/#fileSection">AI仿写</a>
+          <a class="nav-link" href="/rewrite">AI仿写</a>
           <a class="nav-link active" href="/settings" aria-current="page">设置</a>
-          <a class="nav-link" href="#modelConfig">大模型配置</a>
         </nav>
         <div class="theme-switch" role="group" aria-label="主题模式">
           <button class="theme-option" data-theme-option="light" type="button">浅色</button>
@@ -309,12 +308,21 @@
       <div class="field-grid field-grid-2">
         <label class="field full-width">
           <span>DashScope API Key</span>
-          <input id="rewriteApiKeyInput" type="password" autocomplete="off" placeholder="留空保留已保存密钥，粘贴新 Key 后覆盖">
+          <div class="secret-input-wrap">
+            <input id="rewriteApiKeyInput" type="password" autocomplete="off" placeholder="粘贴 DashScope API Key 后保存">
+            <button id="rewriteApiKeyToggleBtn" class="secret-toggle-btn" type="button" title="显示 API Key" aria-label="显示 DashScope API Key" aria-pressed="false" disabled>
+              <svg class="btn-icon secret-toggle-icon secret-toggle-icon-show" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"/><path d="M12 14.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/></svg>
+              <svg class="btn-icon secret-toggle-icon secret-toggle-icon-hide" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 16 16"/><path d="M10.6 6.7A8.8 8.8 0 0 1 12 6.5c6 0 9.2 5.5 9.2 5.5a17 17 0 0 1-2.4 3.1"/><path d="M14 14.1a2.5 2.5 0 0 1-3.4-3.5"/><path d="M7.7 7.9C4.5 9.6 2.8 12 2.8 12s3.2 5.5 9.2 5.5c1.3 0 2.5-.3 3.5-.7"/></svg>
+            </button>
+          </div>
         </label>
-        <label class="field full-width">
-          <span>默认仿写主题</span>
-          <input id="rewriteTopicSettingsInput" type="text" value="创业沙龙" placeholder="创业沙龙">
-        </label>
+        <details class="field full-width collapsible-field rewrite-requirements-panel" open>
+          <summary>
+            <span>默认仿写要求</span>
+            <strong id="rewriteRequirementSummary">创业沙龙</strong>
+          </summary>
+          <textarea id="rewriteTopicSettingsInput" rows="5" placeholder="创业沙龙">创业沙龙</textarea>
+        </details>
         <label class="field">
           <span>文本模型</span>
           <input id="rewriteTextModelInput" type="text" value="qwen-plus">
