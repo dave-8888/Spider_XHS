@@ -457,6 +457,43 @@ h3 {
   .surface {
     margin-bottom: 6px;
   }
+
+  body[data-page="home"] .page-shell,
+  body[data-page="rewrite"] .page-shell {
+    min-height: 100vh;
+    padding-bottom: 4px;
+  }
+
+  body[data-page="home"] #jobSection,
+  body[data-page="rewrite"] .file-section {
+    display: grid;
+    height: calc(100vh - 8px);
+    min-height: 0;
+  }
+
+  body[data-page="home"] #jobSection {
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+  }
+
+  body[data-page="home"] .job-list {
+    min-height: 0;
+    max-height: none;
+  }
+
+  body[data-page="rewrite"] .file-section {
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+  }
+
+  body[data-page="rewrite"] .file-layout,
+  body[data-page="rewrite"] .file-preview-panel,
+  body[data-page="rewrite"] .file-preview {
+    min-height: 0;
+  }
+
+  body[data-page="rewrite"] .file-list,
+  body[data-page="rewrite"] .file-preview {
+    height: auto;
+  }
 }
 
 .hero {
