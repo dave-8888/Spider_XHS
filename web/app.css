@@ -397,8 +397,9 @@ h3 {
   }
 
   .page-shell {
-    width: min(1180px, calc(100vw - var(--sidebar-width) - 40px));
-    padding-top: 32px;
+    width: calc(100vw - var(--sidebar-width) - 8px);
+    margin: 0 4px;
+    padding-top: 4px;
   }
 }
 
@@ -445,6 +446,17 @@ h3 {
 
 .surface:not(.hero) {
   padding: 24px;
+}
+
+@media (min-width: 1080px) {
+  .grid {
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+
+  .surface {
+    margin-bottom: 6px;
+  }
 }
 
 .hero {
