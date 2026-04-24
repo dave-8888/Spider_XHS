@@ -2181,6 +2181,98 @@ def list_output_files(output_root: Path, relative_path: str = "") -> Dict[str, A
     }
 
 
+def is_output_markdown_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in [".md", ".markdown"]
+
+
+def is_rewrite_markdown_path(path: Path, output_root: Path) -> bool:
+    try:
+        parts = path.resolve().relative_to(output_root.resolve()).parts
+    except ValueError:
+        return False
+    return any(part.startswith("AI仿写_") for part in parts)
+
+
+def is_hidden_output_path(path: Path, output_root: Path) -> bool:
+    try:
+        parts = path.resolve().relative_to(output_root.resolve()).parts
+    except ValueError:
+        return True
+    return any(part.startswith(".") or part in INTERNAL_DATA_FILES for part in parts)
+
+
+def summarize_recent_markdown_file(path: Path, output_root: Path, kind: str) -> Dict[str, Any]:
+    stat = path.stat()
+    folder = path.parent
+    context_parts = []
+    try:
+        parent_parts = folder.resolve().relative_to(output_root.resolve()).parts
+    except ValueError:
+        parent_parts = ()
+    if kind == "rewrite":
+        rewrite_index = next((index for index, part in enumerate(parent_parts) if part.startswith("AI仿写_")), -1)
+        if rewrite_index > 0:
+            context_parts.append(parent_parts[rewrite_index - 1])
+        if rewrite_index >= 0:
+            context_parts.append(parent_parts[rewrite_index])
+    else:
+        context_parts = list(parent_parts[-3:])
+    context = " / ".join(part for part in context_parts if part)
+    return {
+        "name": path.name,
+        "path": relative_to_root(path, output_root),
+        "folder": relative_to_root(folder, output_root),
+        "context": context or relative_to_root(folder, output_root),
+        "size": stat.st_size,
+        "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+        "modified_ts": stat.st_mtime,
+        "previewable": True,
+        "rewriteable": kind == "crawled" and folder.joinpath("info.json").exists(),
+    }
+
+
+def list_recent_markdown_files(output_root: Path, limit: int = 8) -> Dict[str, Any]:
+    ensure_data_dirs()
+    output_root.mkdir(parents=True, exist_ok=True)
+    try:
+        limit = int(limit or 8)
+    except (TypeError, ValueError):
+        limit = 8
+    limit = max(1, min(limit, 30))
+    crawled: List[Dict[str, Any]] = []
+    rewritten: List[Dict[str, Any]] = []
+
+    for path in output_root.rglob("*"):
+        try:
+            if not is_output_markdown_file(path) or is_hidden_output_path(path, output_root):
+                continue
+            if is_rewrite_markdown_path(path, output_root):
+                if path.name == "仿写文案.md":
+                    rewritten.append(summarize_recent_markdown_file(path, output_root, "rewrite"))
+                continue
+            if path.parent.joinpath("info.json").exists():
+                crawled.append(summarize_recent_markdown_file(path, output_root, "crawled"))
+        except OSError:
+            continue
+
+    def recent_first(item: Dict[str, Any]) -> Tuple[float, str]:
+        return (-float(item.get("modified_ts") or 0), str(item.get("path") or "").lower())
+
+    crawled.sort(key=recent_first)
+    rewritten.sort(key=recent_first)
+
+    def strip_sort_key(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return [
+            {key: value for key, value in item.items() if key != "modified_ts"}
+            for item in items[:limit]
+        ]
+
+    return {
+        "crawled": strip_sort_key(crawled),
+        "rewritten": strip_sort_key(rewritten),
+    }
+
+
 def create_output_directory(output_root: Path, parent_path: str, name: str) -> Dict[str, Any]:
     ensure_data_dirs()
     output_root.mkdir(parents=True, exist_ok=True)

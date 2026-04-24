@@ -59,6 +59,34 @@
         <div id="fileListMeta" class="file-list-meta" aria-live="polite"></div>
       </div>
 
+      <div class="md-quick-shell">
+        <div class="md-quick-shell-head">
+          <div class="md-quick-title">
+            <strong>Markdown 快捷入口</strong>
+            <span>最新爬取与最近仿写</span>
+          </div>
+          <button id="refreshRecentMdBtn" class="btn btn-ghost file-preview-action" type="button" title="刷新 Markdown 列表" aria-label="刷新 Markdown 列表">
+            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 8a7 7 0 0 0-12.2-2.4L5 7.5"/><path d="M5 4v3.5h3.5"/><path d="M5 16a7 7 0 0 0 12.2 2.4L19 16.5"/><path d="M19 20v-3.5h-3.5"/></svg>
+          </button>
+        </div>
+        <div class="md-quick-grid">
+          <section class="md-quick-panel" aria-labelledby="recentCrawledMdTitle">
+            <div class="md-quick-panel-head">
+              <strong id="recentCrawledMdTitle">最新爬取 MD</strong>
+              <span id="recentCrawledMdMeta">0 个</span>
+            </div>
+            <div id="recentCrawledMdList" class="md-quick-list"></div>
+          </section>
+          <section class="md-quick-panel" aria-labelledby="recentRewriteMdTitle">
+            <div class="md-quick-panel-head">
+              <strong id="recentRewriteMdTitle">最近仿写 MD</strong>
+              <span id="recentRewriteMdMeta">0 个</span>
+            </div>
+            <div id="recentRewriteMdList" class="md-quick-list"></div>
+          </section>
+        </div>
+      </div>
+
       <div class="file-browser-head">
         <div id="fileBreadcrumbs" class="file-breadcrumbs" aria-label="当前目录"></div>
       </div>

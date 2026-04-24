@@ -26,6 +26,8 @@ const homeEls = {
   jobSection: document.querySelector('#jobSection'),
   jobStatusSummary: document.querySelector('#jobStatusSummary'),
   jobFilters: document.querySelector('#jobFilters'),
+  jobTypeFilters: document.querySelector('#jobTypeFilters'),
+  jobPagination: document.querySelector('#jobPagination'),
   refreshJobsBtn: document.querySelector('#refreshJobsBtn'),
   deleteSelectedBtn: document.querySelector('#deleteSelectedBtn'),
   rewriteSelectedBtn: document.querySelector('#rewriteSelectedBtn'),
@@ -46,6 +48,11 @@ const homeEls = {
   openPreviewFileBtn: document.querySelector('#openPreviewFileBtn'),
   closePreviewBtn: document.querySelector('#closePreviewBtn'),
   fileSelectionSummary: document.querySelector('#fileSelectionSummary'),
+  recentCrawledMdList: document.querySelector('#recentCrawledMdList'),
+  recentRewriteMdList: document.querySelector('#recentRewriteMdList'),
+  recentCrawledMdMeta: document.querySelector('#recentCrawledMdMeta'),
+  recentRewriteMdMeta: document.querySelector('#recentRewriteMdMeta'),
+  refreshRecentMdBtn: document.querySelector('#refreshRecentMdBtn'),
   sortTypeChoices: document.querySelector('#sortTypeChoices'),
   contentTypeChoices: document.querySelector('#contentTypeChoices'),
   publishTimeChoices: document.querySelector('#publishTimeChoices'),
@@ -115,7 +122,13 @@ const state = {
   jobLogScrollState: new Map(),
   jobLogOpenState: new Map(),
   jobFilter: 'all',
+  jobTypeFilter: 'all',
+  jobPage: 1,
   currentJobs: [],
+  recentMarkdown: {
+    crawled: [],
+    rewritten: [],
+  },
   collectBusy: false,
   rewriteBusy: false,
   savedRewriteApiKey: '',
@@ -133,6 +146,8 @@ const state = {
   desktopMode: false,
   selectedFilePaths: new Set(),
 };
+
+const JOB_PAGE_SIZE = 8;
 
 function getThemeMode() {
   return ['light', 'dark', 'system'].includes(state.themeMode) ? state.themeMode : 'system';
@@ -478,6 +493,21 @@ function findJobCard(jobId) {
   return homeEls.jobList.querySelector(`[data-job-card-id="${jobId}"]`);
 }
 
+function ensureJobVisibleOnCurrentPage(jobId) {
+  if (!jobId) return;
+  const targetJob = state.currentJobs.find((job) => job.id === jobId);
+  if (!targetJob) return;
+  if (!filterJobs([targetJob]).length) {
+    state.jobFilter = 'all';
+    state.jobTypeFilter = 'all';
+  }
+  const filteredJobs = filterJobs(state.currentJobs);
+  const index = filteredJobs.findIndex((job) => job.id === jobId);
+  if (index >= 0) {
+    state.jobPage = Math.floor(index / JOB_PAGE_SIZE) + 1;
+  }
+}
+
 function highlightJobCard(jobId) {
   if (!jobId) return;
   state.highlightedJobId = jobId;
@@ -507,6 +537,8 @@ function scrollToJobCard(jobId) {
 async function waitForJobCard(jobId, attempts = 8) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     await loadJobs();
+    ensureJobVisibleOnCurrentPage(jobId);
+    renderJobs(state.currentJobs);
     const card = findJobCard(jobId);
     if (card) {
       return card;
@@ -1196,7 +1228,7 @@ function truncateText(value, maxLength = 84) {
 
 const JOB_LOG_GROUPS = {
   crawl: { label: '爬取日志' },
-  rewrite: { label: '仿写日志' },
+  rewrite: { label: '创作日志' },
 };
 
 function normalizeJobLogEntry(item, fallbackType = '') {
@@ -1254,6 +1286,32 @@ function jobLogGroups(job) {
       logs: groups[key] || [],
     }))
     .filter((group) => group.logs.length);
+}
+
+function visibleJobLogGroups(job) {
+  const groups = jobLogGroups(job);
+  if (state.jobTypeFilter === 'crawl') {
+    return groups.filter((group) => group.id === 'crawl');
+  }
+  if (state.jobTypeFilter === 'rewrite') {
+    return groups.filter((group) => group.id === 'rewrite');
+  }
+  return groups;
+}
+
+function jobMatchesLogType(job, type = 'all') {
+  if (type === 'all') return true;
+  const jobType = job.type || 'collect';
+  const groups = jobLogGroups(job);
+  if (type === 'crawl') {
+    return jobType === 'collect' || groups.some((group) => group.id === 'crawl');
+  }
+  if (type === 'rewrite') {
+    return jobType === 'rewrite'
+      || Boolean(job.result?.rewrite || job.result?.rewrite_error)
+      || groups.some((group) => group.id === 'rewrite');
+  }
+  return true;
 }
 
 function jobAllLogs(job) {
@@ -1390,21 +1448,43 @@ function jobMetricItems(job) {
 }
 
 function jobFilterOptions(jobs) {
-  const issueCount = jobs.filter((job) => ['failed', 'interrupted'].includes(job.status)).length;
+  const typedJobs = filterJobsByLogType(jobs);
+  const issueCount = typedJobs.filter((job) => ['failed', 'interrupted'].includes(job.status)).length;
   return [
-    { value: 'all', label: '全部', count: jobs.length },
-    { value: 'running', label: '运行中', count: jobs.filter((job) => job.status === 'running').length },
-    { value: 'success', label: '已完成', count: jobs.filter((job) => job.status === 'success').length },
+    { value: 'all', label: '全部', count: typedJobs.length },
+    { value: 'running', label: '运行中', count: typedJobs.filter((job) => job.status === 'running').length },
+    { value: 'success', label: '已完成', count: typedJobs.filter((job) => job.status === 'success').length },
     { value: 'failed', label: '异常', count: issueCount },
   ];
 }
 
-function filterJobs(jobs) {
+function jobTypeFilterOptions(jobs) {
+  const statusJobs = filterJobsByStatus(jobs);
+  return [
+    { value: 'all', label: '全部日志', count: statusJobs.length },
+    { value: 'crawl', label: '爬取日志', count: statusJobs.filter((job) => jobMatchesLogType(job, 'crawl')).length },
+    { value: 'rewrite', label: '创作日志', count: statusJobs.filter((job) => jobMatchesLogType(job, 'rewrite')).length },
+  ];
+}
+
+function filterJobsByStatus(jobs) {
   const filter = state.jobFilter;
   if (filter === 'running') return jobs.filter((job) => job.status === 'running');
   if (filter === 'success') return jobs.filter((job) => job.status === 'success');
   if (filter === 'failed') return jobs.filter((job) => ['failed', 'interrupted'].includes(job.status));
   return jobs;
+}
+
+function filterJobsByLogType(jobs) {
+  const filter = state.jobTypeFilter;
+  if (filter === 'crawl' || filter === 'rewrite') {
+    return jobs.filter((job) => jobMatchesLogType(job, filter));
+  }
+  return jobs;
+}
+
+function filterJobs(jobs) {
+  return filterJobsByLogType(filterJobsByStatus(jobs));
 }
 
 function renderJobStatusSummary(jobs) {
@@ -1471,6 +1551,108 @@ function renderJobFilters(jobs) {
       </button>
     `;
   }).join('');
+}
+
+function renderJobTypeFilters(jobs) {
+  if (!homeEls.jobTypeFilters) return;
+  const options = jobTypeFilterOptions(jobs);
+  if (!options.some((option) => option.value === state.jobTypeFilter)) {
+    state.jobTypeFilter = 'all';
+  }
+
+  homeEls.jobTypeFilters.innerHTML = options.map((option) => {
+    const active = option.value === state.jobTypeFilter;
+    return `
+      <button
+        class="job-filter job-type-filter${active ? ' active' : ''}"
+        type="button"
+        role="tab"
+        aria-selected="${active ? 'true' : 'false'}"
+        data-job-type-filter="${escapeHtml(option.value)}"
+      >
+        <span>${escapeHtml(option.label)}</span>
+        <strong>${escapeHtml(option.count)}</strong>
+      </button>
+    `;
+  }).join('');
+}
+
+function jobPageCount(total) {
+  return Math.max(1, Math.ceil(total / JOB_PAGE_SIZE));
+}
+
+function clampJobPage(total) {
+  const pageCount = jobPageCount(total);
+  state.jobPage = Math.min(Math.max(1, state.jobPage), pageCount);
+  return pageCount;
+}
+
+function jobPaginationItems(pageCount, currentPage) {
+  if (pageCount <= 7) {
+    return Array.from({ length: pageCount }, (_item, index) => index + 1);
+  }
+  const pages = new Set([1, pageCount, currentPage, currentPage - 1, currentPage + 1]);
+  if (currentPage <= 3) {
+    pages.add(2);
+    pages.add(3);
+    pages.add(4);
+  }
+  if (currentPage >= pageCount - 2) {
+    pages.add(pageCount - 1);
+    pages.add(pageCount - 2);
+    pages.add(pageCount - 3);
+  }
+  const sorted = Array.from(pages)
+    .filter((pageNumber) => pageNumber >= 1 && pageNumber <= pageCount)
+    .sort((left, right) => left - right);
+  return sorted.reduce((items, pageNumber, index) => {
+    if (index > 0 && pageNumber - sorted[index - 1] > 1) {
+      items.push('ellipsis');
+    }
+    items.push(pageNumber);
+    return items;
+  }, []);
+}
+
+function renderJobPagination(totalJobs, pageCount = jobPageCount(totalJobs)) {
+  if (!homeEls.jobPagination) return;
+  if (!totalJobs) {
+    homeEls.jobPagination.classList.add('is-hidden');
+    homeEls.jobPagination.innerHTML = '';
+    return;
+  }
+
+  const currentPage = state.jobPage;
+  const from = (currentPage - 1) * JOB_PAGE_SIZE + 1;
+  const to = Math.min(totalJobs, currentPage * JOB_PAGE_SIZE);
+  const pageItems = jobPaginationItems(pageCount, currentPage).map((item, index) => {
+    if (item === 'ellipsis') {
+      return `<span class="job-page-ellipsis" aria-hidden="true" data-page-gap="${index}">…</span>`;
+    }
+    const active = item === currentPage;
+    return `
+      <button
+        class="job-page-btn${active ? ' active' : ''}"
+        type="button"
+        data-job-page="${item}"
+        aria-current="${active ? 'page' : 'false'}"
+      >${item}</button>
+    `;
+  }).join('');
+
+  homeEls.jobPagination.classList.remove('is-hidden');
+  homeEls.jobPagination.innerHTML = `
+    <div class="job-page-summary">第 ${escapeHtml(currentPage)} / ${escapeHtml(pageCount)} 页 · ${escapeHtml(from)}-${escapeHtml(to)} / ${escapeHtml(totalJobs)} 条</div>
+    <div class="job-page-buttons">
+      <button class="job-page-btn job-page-arrow" type="button" data-job-page="prev" title="上一页" aria-label="上一页" ${currentPage <= 1 ? 'disabled' : ''}>
+        <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>
+      </button>
+      ${pageItems}
+      <button class="job-page-btn job-page-arrow" type="button" data-job-page="next" title="下一页" aria-label="下一页" ${currentPage >= pageCount ? 'disabled' : ''}>
+        <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+      </button>
+    </div>
+  `;
 }
 
 function saveJobLogOpenState() {
@@ -1550,10 +1732,12 @@ function renderJobs(jobs) {
   state.currentJobs = allJobs;
   renderJobStatusSummary(allJobs);
   renderJobFilters(allJobs);
+  renderJobTypeFilters(allJobs);
 
   if (allJobs.length === 0) {
     state.jobLogScrollState.clear();
     state.jobLogOpenState.clear();
+    renderJobPagination(0);
     renderJobEmptyState('暂无任务记录');
     return;
   }
@@ -1561,17 +1745,21 @@ function renderJobs(jobs) {
   saveJobLogScrollState();
   saveJobLogOpenState();
 
-  const visibleJobs = filterJobs(allJobs).slice(0, 8);
-  if (!visibleJobs.length) {
+  const filteredJobs = filterJobs(allJobs);
+  const pageCount = clampJobPage(filteredJobs.length);
+  renderJobPagination(filteredJobs.length, pageCount);
+  if (!filteredJobs.length) {
     renderJobEmptyState('该状态下暂无任务');
     return;
   }
+  const pageStart = (state.jobPage - 1) * JOB_PAGE_SIZE;
+  const visibleJobs = filteredJobs.slice(pageStart, pageStart + JOB_PAGE_SIZE);
 
   homeEls.jobList.classList.remove('muted', 'job-list-empty');
   homeEls.jobList.innerHTML = visibleJobs.map((job) => {
     const meta = jobStatusMeta(job.status);
     const summary = job.summary || {};
-    const logGroups = jobLogGroups(job);
+    const logGroups = visibleJobLogGroups(job);
     const progress = jobProgress(job);
     const highlight = job.id === state.highlightedJobId ? ' job-card-highlight' : '';
     const metricHtml = jobMetricItems(job).map((item) => `
@@ -2035,6 +2223,9 @@ function updateFileToolbarState() {
   if (homeEls.openCurrentFolderBtn) {
     homeEls.openCurrentFolderBtn.disabled = state.collectBusy || state.rewriteBusy;
   }
+  if (homeEls.refreshRecentMdBtn) {
+    homeEls.refreshRecentMdBtn.disabled = state.collectBusy || state.rewriteBusy;
+  }
   if (homeEls.rewriteTopicInput) {
     homeEls.rewriteTopicInput.disabled = state.collectBusy || state.rewriteBusy;
   }
@@ -2071,6 +2262,95 @@ function renderFileListMeta(files) {
     <span><strong>${directoryCount}</strong> 目录</span>
     <span><strong>${fileCount}</strong> 文件</span>
   `;
+}
+
+function renderRecentMarkdownMeta(type, count) {
+  const target = type === 'crawled' ? homeEls.recentCrawledMdMeta : homeEls.recentRewriteMdMeta;
+  if (target) {
+    target.textContent = `${count} 个`;
+  }
+}
+
+function renderRecentMarkdownList(type, items = []) {
+  const container = type === 'crawled' ? homeEls.recentCrawledMdList : homeEls.recentRewriteMdList;
+  if (!container) return;
+  renderRecentMarkdownMeta(type, items.length);
+  if (!items.length) {
+    container.innerHTML = '<div class="md-quick-empty">暂无 Markdown 文件</div>';
+    return;
+  }
+
+  container.innerHTML = items.map((item) => {
+    const path = String(item.path || '');
+    const name = item.name || fileBaseName(path) || 'Markdown 文件';
+    const details = [
+      item.context || item.folder || '',
+      item.modified ? compactTime(item.modified) : '',
+      sizeText(Number(item.size) || 0),
+    ].filter(Boolean);
+    const rewriteButton = item.rewriteable ? `
+      <button class="btn btn-ghost md-quick-action md-quick-rewrite" data-action="rewrite" data-path="${escapeHtml(path)}" data-name="${escapeHtml(name)}" type="button" title="仿写" aria-label="仿写 ${escapeHtml(name)}">
+        ${iconSvg('rewrite')}
+      </button>
+    ` : '';
+
+    return `
+      <article class="md-quick-row">
+        <button class="md-quick-main" data-action="preview" data-path="${escapeHtml(path)}" type="button">
+          <span class="md-quick-icon" aria-hidden="true">${iconSvg('markdown')}</span>
+          <span class="md-quick-copy">
+            <span class="md-quick-name">${escapeHtml(name)}</span>
+            <span class="md-quick-details">${escapeHtml(details.join(' · '))}</span>
+          </span>
+        </button>
+        <div class="md-quick-actions">
+          <button class="btn btn-ghost md-quick-action" data-action="locate" data-path="${escapeHtml(path)}" data-folder="${escapeHtml(item.folder || '')}" type="button" title="定位" aria-label="定位 ${escapeHtml(name)}">
+            ${iconSvg('open')}
+          </button>
+          ${rewriteButton}
+        </div>
+      </article>
+    `;
+  }).join('');
+
+  container.querySelectorAll('[data-action]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try {
+        const action = button.dataset.action || '';
+        const path = button.dataset.path || '';
+        if (!path) return;
+        if (action === 'preview') {
+          await previewFile(path);
+          return;
+        }
+        if (action === 'locate') {
+          await loadFiles(button.dataset.folder || pathFromParts(fileDirectoryParts(path)));
+          await previewFile(path);
+          return;
+        }
+        if (action === 'rewrite') {
+          await rewriteEntry(path, button.dataset.name || fileBaseName(path));
+        }
+      } catch (error) {
+        toast(error.message);
+      }
+    });
+  });
+}
+
+function renderRecentMarkdown(recent = {}) {
+  state.recentMarkdown = {
+    crawled: Array.isArray(recent.crawled) ? recent.crawled : [],
+    rewritten: Array.isArray(recent.rewritten) ? recent.rewritten : [],
+  };
+  renderRecentMarkdownList('crawled', state.recentMarkdown.crawled);
+  renderRecentMarkdownList('rewritten', state.recentMarkdown.rewritten);
+}
+
+async function loadRecentMarkdown() {
+  if (!homeEls.recentCrawledMdList && !homeEls.recentRewriteMdList) return;
+  const data = await api('/api/recent-md?limit=8');
+  renderRecentMarkdown(data.recent || {});
 }
 
 function renderFileEmptyState(files = {}, disabledAttr = '') {
@@ -2256,7 +2536,10 @@ async function deleteEntries(paths, label = '') {
   if (shouldResetPreview(data.deleted_paths || targets)) {
     setPreviewState(defaultPreviewState());
   }
-  await loadFiles(state.currentPath);
+  await Promise.all([
+    loadFiles(state.currentPath),
+    loadRecentMarkdown(),
+  ]);
   toast(targets.length === 1 ? '已删除' : `已删除 ${data.deleted_count || targets.length} 项`);
 }
 
@@ -2565,6 +2848,33 @@ function bindHomeEvents() {
       const button = event.target.closest('[data-job-filter]');
       if (!button) return;
       state.jobFilter = button.dataset.jobFilter || 'all';
+      state.jobPage = 1;
+      renderJobs(state.currentJobs);
+    });
+  }
+  if (homeEls.jobTypeFilters) {
+    homeEls.jobTypeFilters.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-job-type-filter]');
+      if (!button) return;
+      state.jobTypeFilter = button.dataset.jobTypeFilter || 'all';
+      state.jobPage = 1;
+      renderJobs(state.currentJobs);
+    });
+  }
+  if (homeEls.jobPagination) {
+    homeEls.jobPagination.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-job-page]');
+      if (!button || button.disabled) return;
+      const pageCount = jobPageCount(filterJobs(state.currentJobs).length);
+      const targetPage = button.dataset.jobPage || '1';
+      if (targetPage === 'prev') {
+        state.jobPage -= 1;
+      } else if (targetPage === 'next') {
+        state.jobPage += 1;
+      } else {
+        state.jobPage = Number(targetPage) || 1;
+      }
+      state.jobPage = Math.min(Math.max(1, state.jobPage), pageCount);
       renderJobs(state.currentJobs);
     });
   }
@@ -2603,7 +2913,16 @@ function bindHomeEvents() {
   }
   if (homeEls.refreshFilesBtn) {
     homeEls.refreshFilesBtn.addEventListener('click', () => {
-      loadFiles().catch((error) => toast(error.message));
+      Promise.all([loadFiles(), loadRecentMarkdown()])
+        .then(() => toast('文件列表已刷新'))
+        .catch((error) => toast(error.message));
+    });
+  }
+  if (homeEls.refreshRecentMdBtn) {
+    homeEls.refreshRecentMdBtn.addEventListener('click', () => {
+      loadRecentMarkdown()
+        .then(() => toast('Markdown 列表已刷新'))
+        .catch((error) => toast(error.message));
     });
   }
   if (homeEls.copyPreviewTextBtn) {
@@ -2680,7 +2999,10 @@ async function bootRewrite() {
   bindHomeEvents();
   await loadHomeConfig();
   setPreviewState(defaultPreviewState());
-  await loadFiles('');
+  await Promise.all([
+    loadFiles(''),
+    loadRecentMarkdown(),
+  ]);
 }
 
 async function bootSettings() {

@@ -68,8 +68,12 @@
         </div>
       </div>
       <div id="jobStatusSummary" class="job-status-summary" aria-live="polite"></div>
-      <div id="jobFilters" class="job-filters" role="tablist" aria-label="任务状态筛选"></div>
+      <div class="job-filter-panel">
+        <div id="jobFilters" class="job-filters" role="tablist" aria-label="任务状态筛选"></div>
+        <div id="jobTypeFilters" class="job-filters job-type-filters" role="tablist" aria-label="任务日志类型筛选"></div>
+      </div>
       <div id="jobList" class="job-list muted">暂无任务</div>
+      <div id="jobPagination" class="job-pagination is-hidden" aria-label="任务分页"></div>
     </section>
   </main>
 

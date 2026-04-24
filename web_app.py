@@ -28,6 +28,7 @@ from collector_service import (
     SimpleScheduler,
     create_output_directory,
     delete_output_entries,
+    list_recent_markdown_files,
     list_output_files,
     read_output_text_file,
     relative_to_root,
@@ -608,6 +609,16 @@ class AppHandler(BaseHTTPRequestHandler):
             elif path == "/api/files":
                 rel = query.get("path", [""])[0]
                 json_response(self, {"success": True, "files": list_output_files(resolve_output_root(config_store.load()), rel)})
+            elif path == "/api/recent-md":
+                limit_text = query.get("limit", ["8"])[0]
+                try:
+                    limit = int(limit_text)
+                except (TypeError, ValueError):
+                    limit = 8
+                json_response(self, {
+                    "success": True,
+                    "recent": list_recent_markdown_files(resolve_output_root(config_store.load()), limit=limit),
+                })
             elif path == "/api/file":
                 rel = query.get("path", [""])[0]
                 json_response(self, {"success": True, "file": read_output_text_file(resolve_output_root(config_store.load()), rel)})
