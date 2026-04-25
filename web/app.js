@@ -61,6 +61,7 @@ const homeEls = {
   submitPreviewRewriteBtn: document.querySelector('#submitPreviewRewriteBtn'),
   cancelPreviewRewriteBtn: document.querySelector('#cancelPreviewRewriteBtn'),
   copyPreviewTextBtn: document.querySelector('#copyPreviewTextBtn'),
+  previewFullscreenBtn: document.querySelector('#previewFullscreenBtn'),
   closePreviewBtn: document.querySelector('#closePreviewBtn'),
   markdownImageLightbox: document.querySelector('#markdownImageLightbox'),
   markdownImageLightboxImg: document.querySelector('#markdownImageLightboxImg'),
@@ -132,6 +133,7 @@ const state = {
   currentPreviewPath: '',
   currentPreviewContent: '',
   currentPreviewMode: 'text',
+  previewFullscreen: false,
   previewRewriteOpen: false,
   previewRewritePath: '',
   markdownImageLightboxPreviousFocus: null,
@@ -2174,6 +2176,8 @@ function iconSvg(name) {
     open: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h8v8"/><path d="m8 16 8-8"/><path d="M5 5h5"/><path d="M5 5v14h14v-5"/></svg>',
     trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14"/><path d="M9 7V5.8c0-.7.6-1.3 1.3-1.3h3.4c.7 0 1.3.6 1.3 1.3V7"/><path d="M8 10v8M12 10v8M16 10v8"/><path d="M7 7l.8 13h8.4L17 7"/></svg>',
     rename: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4.5 19.5 4.2-.8 9.8-9.8-3.4-3.4-9.8 9.8z"/><path d="m13.8 6.8 3.4 3.4"/><path d="M12 19.5h7.5"/></svg>',
+    expand: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4H4v4"/><path d="M4 4l6 6"/><path d="M16 4h4v4"/><path d="m20 4-6 6"/><path d="M8 20H4v-4"/><path d="m4 20 6-6"/><path d="M16 20h4v-4"/><path d="m20 20-6-6"/></svg>',
+    collapse: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4v6H4"/><path d="m4 10 6-6"/><path d="M14 4v6h6"/><path d="m20 10-6-6"/><path d="M10 20v-6H4"/><path d="m4 14 6 6"/><path d="M14 20v-6h6"/><path d="m20 14-6 6"/></svg>',
     back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m11 6-6 6 6 6"/><path d="M5 12h14"/></svg>',
     chevron: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>',
     details: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 11v5"/><path d="M12 8h.01"/><path d="M4.5 12a7.5 7.5 0 1 0 15 0 7.5 7.5 0 0 0-15 0z"/></svg>',
@@ -2582,6 +2586,24 @@ function defaultPreviewState(overrides = {}) {
     open: false,
     ...overrides,
   };
+}
+
+function setPreviewFullscreen(enabled) {
+  const shouldEnable = Boolean(enabled && state.currentPreviewPath);
+  state.previewFullscreen = shouldEnable;
+  if (homeEls.filePreviewPanel) {
+    homeEls.filePreviewPanel.classList.toggle('is-fullscreen', shouldEnable);
+  }
+  document.body.classList.toggle('has-file-preview-fullscreen', shouldEnable);
+  if (homeEls.previewFullscreenBtn) {
+    const label = shouldEnable ? '退出全屏预览' : '全屏预览';
+    homeEls.previewFullscreenBtn.disabled = !state.currentPreviewPath;
+    homeEls.previewFullscreenBtn.classList.toggle('is-active', shouldEnable);
+    homeEls.previewFullscreenBtn.setAttribute('aria-label', label);
+    homeEls.previewFullscreenBtn.setAttribute('title', label);
+    homeEls.previewFullscreenBtn.setAttribute('aria-pressed', shouldEnable ? 'true' : 'false');
+    homeEls.previewFullscreenBtn.innerHTML = iconSvg(shouldEnable ? 'collapse' : 'expand');
+  }
 }
 
 function setElementHidden(element, hidden) {
@@ -3021,6 +3043,7 @@ function setPreviewState({
     if (homeEls.filePreviewSubMeta) homeEls.filePreviewSubMeta.textContent = '未选择文件';
     if (homeEls.copyPreviewTextBtn) homeEls.copyPreviewTextBtn.disabled = true;
     if (homeEls.closePreviewBtn) homeEls.closePreviewBtn.disabled = true;
+    setPreviewFullscreen(false);
     updatePreviewRewriteState();
     homeEls.filePreview.className = 'file-preview is-empty';
     homeEls.filePreview.innerHTML = `
@@ -3047,6 +3070,7 @@ function setPreviewState({
   if (homeEls.closePreviewBtn) {
     homeEls.closePreviewBtn.disabled = false;
   }
+  setPreviewFullscreen(state.previewFullscreen);
   updatePreviewRewriteState();
 
   homeEls.filePreview.className = `file-preview is-${mode}`;
@@ -4386,6 +4410,10 @@ function bindHomeEvents() {
       }
       if (state.previewRewriteOpen) {
         closePreviewRewritePopover({ restoreFocus: true });
+        return;
+      }
+      if (state.previewFullscreen) {
+        setPreviewFullscreen(false);
       }
     }
   });
@@ -4395,6 +4423,16 @@ function bindHomeEvents() {
       copyText(text)
         .then(() => toast('预览文本已复制'))
         .catch((error) => toast(error.message || '复制失败'));
+    });
+  }
+  if (homeEls.previewFullscreenBtn) {
+    homeEls.previewFullscreenBtn.addEventListener('click', () => {
+      if (!state.currentPreviewPath) return;
+      closePreviewRewritePopover({ restoreFocus: false });
+      setPreviewFullscreen(!state.previewFullscreen);
+      if (state.previewFullscreen) {
+        homeEls.filePreview?.focus({ preventScroll: true });
+      }
     });
   }
   if (homeEls.closePreviewBtn) {

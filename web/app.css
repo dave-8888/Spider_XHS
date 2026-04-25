@@ -2949,6 +2949,23 @@ select:focus {
   background: var(--panel-bg);
 }
 
+body.has-file-preview-fullscreen {
+  overflow: hidden;
+}
+
+.file-preview-panel.is-fullscreen {
+  position: fixed;
+  inset: 14px;
+  z-index: 50;
+  width: auto;
+  min-width: 0;
+  height: auto;
+  max-height: calc(100vh - 28px);
+  border-color: var(--surface-border);
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.32);
+}
+
 .file-preview-panel.is-hidden {
   display: none;
 }
@@ -3005,6 +3022,12 @@ select:focus {
 .file-preview-rewrite-btn:not(:disabled):hover {
   border-color: rgba(191, 47, 72, 0.28);
   background: var(--accent-soft);
+}
+
+.file-preview-action.is-active:not(.file-preview-rewrite-btn) {
+  color: var(--blue);
+  border-color: var(--blue-soft);
+  background: var(--blue-soft);
 }
 
 .preview-rewrite-popover {
@@ -3084,6 +3107,11 @@ select:focus {
   line-height: 1.58;
   cursor: text;
   user-select: text;
+}
+
+.file-preview-panel.is-fullscreen .file-preview {
+  height: auto;
+  min-height: 0;
 }
 
 .file-preview.is-empty {
@@ -3906,6 +3934,11 @@ body.has-markdown-image-lightbox {
     justify-content: flex-end;
   }
 
+  .file-preview-panel.is-fullscreen {
+    inset: 8px;
+    max-height: calc(100vh - 16px);
+  }
+
   .preview-rewrite-popover {
     right: 0;
     width: min(360px, calc(100vw - 32px));
@@ -3980,5 +4013,11 @@ body.has-markdown-image-lightbox {
     right: 12px;
     bottom: 12px;
     max-width: none;
+  }
+
+  .file-preview-panel.is-fullscreen {
+    inset: 0;
+    max-height: 100vh;
+    border-radius: 0;
   }
 }
