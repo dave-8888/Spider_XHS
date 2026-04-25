@@ -31,6 +31,7 @@ const homeEls = {
   refreshJobsBtn: document.querySelector('#refreshJobsBtn'),
   deleteSelectedBtn: document.querySelector('#deleteSelectedBtn'),
   rewriteSelectedBtn: document.querySelector('#rewriteSelectedBtn'),
+  multiSelectModeBtn: document.querySelector('#multiSelectModeBtn'),
   refreshFilesBtn: document.querySelector('#refreshFilesBtn'),
   selectAllFilesBtn: document.querySelector('#selectAllFilesBtn'),
   clearFileSelectionBtn: document.querySelector('#clearFileSelectionBtn'),
@@ -48,6 +49,7 @@ const homeEls = {
   copyPreviewTextBtn: document.querySelector('#copyPreviewTextBtn'),
   openPreviewFileBtn: document.querySelector('#openPreviewFileBtn'),
   closePreviewBtn: document.querySelector('#closePreviewBtn'),
+  fileSelectionWrap: document.querySelector('#fileSelectionWrap'),
   fileSelectionSummary: document.querySelector('#fileSelectionSummary'),
   recentCrawledMdList: document.querySelector('#recentCrawledMdList'),
   recentRewriteMdList: document.querySelector('#recentRewriteMdList'),
@@ -151,6 +153,8 @@ const state = {
   highlightTimer: null,
   themeMode: document.documentElement.dataset.themeMode || 'system',
   desktopMode: false,
+  multiSelectMode: false,
+  fileDetailExpandedPaths: new Set(),
   selectedFilePaths: new Set(),
 };
 
@@ -476,6 +480,7 @@ function setHomeBusy(isBusy) {
     homeEls.likeTopInput,
     homeEls.publishDaysInput,
     homeEls.deleteSelectedBtn,
+    homeEls.multiSelectModeBtn,
     homeEls.refreshFilesBtn,
     homeEls.selectAllFilesBtn,
     homeEls.clearFileSelectionBtn,
@@ -1903,6 +1908,8 @@ function iconSvg(name) {
     trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14"/><path d="M9 7V5.8c0-.7.6-1.3 1.3-1.3h3.4c.7 0 1.3.6 1.3 1.3V7"/><path d="M8 10v8M12 10v8M16 10v8"/><path d="M7 7l.8 13h8.4L17 7"/></svg>',
     back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m11 6-6 6 6 6"/><path d="M5 12h14"/></svg>',
     chevron: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>',
+    details: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 11v5"/><path d="M12 8h.01"/><path d="M4.5 12a7.5 7.5 0 1 0 15 0 7.5 7.5 0 0 0-15 0z"/></svg>',
+    more: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 12h.01"/><path d="M12 12h.01"/><path d="M17.5 12h.01"/></svg>',
     refresh: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 8a7 7 0 0 0-12.2-2.4L5 7.5"/><path d="M5 4v3.5h3.5"/><path d="M5 16a7 7 0 0 0 12.2 2.4L19 16.5"/><path d="M19 20v-3.5h-3.5"/></svg>',
     rewrite: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4.5 19.5 9.8-9.8 2 2-9.8 9.8h-2z"/><path d="m13.7 6.3 2-2 4 4-2 2"/><path d="M6 4.5v3M4.5 6h3M18 16.5v3M16.5 18h3"/></svg>',
   };
@@ -2214,13 +2221,38 @@ function defaultPreviewState(overrides = {}) {
   };
 }
 
+function setElementHidden(element, hidden) {
+  if (element) element.hidden = Boolean(hidden);
+}
+
 function updateFileToolbarState() {
   const entries = state.fileTreeVisibleNodes.map((node) => node.entry).filter(Boolean);
   const selectablePaths = entries.map((entry) => entry.path).filter(Boolean);
   const selectedCount = state.selectedFilePaths.size;
   const rewriteableSelectedCount = selectedRewriteableEntries().length;
+  const busy = state.collectBusy || state.rewriteBusy;
+  const multiSelectActive = state.multiSelectMode;
   const allVisibleSelected = selectablePaths.length > 0
     && selectablePaths.every((path) => state.selectedFilePaths.has(path));
+  const multiSelectControls = [
+    homeEls.fileSelectionWrap,
+    homeEls.selectAllFilesBtn,
+    homeEls.clearFileSelectionBtn,
+    homeEls.rewriteSelectedBtn,
+    homeEls.deleteSelectedBtn,
+  ];
+
+  multiSelectControls.forEach((element) => setElementHidden(element, !multiSelectActive));
+
+  if (homeEls.fileList) {
+    homeEls.fileList.classList.toggle('is-multiselect', multiSelectActive);
+  }
+  if (homeEls.multiSelectModeBtn) {
+    homeEls.multiSelectModeBtn.disabled = busy;
+    homeEls.multiSelectModeBtn.classList.toggle('is-active', multiSelectActive);
+    homeEls.multiSelectModeBtn.setAttribute('aria-pressed', multiSelectActive ? 'true' : 'false');
+    homeEls.multiSelectModeBtn.title = multiSelectActive ? '退出多选' : '显示多选';
+  }
 
   if (homeEls.fileSelectionSummary) {
     homeEls.fileSelectionSummary.textContent = selectedCount
@@ -2228,29 +2260,29 @@ function updateFileToolbarState() {
       : '未选择文件';
   }
   if (homeEls.deleteSelectedBtn) {
-    homeEls.deleteSelectedBtn.disabled = state.collectBusy || state.rewriteBusy || selectedCount === 0;
+    homeEls.deleteSelectedBtn.disabled = busy || !multiSelectActive || selectedCount === 0;
   }
   if (homeEls.rewriteSelectedBtn) {
-    homeEls.rewriteSelectedBtn.disabled = state.collectBusy || state.rewriteBusy || rewriteableSelectedCount === 0;
+    homeEls.rewriteSelectedBtn.disabled = busy || !multiSelectActive || rewriteableSelectedCount === 0;
   }
   if (homeEls.refreshFilesBtn) {
-    homeEls.refreshFilesBtn.disabled = state.collectBusy || state.rewriteBusy;
+    homeEls.refreshFilesBtn.disabled = busy;
   }
   if (homeEls.selectAllFilesBtn) {
-    homeEls.selectAllFilesBtn.disabled = state.collectBusy || state.rewriteBusy || selectablePaths.length === 0;
-    homeEls.selectAllFilesBtn.classList.toggle('is-active', allVisibleSelected);
+    homeEls.selectAllFilesBtn.disabled = busy || !multiSelectActive || selectablePaths.length === 0;
+    homeEls.selectAllFilesBtn.classList.toggle('is-active', multiSelectActive && allVisibleSelected);
   }
   if (homeEls.clearFileSelectionBtn) {
-    homeEls.clearFileSelectionBtn.disabled = state.collectBusy || state.rewriteBusy || selectedCount === 0;
+    homeEls.clearFileSelectionBtn.disabled = busy || !multiSelectActive || selectedCount === 0;
   }
   if (homeEls.openCurrentFolderBtn) {
-    homeEls.openCurrentFolderBtn.disabled = state.collectBusy || state.rewriteBusy;
+    homeEls.openCurrentFolderBtn.disabled = busy;
   }
   if (homeEls.refreshRecentMdBtn) {
-    homeEls.refreshRecentMdBtn.disabled = state.collectBusy || state.rewriteBusy;
+    homeEls.refreshRecentMdBtn.disabled = busy;
   }
   if (homeEls.rewriteTopicInput) {
-    homeEls.rewriteTopicInput.disabled = state.collectBusy || state.rewriteBusy;
+    homeEls.rewriteTopicInput.disabled = busy;
   }
 }
 
@@ -2609,7 +2641,20 @@ function clearFileSelection() {
   updateFileToolbarState();
 }
 
+function setMultiSelectMode(enabled) {
+  state.multiSelectMode = Boolean(enabled);
+  if (!state.multiSelectMode) {
+    state.selectedFilePaths = new Set();
+  }
+  if (state.currentFiles) {
+    renderFiles(state.currentFiles);
+  } else {
+    updateFileToolbarState();
+  }
+}
+
 function toggleFileSelection(path, checked) {
+  if (!state.multiSelectMode) return;
   const normalizedPath = normalizeFilePath(path);
   const next = new Set(state.selectedFilePaths);
   if (checked) {
@@ -2626,6 +2671,9 @@ function toggleFileSelection(path, checked) {
 }
 
 function selectAllVisibleFiles() {
+  if (!state.multiSelectMode) {
+    setMultiSelectMode(true);
+  }
   const entries = state.fileTreeVisibleNodes.map((node) => node.entry).filter(Boolean);
   if (!entries.length) return;
   state.selectedFilePaths = new Set(entries.map((entry) => entry.path).filter(Boolean));
@@ -2674,6 +2722,9 @@ function pruneDeletedFileTreePaths(paths = []) {
     !removedPaths.some((removedPath) => isSamePathOrChild(path, removedPath))
   )));
   state.fileTreeExpandedPaths = new Set(Array.from(state.fileTreeExpandedPaths).filter((path) => (
+    !removedPaths.some((removedPath) => isSamePathOrChild(path, removedPath))
+  )));
+  state.fileDetailExpandedPaths = new Set(Array.from(state.fileDetailExpandedPaths).filter((path) => (
     !removedPaths.some((removedPath) => isSamePathOrChild(path, removedPath))
   )));
   state.fileTreeLoadingPaths = new Set(Array.from(state.fileTreeLoadingPaths).filter((path) => (
@@ -2856,27 +2907,120 @@ function directoryNodeMeta(node) {
   return '未展开';
 }
 
+function toggleFileDetail(path = '') {
+  const normalizedPath = normalizeFilePath(path);
+  if (!normalizedPath) return;
+  const next = new Set(state.fileDetailExpandedPaths);
+  if (next.has(normalizedPath)) {
+    next.delete(normalizedPath);
+  } else {
+    next.add(normalizedPath);
+  }
+  state.fileDetailExpandedPaths = next;
+  renderFiles(state.currentFiles);
+}
+
+function renderFileActionMenu(entry, previewMode, detailOpen, disabledAttr = '') {
+  const actions = [
+    {
+      action: 'details',
+      icon: 'details',
+      label: detailOpen ? '隐藏详情' : '显示详情',
+      className: detailOpen ? 'is-active' : '',
+      attrs: `aria-expanded="${detailOpen ? 'true' : 'false'}"`,
+    },
+  ];
+
+  if (entry.rewriteable) {
+    actions.push({
+      action: 'rewrite',
+      icon: 'rewrite',
+      label: '仿写',
+      className: 'file-rewrite-btn',
+      attrs: `data-name="${escapeHtml(entry.name)}"`,
+    });
+  }
+
+  if (entry.type === 'file' && canPreviewEntry(entry)) {
+    actions.push({
+      action: 'preview',
+      icon: fileIconName(entry),
+      label: previewMode === 'image' || previewMode === 'video' ? '预览媒体' : '预览文本',
+      attrs: `data-name="${escapeHtml(entry.name)}"`,
+    });
+  }
+
+  actions.push(
+    {
+      action: 'open-folder',
+      icon: 'open',
+      label: '打开所在文件夹',
+    },
+    {
+      action: 'delete',
+      icon: 'trash',
+      label: '删除',
+      className: 'file-delete-btn',
+      attrs: `data-name="${escapeHtml(entry.name)}"`,
+    },
+  );
+
+  return `
+    <div class="file-action-menu">
+      <button
+        class="btn btn-ghost file-action-menu-toggle"
+        data-path="${escapeHtml(entry.path)}"
+        type="button"
+        title="更多操作"
+        aria-label="${escapeHtml(entry.name)} 的更多操作"
+        aria-haspopup="menu"
+        aria-expanded="false"
+        ${disabledAttr}
+      >${iconSvg('more')}</button>
+      <div class="file-action-menu-panel" role="menu">
+        ${actions.map((item) => `
+          <button
+            class="file-action-menu-item file-action-btn ${item.className || ''}"
+            data-action="${item.action}"
+            data-path="${escapeHtml(entry.path)}"
+            type="button"
+            role="menuitem"
+            ${item.attrs || ''}
+            ${disabledAttr}
+          >
+            <span class="file-action-menu-icon" aria-hidden="true">${iconSvg(item.icon)}</span>
+            <span>${item.label}</span>
+          </button>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
 function renderFileTreeRow(node, disabledAttr = '') {
   const entry = node.entry;
   const isDirectory = entry.type === 'directory';
-  const iconName = fileIconName(entry);
   const previewMode = filePreviewMode(entry);
   const details = [
     fileKindLabel(entry),
     isDirectory ? directoryNodeMeta(node) : sizeText(entry.size),
     entry.modified || '',
   ].filter(Boolean);
+  const detailTitle = [entry.name, ...details].filter(Boolean).join(' · ');
   const rowClasses = [
     'file-row',
     'file-tree-row',
     isDirectory ? 'is-directory' : '',
     node.expanded ? 'is-expanded' : '',
     node.loading ? 'is-loading' : '',
-    state.selectedFilePaths.has(entry.path) ? 'is-selected' : '',
+    state.multiSelectMode && state.selectedFilePaths.has(entry.path) ? 'is-selected' : '',
     state.currentPreviewPath === entry.path ? 'is-active' : '',
     state.currentPath === entry.path ? 'is-focused' : '',
+    state.fileDetailExpandedPaths.has(entry.path) ? 'is-details-open' : '',
   ].filter(Boolean).join(' ');
   const toggleDisabledAttr = (disabledAttr || node.loading) ? 'disabled' : '';
+  const selectDisabledAttr = (disabledAttr || !state.multiSelectMode) ? 'disabled' : '';
+  const detailOpen = state.fileDetailExpandedPaths.has(entry.path);
   const toggleControl = isDirectory ? `
     <button
       class="file-tree-toggle"
@@ -2894,7 +3038,7 @@ function renderFileTreeRow(node, disabledAttr = '') {
   return `
     <div class="${rowClasses}" data-path="${escapeHtml(entry.path)}" style="--tree-depth: ${node.depth};">
       <label class="file-select" aria-label="选择 ${escapeHtml(entry.name)}">
-        <input class="file-select-input" data-path="${escapeHtml(entry.path)}" type="checkbox" ${state.selectedFilePaths.has(entry.path) ? 'checked' : ''} ${disabledAttr}>
+        <input class="file-select-input" data-path="${escapeHtml(entry.path)}" type="checkbox" ${state.multiSelectMode && state.selectedFilePaths.has(entry.path) ? 'checked' : ''} ${selectDisabledAttr}>
       </label>
       ${toggleControl}
       <button
@@ -2903,21 +3047,16 @@ function renderFileTreeRow(node, disabledAttr = '') {
         data-path="${escapeHtml(entry.path)}"
         data-name="${escapeHtml(entry.name)}"
         data-preview-mode="${escapeHtml(previewMode)}"
+        title="${escapeHtml(detailTitle)}"
         type="button"
         ${disabledAttr}
       >
-        <span class="file-icon file-icon-${iconName}">${iconSvg(iconName)}</span>
         <span class="file-main">
           <span class="file-name">${escapeHtml(entry.name)}</span>
           <span class="file-details">${details.map((detail) => `<span>${escapeHtml(detail)}</span>`).join('')}</span>
         </span>
       </button>
-      <div class="file-actions">
-        ${entry.rewriteable ? `<button class="btn btn-ghost file-action-btn file-rewrite-btn" data-action="rewrite" data-path="${escapeHtml(entry.path)}" data-name="${escapeHtml(entry.name)}" type="button" title="仿写" aria-label="仿写 ${escapeHtml(entry.name)}" ${disabledAttr}>${iconSvg('rewrite')}</button>` : ''}
-        ${entry.type === 'file' && canPreviewEntry(entry) ? `<button class="btn btn-ghost file-action-btn" data-action="preview" data-path="${escapeHtml(entry.path)}" data-name="${escapeHtml(entry.name)}" type="button" title="预览" aria-label="预览 ${escapeHtml(entry.name)}" ${disabledAttr}>${iconSvg(iconName)}</button>` : ''}
-        <button class="btn btn-ghost file-action-btn" data-action="open-folder" data-path="${escapeHtml(entry.path)}" type="button" title="打开所在文件夹" aria-label="打开 ${escapeHtml(entry.name)} 所在文件夹" ${disabledAttr}>${iconSvg('open')}</button>
-        <button class="btn btn-ghost file-action-btn file-delete-btn" data-action="delete" data-path="${escapeHtml(entry.path)}" data-name="${escapeHtml(entry.name)}" type="button" title="删除" aria-label="删除 ${escapeHtml(entry.name)}" ${disabledAttr}>${iconSvg('trash')}</button>
-      </div>
+      ${renderFileActionMenu(entry, previewMode, detailOpen, disabledAttr)}
     </div>
   `;
 }
@@ -2928,6 +3067,15 @@ function scrollFileTreePathIntoView(path = '') {
   window.requestAnimationFrame(() => {
     const row = homeEls.fileList.querySelector(`.file-row[data-path="${cssEscape(normalizedPath)}"]`);
     if (row) row.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+function closeFileActionMenus(exceptMenu = null) {
+  if (!homeEls.fileList) return;
+  homeEls.fileList.querySelectorAll('.file-action-menu.is-open').forEach((menu) => {
+    if (exceptMenu && menu === exceptMenu) return;
+    menu.classList.remove('is-open');
+    menu.querySelector('.file-action-menu-toggle')?.setAttribute('aria-expanded', 'false');
   });
 }
 
@@ -3094,6 +3242,7 @@ function renderFiles(files = state.currentFiles) {
   homeEls.fileList.querySelectorAll('.file-entry-button').forEach((button) => {
     button.addEventListener('click', async () => {
       try {
+        closeFileActionMenus();
         const path = button.dataset.path || '';
         const name = button.dataset.name || fileBaseName(path);
         const mode = button.dataset.previewMode || 'download';
@@ -3122,15 +3271,33 @@ function renderFiles(files = state.currentFiles) {
     });
   });
 
+  homeEls.fileList.querySelectorAll('.file-action-menu-toggle').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const menu = button.closest('.file-action-menu');
+      if (!menu) return;
+      const willOpen = !menu.classList.contains('is-open');
+      closeFileActionMenus(menu);
+      menu.classList.toggle('is-open', willOpen);
+      button.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+    });
+  });
+
   homeEls.fileList.querySelectorAll('.file-action-btn').forEach((button) => {
     button.addEventListener('click', async (event) => {
       try {
         event.preventDefault();
         event.stopPropagation();
+        closeFileActionMenus();
         const path = button.dataset.path || '';
         if (!path) return;
         if (button.dataset.action === 'rewrite') {
           await rewriteEntry(path, button.dataset.name || fileBaseName(path));
+          return;
+        }
+        if (button.dataset.action === 'details') {
+          toggleFileDetail(path);
           return;
         }
         if (button.dataset.action === 'open-folder') {
@@ -3229,6 +3396,10 @@ function bindCollectionConfigEvents() {
 
 function bindHomeEvents() {
   bindFileLayoutResize();
+  document.addEventListener('click', (event) => {
+    if (!homeEls.fileList || event.target.closest('.file-action-menu')) return;
+    closeFileActionMenus();
+  });
   if (homeEls.collectBtn) {
     homeEls.collectBtn.addEventListener('click', () => {
       startCollect().catch((error) => {
@@ -3311,6 +3482,11 @@ function bindHomeEvents() {
   if (homeEls.rewriteSelectedBtn) {
     homeEls.rewriteSelectedBtn.addEventListener('click', () => {
       rewriteSelectedEntries().catch((error) => toast(error.message));
+    });
+  }
+  if (homeEls.multiSelectModeBtn) {
+    homeEls.multiSelectModeBtn.addEventListener('click', () => {
+      setMultiSelectMode(!state.multiSelectMode);
     });
   }
   if (homeEls.selectAllFilesBtn) {
