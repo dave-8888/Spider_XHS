@@ -608,7 +608,16 @@ class AppHandler(BaseHTTPRequestHandler):
                 json_response(self, {"success": True, "jobs": job_manager.list_jobs()})
             elif path == "/api/files":
                 rel = query.get("path", [""])[0]
-                json_response(self, {"success": True, "files": list_output_files(resolve_output_root(config_store.load()), rel)})
+                config = config_store.load()
+                storage = config.get("storage", {}) if isinstance(config.get("storage"), dict) else {}
+                json_response(self, {
+                    "success": True,
+                    "files": list_output_files(
+                        resolve_output_root(config),
+                        rel,
+                        show_note_metadata=bool(storage.get("show_note_metadata")),
+                    ),
+                })
             elif path == "/api/recent-md":
                 limit_text = query.get("limit", ["8"])[0]
                 try:

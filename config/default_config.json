@@ -23,7 +23,8 @@
     "pos_distance": 0
   },
   "storage": {
-    "output_dir": ""
+    "output_dir": "",
+    "show_note_metadata": false
   },
   "rewrite": {
     "enabled": false,

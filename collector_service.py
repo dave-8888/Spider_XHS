@@ -636,6 +636,7 @@ class ConfigStore:
 
         storage = sanitized.setdefault("storage", {})
         storage["output_dir"] = str(storage.get("output_dir") or "").strip().strip("'").strip('"')
+        storage["show_note_metadata"] = bool(storage.get("show_note_metadata"))
 
         rewrite = sanitized.setdefault("rewrite", {})
         rewrite["enabled"] = bool(rewrite.get("enabled"))
@@ -2127,7 +2128,13 @@ def has_visible_output_content(path: Path) -> bool:
     return False
 
 
-def list_output_files(output_root: Path, relative_path: str = "") -> Dict[str, Any]:
+def is_note_metadata_entry(path: Path, parent: Path) -> bool:
+    if not parent.joinpath("info.json").exists():
+        return False
+    return path.name == "info.json" or (path.is_dir() and path.name == "assert")
+
+
+def list_output_files(output_root: Path, relative_path: str = "", show_note_metadata: bool = False) -> Dict[str, Any]:
     ensure_data_dirs()
     output_root.mkdir(parents=True, exist_ok=True)
     target = safe_output_path(output_root, relative_path or "")
@@ -2137,6 +2144,8 @@ def list_output_files(output_root: Path, relative_path: str = "") -> Dict[str, A
         target = target.parent
     sortable_entries = []
     for child in target.iterdir():
+        if not show_note_metadata and is_note_metadata_entry(child, target):
+            continue
         if is_hidden_output_entry(child):
             continue
         if child.is_dir() and not has_visible_output_content(child):

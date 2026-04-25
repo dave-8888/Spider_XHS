@@ -105,11 +105,18 @@
           <div class="field full-width">
             <span>采集存放目录</span>
             <div class="directory-picker">
-              <div class="directory-display">
-                <div class="directory-label">当前目录</div>
+              <details class="directory-display">
+                <summary>
+                  <span class="directory-label">当前目录</span>
+                  <strong id="outputDirSummary" class="directory-summary">点击查看</strong>
+                </summary>
                 <div id="outputDirText" class="directory-path">加载中...</div>
-              </div>
+              </details>
               <div class="button-pair directory-actions">
+                <button id="openOutputDirBtn" class="btn btn-ghost btn-icon-text" type="button">
+                  <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h8v8"/><path d="m8 16 8-8"/><path d="M5 5h5"/><path d="M5 5v14h14v-5"/></svg>
+                  打开当前目录
+                </button>
                 <button id="pickOutputDirBtn" class="btn btn-secondary btn-icon-text" type="button">
                   <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l1.7 2h9.3v7.8a2.2 2.2 0 0 1-2.2 2.2H5.7a2.2 2.2 0 0 1-2.2-2.2z"/><path d="M3.5 9.5V6.7c0-1.2 1-2.2 2.2-2.2h4.1l1.7 2h6.8c1.2 0 2.2 1 2.2 2.2v.8"/></svg>
                   选择目录
@@ -132,6 +139,16 @@
           <label class="field full-width">
             <span>自定义发布时间天数</span>
             <input id="publishDaysInput" type="number" min="0" max="3650" value="7">
+          </label>
+        </div>
+        <div class="row spread switch-row">
+          <div>
+            <strong>显示采集元数据</strong>
+            <p class="muted">开启后在文案创作文件树中显示 assert 文件夹和 info.json。</p>
+          </div>
+          <label class="switch">
+            <input id="showNoteMetadataInput" type="checkbox">
+            <span></span>
           </label>
         </div>
         <p class="muted">目录通过系统选择器指定，恢复默认后使用项目内默认输出目录。</p>

@@ -11,6 +11,8 @@ const homeEls = {
   keywordList: document.querySelector('#keywordList'),
   addKeywordBtn: document.querySelector('#addKeywordBtn'),
   outputDirText: document.querySelector('#outputDirText'),
+  outputDirSummary: document.querySelector('#outputDirSummary'),
+  openOutputDirBtn: document.querySelector('#openOutputDirBtn'),
   pickOutputDirBtn: document.querySelector('#pickOutputDirBtn'),
   resetOutputDirBtn: document.querySelector('#resetOutputDirBtn'),
   countInput: document.querySelector('#countInput'),
@@ -35,8 +37,6 @@ const homeEls = {
   refreshFilesBtn: document.querySelector('#refreshFilesBtn'),
   selectAllFilesBtn: document.querySelector('#selectAllFilesBtn'),
   clearFileSelectionBtn: document.querySelector('#clearFileSelectionBtn'),
-  openCurrentFolderBtn: document.querySelector('#openCurrentFolderBtn'),
-  rewriteTopicInput: document.querySelector('#rewriteTopicInput'),
   fileLayout: document.querySelector('#fileLayout'),
   fileLayoutResizer: document.querySelector('#fileLayoutResizer'),
   fileList: document.querySelector('#fileList'),
@@ -47,7 +47,6 @@ const homeEls = {
   filePreviewMeta: document.querySelector('#filePreviewMeta'),
   filePreviewSubMeta: document.querySelector('#filePreviewSubMeta'),
   copyPreviewTextBtn: document.querySelector('#copyPreviewTextBtn'),
-  openPreviewFileBtn: document.querySelector('#openPreviewFileBtn'),
   closePreviewBtn: document.querySelector('#closePreviewBtn'),
   fileSelectionWrap: document.querySelector('#fileSelectionWrap'),
   fileSelectionSummary: document.querySelector('#fileSelectionSummary'),
@@ -71,6 +70,7 @@ const settingsEls = {
   searchDelayMaxInput: document.querySelector('#searchDelayMaxInput'),
   detailDelayMinInput: document.querySelector('#detailDelayMinInput'),
   detailDelayMaxInput: document.querySelector('#detailDelayMaxInput'),
+  showNoteMetadataInput: document.querySelector('#showNoteMetadataInput'),
   scheduleEnabledInput: document.querySelector('#scheduleEnabledInput'),
   cycleInput: document.querySelector('#cycleInput'),
   dailyRunsInput: document.querySelector('#dailyRunsInput'),
@@ -390,9 +390,17 @@ function renderKeywordList({ focusId = '' } = {}) {
 }
 
 function renderOutputDirSelection() {
+  const displayPath = state.outputDirDisplay || state.defaultOutputRoot;
+  const isDefaultPath = !state.selectedOutputDir;
+  if (homeEls.outputDirSummary) {
+    homeEls.outputDirSummary.textContent = isDefaultPath ? '默认目录' : '自定义目录';
+  }
   if (homeEls.outputDirText) {
-    homeEls.outputDirText.textContent = state.outputDirDisplay || state.defaultOutputRoot;
-    homeEls.outputDirText.classList.toggle('is-default', !state.selectedOutputDir);
+    homeEls.outputDirText.textContent = displayPath;
+    homeEls.outputDirText.classList.toggle('is-default', isDefaultPath);
+  }
+  if (homeEls.openOutputDirBtn) {
+    homeEls.openOutputDirBtn.disabled = state.collectBusy;
   }
   if (homeEls.pickOutputDirBtn) {
     homeEls.pickOutputDirBtn.disabled = state.collectBusy;
@@ -484,8 +492,6 @@ function setHomeBusy(isBusy) {
     homeEls.refreshFilesBtn,
     homeEls.selectAllFilesBtn,
     homeEls.clearFileSelectionBtn,
-    homeEls.openCurrentFolderBtn,
-    homeEls.openPreviewFileBtn,
     homeEls.closePreviewBtn,
   ].forEach((element) => {
     if (element) {
@@ -776,10 +782,9 @@ function applyHomeConfig(config) {
   if (homeEls.publishDaysInput) {
     homeEls.publishDaysInput.value = filters.publish_days ?? 7;
   }
-  if (homeEls.rewriteTopicInput) {
-    homeEls.rewriteTopicInput.value = config.rewrite?.topic || '创业沙龙';
+  if (settingsEls.showNoteMetadataInput) {
+    settingsEls.showNoteMetadataInput.checked = Boolean(config.storage?.show_note_metadata);
   }
-
   updateOutputRoot(config);
   renderKeywordList();
   renderOutputDirSelection();
@@ -916,6 +921,9 @@ function readHomeDraft() {
     },
     storage: {
       output_dir: state.selectedOutputDir.trim() || '',
+      show_note_metadata: settingsEls.showNoteMetadataInput
+        ? Boolean(settingsEls.showNoteMetadataInput.checked)
+        : Boolean(state.config?.storage?.show_note_metadata),
     },
   };
 }
@@ -2275,14 +2283,8 @@ function updateFileToolbarState() {
   if (homeEls.clearFileSelectionBtn) {
     homeEls.clearFileSelectionBtn.disabled = busy || !multiSelectActive || selectedCount === 0;
   }
-  if (homeEls.openCurrentFolderBtn) {
-    homeEls.openCurrentFolderBtn.disabled = busy;
-  }
   if (homeEls.refreshRecentMdBtn) {
     homeEls.refreshRecentMdBtn.disabled = busy;
-  }
-  if (homeEls.rewriteTopicInput) {
-    homeEls.rewriteTopicInput.disabled = busy;
   }
 }
 
@@ -2533,7 +2535,6 @@ function setPreviewState({
     if (homeEls.filePreviewMeta) homeEls.filePreviewMeta.textContent = '预览';
     if (homeEls.filePreviewSubMeta) homeEls.filePreviewSubMeta.textContent = '未选择文件';
     if (homeEls.copyPreviewTextBtn) homeEls.copyPreviewTextBtn.disabled = true;
-    if (homeEls.openPreviewFileBtn) homeEls.openPreviewFileBtn.disabled = true;
     if (homeEls.closePreviewBtn) homeEls.closePreviewBtn.disabled = true;
     homeEls.filePreview.className = 'file-preview is-empty';
     homeEls.filePreview.innerHTML = `
@@ -2556,9 +2557,6 @@ function setPreviewState({
   }
   if (homeEls.copyPreviewTextBtn) {
     homeEls.copyPreviewTextBtn.disabled = !content || !['markdown', 'text'].includes(mode);
-  }
-  if (homeEls.openPreviewFileBtn) {
-    homeEls.openPreviewFileBtn.disabled = !path;
   }
   if (homeEls.closePreviewBtn) {
     homeEls.closePreviewBtn.disabled = false;
@@ -2653,21 +2651,47 @@ function setMultiSelectMode(enabled) {
   }
 }
 
-function toggleFileSelection(path, checked) {
+async function collectDescendantFilePaths(path = '', { load = false } = {}) {
+  const normalizedPath = normalizeFilePath(path);
+  if (!normalizedPath) return [];
+  const entry = state.currentFileEntries.get(normalizedPath);
+  if (entry?.type !== 'directory') return [];
+
+  let files = state.fileTreeCache.get(normalizedPath);
+  if (!files && load) {
+    files = await fetchFileDirectory(normalizedPath);
+  }
+  if (!files) return [];
+
+  const paths = [];
+  for (const child of files.entries || []) {
+    if (!child.path) continue;
+    paths.push(child.path);
+    if (child.type === 'directory') {
+      paths.push(...await collectDescendantFilePaths(child.path, { load }));
+    }
+  }
+  return paths;
+}
+
+async function toggleFileSelection(path, checked) {
   if (!state.multiSelectMode) return;
   const normalizedPath = normalizeFilePath(path);
+  if (!normalizedPath) return;
+  const affectedPaths = [
+    normalizedPath,
+    ...await collectDescendantFilePaths(normalizedPath, { load: checked }),
+  ];
   const next = new Set(state.selectedFilePaths);
-  if (checked) {
-    next.add(normalizedPath);
-  } else {
-    next.delete(normalizedPath);
-  }
+  affectedPaths.forEach((affectedPath) => {
+    if (checked) {
+      next.add(affectedPath);
+    } else {
+      next.delete(affectedPath);
+    }
+  });
   state.selectedFilePaths = next;
-  updateFileToolbarState();
-  if (homeEls.fileList) {
-    const row = homeEls.fileList.querySelector(`.file-row[data-path="${cssEscape(normalizedPath)}"]`);
-    if (row) row.classList.toggle('is-selected', checked);
-  }
+  renderFiles(state.currentFiles);
 }
 
 function selectAllVisibleFiles() {
@@ -2807,7 +2831,7 @@ async function rewriteEntries(entries, { confirmBulk = false } = {}) {
     return;
   }
 
-  const topic = (homeEls.rewriteTopicInput?.value || state.config?.rewrite?.topic || '创业沙龙').trim() || '创业沙龙';
+  const topic = (state.config?.rewrite?.topic || '创业沙龙').trim() || '创业沙龙';
   state.rewriteBusy = true;
   updateFileToolbarState();
   if (state.currentFiles) renderFiles(state.currentFiles);
@@ -3221,8 +3245,14 @@ function renderFiles(files = state.currentFiles) {
     input.addEventListener('click', (event) => {
       event.stopPropagation();
     });
-    input.addEventListener('change', () => {
-      toggleFileSelection(input.dataset.path || '', input.checked);
+    input.addEventListener('change', async () => {
+      try {
+        input.disabled = true;
+        await toggleFileSelection(input.dataset.path || '', input.checked);
+      } catch (error) {
+        toast(error.message);
+        renderFiles(state.currentFiles);
+      }
     });
   });
 
@@ -3392,6 +3422,11 @@ function bindCollectionConfigEvents() {
   if (homeEls.resetOutputDirBtn) {
     homeEls.resetOutputDirBtn.addEventListener('click', resetOutputFolder);
   }
+  if (homeEls.openOutputDirBtn) {
+    homeEls.openOutputDirBtn.addEventListener('click', () => {
+      openFolder('').catch((error) => toast(error.message));
+    });
+  }
 }
 
 function bindHomeEvents() {
@@ -3498,11 +3533,6 @@ function bindHomeEvents() {
       renderFiles(state.currentFiles);
     });
   }
-  if (homeEls.openCurrentFolderBtn) {
-    homeEls.openCurrentFolderBtn.addEventListener('click', () => {
-      openFolder(state.currentPath).catch((error) => toast(error.message));
-    });
-  }
   if (homeEls.refreshFilesBtn) {
     homeEls.refreshFilesBtn.addEventListener('click', () => {
       Promise.all([loadFiles(state.currentPath, { force: true }), loadRecentMarkdown()])
@@ -3523,12 +3553,6 @@ function bindHomeEvents() {
       copyText(text)
         .then(() => toast('预览文本已复制'))
         .catch((error) => toast(error.message || '复制失败'));
-    });
-  }
-  if (homeEls.openPreviewFileBtn) {
-    homeEls.openPreviewFileBtn.addEventListener('click', () => {
-      if (!state.currentPreviewPath) return;
-      window.open(`/download?path=${encodeURIComponent(state.currentPreviewPath)}`, '_blank', 'noopener');
     });
   }
   if (homeEls.closePreviewBtn) {

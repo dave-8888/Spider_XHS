@@ -923,8 +923,36 @@ select:focus {
   background: var(--field-bg);
 }
 
+.directory-display summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.directory-display summary::-webkit-details-marker {
+  display: none;
+}
+
+.directory-display summary::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  color: var(--text-faint);
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 0.16s ease;
+}
+
+.directory-display[open] summary::after {
+  transform: rotate(225deg) translateY(-2px);
+}
+
 .directory-label {
-  margin-bottom: 6px;
   color: var(--text-faint);
   font-size: 12px;
   font-weight: 700;
@@ -932,7 +960,18 @@ select:focus {
   text-transform: uppercase;
 }
 
+.directory-summary {
+  min-width: 0;
+  margin-left: auto;
+  color: var(--text-soft);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .directory-path {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-size: 13px;
   line-height: 1.6;
@@ -2115,12 +2154,35 @@ select:focus {
 }
 
 .file-toolbar {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   margin-bottom: 12px;
   padding: 8px;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
   background: var(--panel-muted-bg);
+}
+
+.file-toolbar-left,
+.file-toolbar-right {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.file-toolbar-left {
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.file-toolbar-right {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  margin-left: auto;
 }
 
 .file-toolbar-copy {
@@ -3136,8 +3198,12 @@ body.has-collect-overlay {
     justify-content: flex-start;
   }
 
-  .rewrite-topic-field {
-    width: 100%;
+  .file-toolbar {
+    align-items: flex-start;
+  }
+
+  .file-toolbar-right {
+    margin-left: auto;
   }
 
   .inline-field input {
@@ -3313,6 +3379,10 @@ body.has-collect-overlay {
   .button-pair .btn,
   .directory-actions .btn {
     width: 100%;
+  }
+
+  .file-toolbar .btn {
+    width: auto;
   }
 
   .file-section-title {
