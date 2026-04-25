@@ -72,6 +72,31 @@
         <div id="jobFilters" class="job-filters" role="tablist" aria-label="任务状态筛选"></div>
         <div id="jobTypeFilters" class="job-filters job-type-filters" role="tablist" aria-label="任务日志类型筛选"></div>
       </div>
+      <div class="job-toolbar" role="toolbar" aria-label="任务日志操作">
+        <div class="job-toolbar-left">
+          <div id="jobSelectionWrap" class="job-toolbar-copy job-multi-select-control" aria-live="polite" hidden>
+            <div id="jobSelectionSummary" class="job-selection-summary">已选 0 条日志</div>
+          </div>
+          <button id="selectAllJobsBtn" class="btn btn-ghost btn-icon-text job-multi-select-control" type="button" hidden>
+            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v14H5z"/><path d="m8 12 2.3 2.3L16 8.6"/></svg>
+            全选
+          </button>
+          <button id="clearJobSelectionBtn" class="btn btn-ghost btn-icon-text job-multi-select-control" type="button" disabled hidden>
+            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v14H5z"/><path d="m8 8 8 8M16 8l-8 8"/></svg>
+            清空
+          </button>
+          <button id="deleteSelectedJobsBtn" class="btn btn-ghost btn-icon-text job-danger-command job-multi-select-control" type="button" disabled hidden>
+            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14"/><path d="M9 7V5.8c0-.7.6-1.3 1.3-1.3h3.4c.7 0 1.3.6 1.3 1.3V7"/><path d="M8 10v8M12 10v8M16 10v8"/><path d="M7 7l.8 13h8.4L17 7"/></svg>
+            删除
+          </button>
+        </div>
+        <div class="job-toolbar-right">
+          <button id="jobMultiSelectModeBtn" class="btn btn-ghost btn-icon-text" type="button" aria-pressed="false">
+            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v14H5z"/><path d="M9 12h6"/></svg>
+            多选
+          </button>
+        </div>
+      </div>
       <div id="jobList" class="job-list muted">暂无任务</div>
       <div id="jobPagination" class="job-pagination is-hidden" aria-label="任务分页"></div>
     </section>

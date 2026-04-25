@@ -1696,6 +1696,48 @@ class JobManager:
             self._prepare_job_for_response(job)
         return jobs
 
+    def delete_jobs(self, job_ids: List[str]) -> Dict[str, Any]:
+        requested_ids = []
+        seen = set()
+        for raw_id in job_ids or []:
+            job_id = str(raw_id or "").strip()
+            if not job_id or job_id in seen:
+                continue
+            requested_ids.append(job_id)
+            seen.add(job_id)
+        if not requested_ids:
+            raise ValueError("请选择要删除的任务日志")
+
+        with self.lock:
+            requested_set = set(requested_ids)
+            deleted_ids: List[str] = []
+            skipped_running_ids: List[str] = []
+            remaining_jobs: List[Dict[str, Any]] = []
+
+            for job in self.jobs:
+                job_id = str(job.get("id") or "")
+                if job_id not in requested_set:
+                    remaining_jobs.append(job)
+                    continue
+                if job.get("status") == "running":
+                    skipped_running_ids.append(job_id)
+                    remaining_jobs.append(job)
+                    continue
+                deleted_ids.append(job_id)
+
+            known_ids = set(deleted_ids + skipped_running_ids)
+            missing_ids = [job_id for job_id in requested_ids if job_id not in known_ids]
+            if deleted_ids:
+                self.jobs = remaining_jobs
+                self._persist_unlocked()
+
+        return {
+            "deleted_count": len(deleted_ids),
+            "deleted_ids": deleted_ids,
+            "skipped_running_ids": skipped_running_ids,
+            "missing_ids": missing_ids,
+        }
+
     def has_running(self) -> bool:
         with self.lock:
             return self._running_job_unlocked() is not None

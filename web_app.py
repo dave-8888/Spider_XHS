@@ -666,6 +666,13 @@ class AppHandler(BaseHTTPRequestHandler):
                 json_response(self, {"success": True, "job": run_manual_rewrite_job(payload)})
             elif path == "/api/rewrite":
                 json_response(self, {"success": True, "rewrite": run_manual_rewrite(payload)})
+            elif path == "/api/jobs/delete":
+                json_response(self, {
+                    "success": True,
+                    **job_manager.delete_jobs(
+                        payload.get("ids") if isinstance(payload.get("ids"), list) else [],
+                    ),
+                })
             elif path == "/api/login/check":
                 self._check_login(payload)
             elif path == "/api/login/browser/start":

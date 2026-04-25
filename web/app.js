@@ -31,6 +31,12 @@ const homeEls = {
   jobTypeFilters: document.querySelector('#jobTypeFilters'),
   jobPagination: document.querySelector('#jobPagination'),
   refreshJobsBtn: document.querySelector('#refreshJobsBtn'),
+  jobSelectionWrap: document.querySelector('#jobSelectionWrap'),
+  jobSelectionSummary: document.querySelector('#jobSelectionSummary'),
+  selectAllJobsBtn: document.querySelector('#selectAllJobsBtn'),
+  clearJobSelectionBtn: document.querySelector('#clearJobSelectionBtn'),
+  deleteSelectedJobsBtn: document.querySelector('#deleteSelectedJobsBtn'),
+  jobMultiSelectModeBtn: document.querySelector('#jobMultiSelectModeBtn'),
   deleteSelectedBtn: document.querySelector('#deleteSelectedBtn'),
   rewriteSelectedBtn: document.querySelector('#rewriteSelectedBtn'),
   multiSelectModeBtn: document.querySelector('#multiSelectModeBtn'),
@@ -134,6 +140,8 @@ const state = {
   jobTypeFilter: 'all',
   jobPage: 1,
   currentJobs: [],
+  jobMultiSelectMode: false,
+  selectedJobIds: new Set(),
   recentMarkdown: {
     crawled: [],
     rewritten: [],
@@ -487,6 +495,10 @@ function setHomeBusy(isBusy) {
     homeEls.countInput,
     homeEls.likeTopInput,
     homeEls.publishDaysInput,
+    homeEls.jobMultiSelectModeBtn,
+    homeEls.selectAllJobsBtn,
+    homeEls.clearJobSelectionBtn,
+    homeEls.deleteSelectedJobsBtn,
     homeEls.deleteSelectedBtn,
     homeEls.multiSelectModeBtn,
     homeEls.refreshFilesBtn,
@@ -502,6 +514,7 @@ function setHomeBusy(isBusy) {
   renderKeywordList();
   renderOutputDirSelection();
   renderHomeChoices();
+  updateJobToolbarState();
   if (state.currentFiles) {
     renderFiles(state.currentFiles);
   } else {
@@ -1514,6 +1527,145 @@ function filterJobs(jobs) {
   return filterJobsByLogType(filterJobsByStatus(jobs));
 }
 
+function jobCanBeDeleted(job = {}) {
+  return Boolean(job.id) && job.status !== 'running';
+}
+
+function currentPageJobs(jobs = state.currentJobs) {
+  const filteredJobs = filterJobs(Array.isArray(jobs) ? jobs : []);
+  const pageStart = (state.jobPage - 1) * JOB_PAGE_SIZE;
+  return filteredJobs.slice(pageStart, pageStart + JOB_PAGE_SIZE);
+}
+
+function pruneSelectedJobIds(jobs = state.currentJobs) {
+  const deletableIds = new Set((Array.isArray(jobs) ? jobs : [])
+    .filter((job) => jobCanBeDeleted(job))
+    .map((job) => String(job.id)));
+  state.selectedJobIds = new Set(Array.from(state.selectedJobIds).filter((jobId) => deletableIds.has(jobId)));
+}
+
+function updateJobToolbarState() {
+  const multiSelectActive = state.jobMultiSelectMode;
+  const selectedCount = state.selectedJobIds.size;
+  const visibleSelectableJobs = currentPageJobs().filter((job) => jobCanBeDeleted(job));
+  const visibleSelectableIds = visibleSelectableJobs.map((job) => String(job.id));
+  const allVisibleSelected = visibleSelectableIds.length > 0
+    && visibleSelectableIds.every((jobId) => state.selectedJobIds.has(jobId));
+  const busy = state.collectBusy;
+  const multiSelectControls = [
+    homeEls.jobSelectionWrap,
+    homeEls.selectAllJobsBtn,
+    homeEls.clearJobSelectionBtn,
+    homeEls.deleteSelectedJobsBtn,
+  ];
+
+  multiSelectControls.forEach((element) => setElementHidden(element, !multiSelectActive));
+
+  if (homeEls.jobList) {
+    homeEls.jobList.classList.toggle('is-multiselect', multiSelectActive);
+  }
+  if (homeEls.jobMultiSelectModeBtn) {
+    homeEls.jobMultiSelectModeBtn.disabled = busy;
+    homeEls.jobMultiSelectModeBtn.classList.toggle('is-active', multiSelectActive);
+    homeEls.jobMultiSelectModeBtn.setAttribute('aria-pressed', multiSelectActive ? 'true' : 'false');
+    homeEls.jobMultiSelectModeBtn.title = multiSelectActive ? '退出多选' : '显示多选';
+  }
+  if (homeEls.jobSelectionSummary) {
+    homeEls.jobSelectionSummary.textContent = selectedCount
+      ? `已选 ${selectedCount} 条日志`
+      : '未选择日志';
+  }
+  if (homeEls.selectAllJobsBtn) {
+    homeEls.selectAllJobsBtn.disabled = busy || !multiSelectActive || visibleSelectableIds.length === 0;
+    homeEls.selectAllJobsBtn.classList.toggle('is-active', multiSelectActive && allVisibleSelected);
+  }
+  if (homeEls.clearJobSelectionBtn) {
+    homeEls.clearJobSelectionBtn.disabled = busy || !multiSelectActive || selectedCount === 0;
+  }
+  if (homeEls.deleteSelectedJobsBtn) {
+    homeEls.deleteSelectedJobsBtn.disabled = busy || !multiSelectActive || selectedCount === 0;
+  }
+}
+
+function clearJobSelection({ render = false } = {}) {
+  state.selectedJobIds = new Set();
+  if (render) {
+    renderJobs(state.currentJobs);
+    return;
+  }
+  updateJobToolbarState();
+}
+
+function setJobMultiSelectMode(enabled) {
+  state.jobMultiSelectMode = Boolean(enabled);
+  if (!state.jobMultiSelectMode) {
+    state.selectedJobIds = new Set();
+  }
+  renderJobs(state.currentJobs);
+}
+
+function toggleJobSelection(jobId, checked) {
+  const normalizedId = String(jobId || '').trim();
+  if (!normalizedId || !state.jobMultiSelectMode) return;
+  const job = state.currentJobs.find((item) => String(item.id) === normalizedId);
+  if (!jobCanBeDeleted(job)) {
+    toast('运行中的任务日志暂不能删除');
+    renderJobs(state.currentJobs);
+    return;
+  }
+  const next = new Set(state.selectedJobIds);
+  if (checked) {
+    next.add(normalizedId);
+  } else {
+    next.delete(normalizedId);
+  }
+  state.selectedJobIds = next;
+  renderJobs(state.currentJobs);
+}
+
+function selectAllVisibleJobs() {
+  if (!state.jobMultiSelectMode) {
+    state.jobMultiSelectMode = true;
+  }
+  const next = new Set(state.selectedJobIds);
+  currentPageJobs().forEach((job) => {
+    if (jobCanBeDeleted(job)) {
+      next.add(String(job.id));
+    }
+  });
+  state.selectedJobIds = next;
+  renderJobs(state.currentJobs);
+}
+
+async function deleteSelectedJobs() {
+  const targets = Array.from(state.selectedJobIds).filter(Boolean);
+  if (!targets.length) {
+    toast('请选择要删除的任务日志');
+    return;
+  }
+  if (!window.confirm(`确定删除已选 ${targets.length} 条任务日志吗？`)) return;
+
+  const data = await api('/api/jobs/delete', {
+    method: 'POST',
+    body: JSON.stringify({ ids: targets }),
+  });
+  const deletedIds = new Set((data.deleted_ids || []).map((jobId) => String(jobId)));
+  state.selectedJobIds = new Set(Array.from(state.selectedJobIds).filter((jobId) => !deletedIds.has(jobId)));
+  await loadJobs();
+
+  const deletedCount = Number(data.deleted_count) || deletedIds.size;
+  const skippedCount = Array.isArray(data.skipped_running_ids) ? data.skipped_running_ids.length : 0;
+  if (deletedCount && skippedCount) {
+    toast(`已删除 ${deletedCount} 条，${skippedCount} 条运行中未删除`);
+    return;
+  }
+  if (deletedCount) {
+    toast(`已删除 ${deletedCount} 条任务日志`);
+    return;
+  }
+  toast(skippedCount ? '运行中的任务日志暂不能删除' : '没有可删除的任务日志');
+}
+
 function renderJobStatusSummary(jobs) {
   if (!homeEls.jobStatusSummary) return;
   const runningJobs = jobs.filter((job) => job.status === 'running');
@@ -1757,6 +1909,7 @@ function renderJobs(jobs) {
   if (!homeEls.jobList) return;
   const allJobs = Array.isArray(jobs) ? jobs : [];
   state.currentJobs = allJobs;
+  pruneSelectedJobIds(allJobs);
   renderJobStatusSummary(allJobs);
   renderJobFilters(allJobs);
   renderJobTypeFilters(allJobs);
@@ -1765,6 +1918,7 @@ function renderJobs(jobs) {
     state.jobLogScrollState.clear();
     state.jobLogOpenState.clear();
     renderJobPagination(0);
+    updateJobToolbarState();
     renderJobEmptyState('暂无任务记录');
     return;
   }
@@ -1775,6 +1929,7 @@ function renderJobs(jobs) {
   const filteredJobs = filterJobs(allJobs);
   const pageCount = clampJobPage(filteredJobs.length);
   renderJobPagination(filteredJobs.length, pageCount);
+  updateJobToolbarState();
   if (!filteredJobs.length) {
     renderJobEmptyState('该状态下暂无任务');
     return;
@@ -1789,6 +1944,8 @@ function renderJobs(jobs) {
     const logGroups = visibleJobLogGroups(job);
     const progress = jobProgress(job);
     const highlight = job.id === state.highlightedJobId ? ' job-card-highlight' : '';
+    const deletable = jobCanBeDeleted(job);
+    const selected = state.jobMultiSelectMode && state.selectedJobIds.has(String(job.id));
     const metricHtml = jobMetricItems(job).map((item) => `
       <div class="job-metric">
         <span>${escapeHtml(item.label)}</span>
@@ -1812,8 +1969,11 @@ function renderJobs(jobs) {
     }).join('');
 
     return `
-      <article class="job-card job-status-${escapeHtml(meta.tone)}${highlight}" data-job-card-id="${escapeHtml(job.id)}">
+      <article class="job-card job-status-${escapeHtml(meta.tone)}${selected ? ' is-selected' : ''}${highlight}" data-job-card-id="${escapeHtml(job.id)}">
         <div class="job-card-top">
+          <label class="job-select" aria-label="选择任务日志 ${escapeHtml(job.id)}" title="${deletable ? '选择任务日志' : '运行中的任务日志暂不能删除'}">
+            <input class="job-select-input" data-job-id="${escapeHtml(job.id)}" type="checkbox" ${selected ? 'checked' : ''} ${state.jobMultiSelectMode && deletable ? '' : 'disabled'}>
+          </label>
           <div class="job-title-block">
             <div class="job-title-row">
               <span class="job-status-dot ${escapeHtml(meta.tone)}" aria-hidden="true"></span>
@@ -3504,12 +3664,39 @@ function bindHomeEvents() {
     });
   }
   if (homeEls.jobList) {
+    homeEls.jobList.addEventListener('change', (event) => {
+      const input = event.target.closest('.job-select-input');
+      if (!input) return;
+      toggleJobSelection(input.dataset.jobId || '', input.checked);
+    });
     homeEls.jobList.addEventListener('click', (event) => {
+      if (event.target.closest('.job-select')) {
+        event.stopPropagation();
+        return;
+      }
       const button = event.target.closest('.job-copy-id');
       if (!button) return;
       copyText(button.dataset.jobId || '')
         .then(() => toast('任务 ID 已复制'))
         .catch((error) => toast(error.message || '复制失败'));
+    });
+  }
+  if (homeEls.jobMultiSelectModeBtn) {
+    homeEls.jobMultiSelectModeBtn.addEventListener('click', () => {
+      setJobMultiSelectMode(!state.jobMultiSelectMode);
+    });
+  }
+  if (homeEls.selectAllJobsBtn) {
+    homeEls.selectAllJobsBtn.addEventListener('click', selectAllVisibleJobs);
+  }
+  if (homeEls.clearJobSelectionBtn) {
+    homeEls.clearJobSelectionBtn.addEventListener('click', () => {
+      clearJobSelection({ render: true });
+    });
+  }
+  if (homeEls.deleteSelectedJobsBtn) {
+    homeEls.deleteSelectedJobsBtn.addEventListener('click', () => {
+      deleteSelectedJobs().catch((error) => toast(error.message));
     });
   }
   if (homeEls.deleteSelectedBtn) {

@@ -472,7 +472,7 @@ h3 {
   }
 
   body[data-page="home"] #jobSection {
-    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+    grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
   }
 
   body[data-page="home"] .job-list {
@@ -1472,6 +1472,56 @@ select:focus {
   font-size: 12px;
 }
 
+.job-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-muted-bg);
+}
+
+.job-toolbar-left,
+.job-toolbar-right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.job-toolbar-left {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.job-toolbar-right {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.job-toolbar-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.job-selection-summary {
+  color: var(--text-soft);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.job-multi-select-control[hidden] {
+  display: none;
+}
+
+.job-danger-command {
+  color: var(--danger);
+}
+
 .job-pagination {
   display: flex;
   align-items: center;
@@ -1580,6 +1630,14 @@ select:focus {
   border-color: var(--line);
 }
 
+.job-card.is-selected {
+  border-color: rgba(191, 47, 72, 0.34);
+  background: linear-gradient(90deg, var(--accent-soft), var(--panel-bg) 74%);
+  box-shadow:
+    inset 3px 0 0 var(--accent),
+    var(--shadow-soft);
+}
+
 .job-card-highlight {
   border-color: var(--blue);
   box-shadow:
@@ -1596,7 +1654,28 @@ select:focus {
   margin-bottom: 10px;
 }
 
+.job-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  min-height: 28px;
+  flex: 0 0 20px;
+}
+
+.job-list:not(.is-multiselect) .job-select {
+  display: none;
+}
+
+.job-select-input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 .job-title-block {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
