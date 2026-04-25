@@ -2495,6 +2495,49 @@ def create_output_directory(output_root: Path, parent_path: str, name: str) -> D
     }
 
 
+def rename_output_entry(output_root: Path, relative_path: str, name: str) -> Dict[str, Any]:
+    ensure_data_dirs()
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    rel = str(relative_path or "").strip()
+    if not rel:
+        raise ValueError("请选择要重命名的文件或目录")
+
+    source = ensure_manageable_output_target(output_root, safe_output_path(output_root, rel))
+    if not source.exists():
+        raise FileNotFoundError("路径不存在")
+
+    normalized_name = str(name or "").strip()
+    if not normalized_name:
+        raise ValueError("名称不能为空")
+    if normalized_name in {".", ".."}:
+        raise ValueError("名称不合法")
+    if "/" in normalized_name or "\\" in normalized_name:
+        raise ValueError("名称不能包含路径分隔符")
+    if normalized_name.startswith(".") or normalized_name in INTERNAL_DATA_FILES:
+        raise ValueError("名称不可用")
+    if normalized_name == source.name:
+        raise ValueError("名称未变化")
+
+    target = (source.parent / normalized_name).resolve()
+    base = output_root.resolve()
+    if target != base and base not in target.parents:
+        raise ValueError("目标路径超出采集输出目录")
+    if target.exists() and target.resolve() != source.resolve():
+        raise FileExistsError("同名文件或目录已存在")
+
+    old_path = relative_to_root(source, output_root)
+    entry_type = "directory" if source.is_dir() else "file"
+    source.rename(target)
+
+    return {
+        "old_path": old_path,
+        "path": relative_to_root(target, output_root),
+        "name": target.name,
+        "type": entry_type,
+    }
+
+
 def delete_output_entries(output_root: Path, paths: List[str]) -> Dict[str, Any]:
     ensure_data_dirs()
     output_root.mkdir(parents=True, exist_ok=True)

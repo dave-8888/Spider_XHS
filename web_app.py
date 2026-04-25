@@ -32,6 +32,7 @@ from collector_service import (
     list_output_files,
     read_output_text_file,
     relative_to_root,
+    rename_output_entry,
     resolve_output_root,
     safe_output_path,
 )
@@ -688,6 +689,15 @@ class AppHandler(BaseHTTPRequestHandler):
                     "folder": create_output_directory(
                         resolve_output_root(config_store.load()),
                         str(payload.get("parent_path") or ""),
+                        str(payload.get("name") or ""),
+                    ),
+                })
+            elif path == "/api/files/rename":
+                json_response(self, {
+                    "success": True,
+                    "entry": rename_output_entry(
+                        resolve_output_root(config_store.load()),
+                        str(payload.get("path") or ""),
                         str(payload.get("name") or ""),
                     ),
                 })

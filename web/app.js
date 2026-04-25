@@ -2171,6 +2171,7 @@ function iconSvg(name) {
     video: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 7h11v10h-11z"/><path d="m15.5 10 4-2.2v8.4l-4-2.2z"/></svg>',
     open: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h8v8"/><path d="m8 16 8-8"/><path d="M5 5h5"/><path d="M5 5v14h14v-5"/></svg>',
     trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14"/><path d="M9 7V5.8c0-.7.6-1.3 1.3-1.3h3.4c.7 0 1.3.6 1.3 1.3V7"/><path d="M8 10v8M12 10v8M16 10v8"/><path d="M7 7l.8 13h8.4L17 7"/></svg>',
+    rename: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4.5 19.5 4.2-.8 9.8-9.8-3.4-3.4-9.8 9.8z"/><path d="m13.8 6.8 3.4 3.4"/><path d="M12 19.5h7.5"/></svg>',
     back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m11 6-6 6 6 6"/><path d="M5 12h14"/></svg>',
     chevron: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>',
     details: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 11v5"/><path d="M12 8h.01"/><path d="M4.5 12a7.5 7.5 0 1 0 15 0 7.5 7.5 0 0 0-15 0z"/></svg>',
@@ -3205,6 +3206,48 @@ function isSamePathOrChild(path = '', possibleParent = '') {
     || Boolean(normalizedParent && normalizedPath.startsWith(`${normalizedParent}/`));
 }
 
+function rebasePathAfterRename(path = '', oldPath = '', newPath = '') {
+  const normalizedPath = normalizeFilePath(path);
+  const normalizedOld = normalizeFilePath(oldPath);
+  const normalizedNew = normalizeFilePath(newPath);
+  if (!normalizedPath || !normalizedOld || !normalizedNew) return normalizedPath;
+  if (normalizedPath === normalizedOld) return normalizedNew;
+  if (normalizedPath.startsWith(`${normalizedOld}/`)) {
+    return `${normalizedNew}/${normalizedPath.slice(normalizedOld.length + 1)}`;
+  }
+  return normalizedPath;
+}
+
+function rebasePathSetAfterRename(paths, oldPath = '', newPath = '') {
+  return new Set(Array.from(paths || []).map((path) => rebasePathAfterRename(path, oldPath, newPath)));
+}
+
+function clearRenamedFileTreeCache(oldPath = '') {
+  const normalizedOld = normalizeFilePath(oldPath);
+  state.fileTreeLoadPromises.forEach((_promise, path) => {
+    if (!normalizedOld || isSamePathOrChild(path, normalizedOld)) {
+      state.fileTreeLoadPromises.delete(path);
+    }
+  });
+  state.fileTreeCache.clear();
+  state.currentFiles = null;
+  state.currentFileEntries.clear();
+}
+
+function rebaseFileTreeStateAfterRename(oldPath = '', newPath = '') {
+  const normalizedOld = normalizeFilePath(oldPath);
+  const normalizedNew = normalizeFilePath(newPath);
+  if (!normalizedOld || !normalizedNew) return;
+
+  state.selectedFilePaths = rebasePathSetAfterRename(state.selectedFilePaths, normalizedOld, normalizedNew);
+  state.fileTreeExpandedPaths = rebasePathSetAfterRename(state.fileTreeExpandedPaths, normalizedOld, normalizedNew);
+  state.fileDetailExpandedPaths = rebasePathSetAfterRename(state.fileDetailExpandedPaths, normalizedOld, normalizedNew);
+  state.fileTreeLoadingPaths = rebasePathSetAfterRename(state.fileTreeLoadingPaths, normalizedOld, normalizedNew);
+  state.currentPath = rebasePathAfterRename(state.currentPath, normalizedOld, normalizedNew);
+  state.fileTreeExpandedPaths.add('');
+  clearRenamedFileTreeCache(normalizedOld);
+}
+
 function shouldResetPreview(removedPaths) {
   if (!state.currentPreviewPath) return false;
   return removedPaths.some((path) => isSamePathOrChild(state.currentPreviewPath, path));
@@ -3288,6 +3331,90 @@ async function deleteEntries(paths, label = '') {
     loadRecentMarkdown(),
   ]);
   toast(targets.length === 1 ? '已删除' : `已删除 ${data.deleted_count || targets.length} 项`);
+}
+
+async function restorePreviewAfterRename(previewPath = '', previewMode = 'empty', previewMeta = '') {
+  const normalizedPath = normalizeFilePath(previewPath);
+  if (!normalizedPath) return;
+  if (previewMode === 'markdown' || previewMode === 'text') {
+    await previewFile(normalizedPath);
+    return;
+  }
+  if (previewMode === 'image' || previewMode === 'video') {
+    previewMediaFile(normalizedPath, previewMeta || fileBaseName(normalizedPath), previewMode);
+  }
+}
+
+async function renameEntry(path, name = '') {
+  const normalizedPath = normalizeFilePath(path);
+  if (!normalizedPath) {
+    toast('请选择要重命名的文件或目录');
+    return;
+  }
+  if (state.collectBusy || state.rewriteBusy) {
+    toast('当前任务运行中，稍后再重命名');
+    return;
+  }
+
+  const currentName = name || fileBaseName(normalizedPath);
+  const nextName = window.prompt(`重命名“${currentName}”`, currentName);
+  if (nextName === null) return;
+
+  const normalizedName = nextName.trim();
+  if (!normalizedName) {
+    toast('名称不能为空');
+    return;
+  }
+  if (normalizedName === currentName) {
+    toast('名称未变化');
+    return;
+  }
+  if (normalizedName === '.' || normalizedName === '..' || normalizedName.includes('/') || normalizedName.includes('\\')) {
+    toast('名称不能包含路径分隔符');
+    return;
+  }
+  if (normalizedName.startsWith('.')) {
+    toast('名称不可用');
+    return;
+  }
+
+  const previewPath = state.currentPreviewPath;
+  const previewMode = state.currentPreviewMode;
+  const previewAffected = isSamePathOrChild(previewPath, normalizedPath);
+
+  const data = await api('/api/files/rename', {
+    method: 'POST',
+    body: JSON.stringify({ path: normalizedPath, name: normalizedName }),
+  });
+
+  const entry = data.entry || {};
+  const oldPath = normalizeFilePath(entry.old_path || normalizedPath);
+  const newPath = normalizeFilePath(entry.path || pathFromParts([...fileDirectoryParts(normalizedPath), normalizedName]));
+  const focusPath = isSamePathOrChild(state.currentPath, oldPath)
+    ? rebasePathAfterRename(state.currentPath, oldPath, newPath)
+    : state.currentPath;
+  const nextPreviewPath = previewAffected ? rebasePathAfterRename(previewPath, oldPath, newPath) : '';
+  const nextPreviewMeta = previewPath === oldPath ? (entry.name || fileBaseName(newPath)) : fileBaseName(nextPreviewPath);
+
+  if (previewAffected) {
+    setPreviewState(defaultPreviewState());
+  }
+  rebaseFileTreeStateAfterRename(oldPath, newPath);
+
+  await Promise.all([
+    loadFiles(focusPath || pathFromParts(fileDirectoryParts(newPath)), { force: true, resetSelection: false }),
+    loadRecentMarkdown(),
+  ]);
+  if (previewAffected) {
+    try {
+      await restorePreviewAfterRename(nextPreviewPath, previewMode, nextPreviewMeta);
+    } catch (error) {
+      toast(`已重命名，预览刷新失败：${error.message}`);
+      return;
+    }
+  }
+  scrollFileTreePathIntoView(newPath);
+  toast('已重命名');
 }
 
 async function rewriteEntry(path, name = '', options = {}) {
@@ -3461,6 +3588,13 @@ function renderFileActionMenu(entry, previewMode, detailOpen, disabledAttr = '')
   }
 
   actions.push(
+    {
+      action: 'rename',
+      icon: 'rename',
+      label: '重命名',
+      className: 'file-rename-btn',
+      attrs: `data-name="${escapeHtml(entry.name)}"`,
+    },
     {
       action: 'open-folder',
       icon: 'open',
@@ -3814,6 +3948,10 @@ function renderFiles(files = state.currentFiles) {
         }
         if (button.dataset.action === 'details') {
           toggleFileDetail(path);
+          return;
+        }
+        if (button.dataset.action === 'rename') {
+          await renameEntry(path, button.dataset.name || fileBaseName(path));
           return;
         }
         if (button.dataset.action === 'open-folder') {

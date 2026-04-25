@@ -2890,6 +2890,10 @@ select:focus {
   color: var(--danger);
 }
 
+.file-rename-btn {
+  color: var(--blue);
+}
+
 .file-rewrite-btn {
   color: var(--accent);
 }
