@@ -280,16 +280,18 @@ def download_note(note_info, path, save_choice):
     check_and_create_path(user_path)
     save_path = unique_child_path(user_path, title)
     check_and_create_path(save_path)
-    with open(f'{save_path}/info.json', mode='w', encoding='utf-8') as f:
-        f.write(json.dumps(note_info) + '\n')
+    assert_path = os.path.join(save_path, 'assert')
+    check_and_create_path(assert_path)
+    with open(f'{assert_path}/info.json', mode='w', encoding='utf-8') as f:
+        f.write(json.dumps(note_info, ensure_ascii=False) + '\n')
     note_type = note_info['note_type']
     save_note_detail(note_info, save_path)
     if note_type == '图集' and save_choice in ['media', 'media-image', 'all']:
         for img_index, img_url in enumerate(note_info['image_list']):
-            download_media(save_path, f'image_{img_index}', img_url, 'image')
+            download_media(assert_path, f'image_{img_index}', img_url, 'image')
     elif note_type == '视频' and save_choice in ['media', 'media-video', 'all']:
-        download_media(save_path, 'cover', note_info['video_cover'], 'image')
-        download_media(save_path, 'video', note_info['video_addr'], 'video')
+        download_media(assert_path, 'cover', note_info['video_cover'], 'image')
+        download_media(assert_path, 'video', note_info['video_addr'], 'video')
     return save_path
 
 

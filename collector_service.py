@@ -202,6 +202,18 @@ def available_child_path(parent: Path, preferred_name: str) -> Path:
         index += 1
 
 
+def available_note_markdown_path(keyword_dir: Path, preferred_stem: str) -> Path:
+    stem = safe_filename(preferred_stem, fallback="无标题", max_len=60)
+    index = 1
+    while True:
+        candidate_stem = stem if index == 1 else f"{stem}-{index}"
+        markdown_path = keyword_dir / f"{candidate_stem}.md"
+        asset_dir = keyword_dir / "assert" / candidate_stem
+        if not markdown_path.exists() and not asset_dir.exists():
+            return markdown_path
+        index += 1
+
+
 def resolve_output_root(config: Optional[Dict[str, Any]] = None) -> Path:
     storage = config.get("storage", {}) if config else {}
     configured = str(storage.get("output_dir") or "").strip()
@@ -216,6 +228,100 @@ def resolve_output_root(config: Optional[Dict[str, Any]] = None) -> Path:
 
 def relative_to_root(path: Path, root: Path) -> str:
     return path.resolve().relative_to(root.resolve()).as_posix()
+
+
+def is_output_markdown_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in [".md", ".markdown"]
+
+
+def markdown_link_target(path: str) -> str:
+    return f"<{str(path or '').replace('>', '%3E')}>"
+
+
+def note_asset_dir_for_markdown(markdown_path: Path) -> Path:
+    return markdown_path.parent / "assert" / markdown_path.stem
+
+
+def note_info_path_for_markdown(markdown_path: Path) -> Path:
+    return note_asset_dir_for_markdown(markdown_path) / "info.json"
+
+
+def markdown_for_note_asset_dir(asset_dir: Path) -> Optional[Path]:
+    if asset_dir.parent.name != "assert":
+        return None
+    note_parent = asset_dir.parent.parent
+    for suffix in [".md", ".markdown"]:
+        candidate = note_parent / f"{asset_dir.name}{suffix}"
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
+def resolve_note_reference_path(target: Path) -> Optional[Path]:
+    if target.is_file() and is_output_markdown_file(target):
+        if note_info_path_for_markdown(target).exists():
+            return target
+        if target.parent.joinpath("info.json").exists() or target.parent.joinpath("assert", "info.json").exists():
+            return target.parent
+
+    if target.is_file() and target.name == "info.json":
+        markdown_path = markdown_for_note_asset_dir(target.parent)
+        if markdown_path:
+            return markdown_path
+        if target.parent.name == "assert":
+            return target.parent.parent
+        return target.parent
+
+    if target.is_file():
+        if target.parent.joinpath("info.json").exists():
+            markdown_path = markdown_for_note_asset_dir(target.parent)
+            return markdown_path or target.parent
+        if target.parent.name == "assert" and (
+            target.parent.parent.joinpath("info.json").exists()
+            or target.parent.joinpath("info.json").exists()
+        ):
+            return target.parent.parent
+
+    if target.is_dir():
+        if target.joinpath("info.json").exists():
+            markdown_path = markdown_for_note_asset_dir(target)
+            return markdown_path or target
+        if target.joinpath("assert", "info.json").exists():
+            return target
+
+    return None
+
+
+def note_info_path_for_reference(note_ref: Path) -> Optional[Path]:
+    if is_output_markdown_file(note_ref):
+        info_path = note_info_path_for_markdown(note_ref)
+        return info_path if info_path.exists() else None
+    if note_ref.is_dir():
+        for candidate in [note_ref / "info.json", note_ref / "assert" / "info.json"]:
+            if candidate.exists():
+                return candidate
+    return None
+
+
+def note_markdown_path_for_reference(note_ref: Path) -> Optional[Path]:
+    if is_output_markdown_file(note_ref):
+        return note_ref
+    if note_ref.is_dir():
+        markdown_paths = sorted(path for path in note_ref.glob("*.md") if path.is_file())
+        if markdown_paths:
+            return markdown_paths[0]
+        markdown_path = markdown_for_note_asset_dir(note_ref)
+        if markdown_path:
+            return markdown_path
+    return None
+
+
+def note_asset_dir_for_reference(note_ref: Path) -> Path:
+    if is_output_markdown_file(note_ref):
+        return note_asset_dir_for_markdown(note_ref)
+    if note_ref.is_dir() and note_ref.parent.name == "assert":
+        return note_ref
+    return note_ref / "assert"
 
 
 def redact_cookie(cookie: str) -> str:
@@ -292,18 +398,25 @@ def download_url(url: str, target_without_ext: Path, default_ext: str) -> Tuple[
         return None, str(exc)
 
 
-def render_markdown(note: Dict[str, Any], media_items: List[Dict[str, Any]]) -> str:
+def render_markdown(note: Dict[str, Any], media_items: List[Dict[str, Any]], info_relative_path: str = "") -> str:
     title = note.get("title") or "无标题"
     lines = [
         f"# {title}",
         "",
+    ]
+    if info_relative_path:
+        lines.extend([
+            f"> 信息文件：[info.json]({markdown_link_target(info_relative_path)})",
+            "",
+        ])
+    lines.extend([
         "## 正文",
         "",
         str(note.get("desc") or "无正文"),
         "",
         "## 媒体",
         "",
-    ]
+    ])
 
     if not media_items:
         lines.extend(["无本地媒体文件。", ""])
@@ -314,18 +427,18 @@ def render_markdown(note: Dict[str, Any], media_items: List[Dict[str, Any]]) -> 
         source_url = item.get("source_url", "")
         error = item.get("error")
         if rel_path and media_type == "image":
-            lines.extend([f"![{label}]({rel_path})", ""])
+            lines.extend([f"![{label}]({markdown_link_target(rel_path)})", ""])
         elif rel_path and media_type == "video":
             poster = item.get("poster")
             poster_attr = f' poster="{poster}"' if poster else ""
             lines.extend([
                 f'<video controls src="{rel_path}"{poster_attr} style="max-width: 100%;"></video>',
                 "",
-                f"[打开视频文件]({rel_path})",
+                f"[打开视频文件]({markdown_link_target(rel_path)})",
                 "",
             ])
         elif rel_path:
-            lines.extend([f"[{label}]({rel_path})", ""])
+            lines.extend([f"[{label}]({markdown_link_target(rel_path)})", ""])
         else:
             lines.extend([f"- {label} 下载失败：{error or '未知错误'}", f"  原始地址：{source_url}", ""])
 
@@ -335,10 +448,12 @@ def render_markdown(note: Dict[str, Any], media_items: List[Dict[str, Any]]) -> 
 def save_note_as_markdown(note: Dict[str, Any], keyword_dir: Path, output_root: Path) -> Dict[str, Any]:
     note_id = str(note.get("note_id") or uuid.uuid4().hex)
     title = safe_filename(note.get("title"), fallback="无标题", max_len=60)
-    note_dir = available_child_path(keyword_dir, title)
-    assert_dir = note_dir / "assert"
-    note_dir.mkdir(parents=True, exist_ok=True)
+    md_path = available_note_markdown_path(keyword_dir, title)
+    note_name = md_path.stem
+    assert_dir = note_asset_dir_for_markdown(md_path)
+    keyword_dir.mkdir(parents=True, exist_ok=True)
     assert_dir.mkdir(parents=True, exist_ok=True)
+    info_rel_path = f"assert/{note_name}/info.json"
 
     media_items: List[Dict[str, Any]] = []
     note_type = note.get("note_type")
@@ -348,7 +463,7 @@ def save_note_as_markdown(note: Dict[str, Any], keyword_dir: Path, output_root: 
             media_items.append({
                 "type": "image",
                 "label": f"图片 {index + 1}",
-                "relative_path": f"assert/{file_name}" if file_name else None,
+                "relative_path": f"assert/{note_name}/{file_name}" if file_name else None,
                 "source_url": url,
                 "error": error,
             })
@@ -357,7 +472,7 @@ def save_note_as_markdown(note: Dict[str, Any], keyword_dir: Path, output_root: 
         cover_url = note.get("video_cover")
         if cover_url:
             file_name, error = download_url(cover_url, assert_dir / "cover", ".jpg")
-            poster_rel = f"assert/{file_name}" if file_name else None
+            poster_rel = f"assert/{note_name}/{file_name}" if file_name else None
             media_items.append({
                 "type": "image",
                 "label": "视频封面",
@@ -370,17 +485,16 @@ def save_note_as_markdown(note: Dict[str, Any], keyword_dir: Path, output_root: 
         media_items.append({
             "type": "video",
             "label": "视频",
-            "relative_path": f"assert/{file_name}" if file_name else None,
+            "relative_path": f"assert/{note_name}/{file_name}" if file_name else None,
             "poster": poster_rel,
             "source_url": video_url,
             "error": error,
         })
 
-    info_path = note_dir / "info.json"
+    info_path = assert_dir / "info.json"
     info_path.write_text(json.dumps(note, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    md_path = note_dir / f"{note_dir.name}.md"
-    md_path.write_text(render_markdown(note, media_items), encoding="utf-8")
+    md_path.write_text(render_markdown(note, media_items, info_rel_path), encoding="utf-8")
 
     return {
         "note_id": note_id,
@@ -389,8 +503,9 @@ def save_note_as_markdown(note: Dict[str, Any], keyword_dir: Path, output_root: 
         "liked_count": note.get("liked_count"),
         "upload_time": note.get("upload_time"),
         "note_url": note.get("note_url"),
-        "folder": relative_to_root(note_dir, output_root),
+        "folder": relative_to_root(md_path, output_root),
         "markdown": relative_to_root(md_path, output_root),
+        "info": relative_to_root(info_path, output_root),
         "media_count": len([item for item in media_items if item.get("relative_path")]),
     }
 
@@ -872,12 +987,13 @@ class RewriteService:
     ) -> Dict[str, Any]:
         if topic:
             self.topic = normalize_rewrite_requirements(topic)
-        note_folder = self._resolve_note_folder(relative_path)
-        target_note = self._load_note_folder(note_folder)
-        peers = self._peer_notes(note_folder)
+        note_ref = self._resolve_note_folder(relative_path)
+        target_note = self._load_note_folder(note_ref)
+        peers = self._peer_notes(note_ref)
         notes = [target_note] + [note for note in peers if note.get("note_id") != target_note.get("note_id")]
+        output_parent = note_ref.parent if note_ref.is_file() else note_ref
         target_dir = available_child_path(
-            note_folder,
+            output_parent,
             f"AI仿写_{safe_filename(self.topic_label(), fallback='requirements', max_len=28)}_{batch_name()}",
         )
         return self.generate(notes[:10], target_dir, mode="single", target_note=target_note, progress=progress)
@@ -976,10 +1092,11 @@ class RewriteService:
             folder = str(item.get("folder") or "").strip()
             if not folder:
                 continue
-            note_folder = safe_output_path(self.output_root, folder)
-            if not (note_folder / "info.json").exists():
+            try:
+                note_ref = self._resolve_note_folder(folder)
+            except FileNotFoundError:
                 continue
-            note = self._load_note_folder(note_folder)
+            note = self._load_note_folder(note_ref)
             note_id = note.get("note_id") or note.get("folder")
             if note_id in seen:
                 continue
@@ -1002,32 +1119,30 @@ class RewriteService:
 
     def _resolve_note_folder(self, relative_path: str) -> Path:
         target = safe_output_path(self.output_root, str(relative_path or "").strip())
-        if target.is_file():
-            if target.name == "info.json":
-                target = target.parent
-            elif target.parent.joinpath("info.json").exists():
-                target = target.parent
-            elif target.parent.name == "assert" and target.parent.parent.joinpath("info.json").exists():
-                target = target.parent.parent
-        if target.is_dir() and target.joinpath("info.json").exists():
-            return target
+        note_ref = resolve_note_reference_path(target)
+        if note_ref:
+            return note_ref
         raise FileNotFoundError("请选择包含 info.json 的单篇笔记目录或 Markdown 文件")
 
     def _load_note_folder(self, note_folder: Path) -> Dict[str, Any]:
-        info_path = note_folder / "info.json"
+        note_ref = resolve_note_reference_path(note_folder) or note_folder
+        info_path = note_info_path_for_reference(note_ref)
+        if not info_path:
+            raise FileNotFoundError("缺少 info.json")
         info = read_json(info_path, {})
         if not isinstance(info, dict):
             info = {}
-        markdown_paths = sorted(path for path in note_folder.glob("*.md") if path.is_file())
+        markdown_path = note_markdown_path_for_reference(note_ref)
         local_images = []
-        assert_dir = note_folder / "assert"
+        assert_dir = note_asset_dir_for_reference(note_ref)
         if assert_dir.exists():
             for child in sorted(assert_dir.iterdir()):
                 if child.is_file() and child.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp", ".gif"]:
                     local_images.append(relative_to_root(child, self.output_root))
+        fallback_name = markdown_path.stem if markdown_path else note_ref.name
         return {
-            "note_id": str(info.get("note_id") or note_folder.name),
-            "title": str(info.get("title") or note_folder.name),
+            "note_id": str(info.get("note_id") or fallback_name),
+            "title": str(info.get("title") or fallback_name),
             "desc": str(info.get("desc") or ""),
             "liked_count": info.get("liked_count"),
             "collected_count": info.get("collected_count"),
@@ -1038,23 +1153,29 @@ class RewriteService:
             "note_type": info.get("note_type"),
             "tags": info.get("tags") or [],
             "image_list": info.get("image_list") or [],
-            "folder": relative_to_root(note_folder, self.output_root),
-            "markdown": relative_to_root(markdown_paths[0], self.output_root) if markdown_paths else "",
+            "folder": relative_to_root(note_ref, self.output_root),
+            "markdown": relative_to_root(markdown_path, self.output_root) if markdown_path else "",
+            "info": relative_to_root(info_path, self.output_root),
             "local_images": local_images,
         }
 
     def _peer_notes(self, note_folder: Path) -> List[Dict[str, Any]]:
         peers = []
-        search_roots = [note_folder.parent, note_folder.parent.parent]
+        note_ref = resolve_note_reference_path(note_folder) or note_folder
+        current = note_ref.resolve()
+        search_roots = [note_ref.parent, note_ref.parent.parent]
         seen = set()
         for root in search_roots:
             if not root.exists() or root.resolve() == self.output_root:
                 continue
             for info_path in root.rglob("info.json"):
-                candidate = info_path.parent
-                if candidate == note_folder or candidate in seen:
+                candidate = resolve_note_reference_path(info_path)
+                if not candidate:
                     continue
-                seen.add(candidate)
+                candidate_resolved = candidate.resolve()
+                if candidate_resolved == current or candidate_resolved in seen:
+                    continue
+                seen.add(candidate_resolved)
                 try:
                     peers.append(self._load_note_folder(candidate))
                 except Exception:
@@ -2129,9 +2250,15 @@ def has_visible_output_content(path: Path) -> bool:
 
 
 def is_note_metadata_entry(path: Path, parent: Path) -> bool:
-    if not parent.joinpath("info.json").exists():
-        return False
-    return path.name == "info.json" or (path.is_dir() and path.name == "assert")
+    if path.name == "info.json" and resolve_note_reference_path(path):
+        return True
+    if path.is_dir() and path.name == "assert":
+        return (
+            parent.joinpath("info.json").exists()
+            or parent.joinpath("assert", "info.json").exists()
+            or any(child.is_file() and child.suffix.lower() in [".md", ".markdown"] for child in parent.iterdir())
+        )
+    return False
 
 
 def list_output_files(output_root: Path, relative_path: str = "", show_note_metadata: bool = False) -> Dict[str, Any]:
@@ -2151,13 +2278,9 @@ def list_output_files(output_root: Path, relative_path: str = "", show_note_meta
         if child.is_dir() and not has_visible_output_content(child):
             continue
         stat = child.stat()
-        rewriteable = (
-            (child.is_dir() and child.joinpath("info.json").exists())
-            or (
-                child.is_file()
-                and child.suffix.lower() in [".md", ".markdown"]
-                and child.parent.joinpath("info.json").exists()
-            )
+        rewriteable = bool(resolve_note_reference_path(child)) and (
+            child.is_dir()
+            or (child.is_file() and child.suffix.lower() in [".md", ".markdown"])
         )
         sortable_entries.append({
             "is_file": child.is_file(),
@@ -2188,10 +2311,6 @@ def list_output_files(output_root: Path, relative_path: str = "", show_note_meta
         "parent": parent,
         "entries": entries,
     }
-
-
-def is_output_markdown_file(path: Path) -> bool:
-    return path.is_file() and path.suffix.lower() in [".md", ".markdown"]
 
 
 def is_rewrite_markdown_path(path: Path, output_root: Path) -> bool:
@@ -2236,7 +2355,7 @@ def summarize_recent_markdown_file(path: Path, output_root: Path, kind: str) -> 
         "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
         "modified_ts": stat.st_mtime,
         "previewable": True,
-        "rewriteable": kind == "crawled" and folder.joinpath("info.json").exists(),
+        "rewriteable": kind == "crawled" and bool(resolve_note_reference_path(path)),
     }
 
 
@@ -2259,7 +2378,7 @@ def list_recent_markdown_files(output_root: Path, limit: int = 8) -> Dict[str, A
                 if path.name == "仿写文案.md":
                     rewritten.append(summarize_recent_markdown_file(path, output_root, "rewrite"))
                 continue
-            if path.parent.joinpath("info.json").exists():
+            if resolve_note_reference_path(path):
                 crawled.append(summarize_recent_markdown_file(path, output_root, "crawled"))
         except OSError:
             continue

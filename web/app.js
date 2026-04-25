@@ -1955,7 +1955,10 @@ function filePathDepth(path = '') {
 }
 
 function localMarkdownDownloadUrl(url, sourcePath = '') {
-  const raw = String(url || '').trim();
+  let raw = String(url || '').trim();
+  if (raw.startsWith('<') && raw.endsWith('>')) {
+    raw = raw.slice(1, -1).trim();
+  }
   if (!raw || raw.startsWith('#')) return raw;
   if (/^(https?:|mailto:|tel:)/i.test(raw)) return raw;
   if (raw.startsWith('//')) return `https:${raw}`;
