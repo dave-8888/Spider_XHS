@@ -162,17 +162,6 @@
             <input id="publishDaysInput" type="number" min="0" max="3650" value="7">
           </label>
         </div>
-        <div class="row spread switch-row">
-          <div>
-            <strong>显示采集元数据</strong>
-            <p class="muted">开启后在文案创作文件树中显示 assert 文件夹和 info.json。</p>
-          </div>
-          <label class="switch">
-            <input id="showNoteMetadataInput" type="checkbox">
-            <span></span>
-          </label>
-        </div>
-        <p class="muted">目录通过系统选择器指定，恢复默认后使用项目内默认输出目录。</p>
       </article>
     </section>
 
@@ -186,30 +175,30 @@
       </div>
 
       <div class="settings-filter-grid">
-        <div class="choice-section">
-          <h3>排序依据</h3>
-          <div id="sortTypeChoices" class="choice-grid"></div>
-        </div>
+        <label class="field choice-section">
+          <span>排序依据</span>
+          <select id="sortTypeChoices"></select>
+        </label>
 
-        <div class="choice-section">
-          <h3>笔记类型</h3>
-          <div id="contentTypeChoices" class="choice-grid compact"></div>
-        </div>
+        <label class="field choice-section">
+          <span>笔记类型</span>
+          <select id="contentTypeChoices"></select>
+        </label>
 
-        <div class="choice-section">
-          <h3>发布时间</h3>
-          <div id="publishTimeChoices" class="choice-grid"></div>
-        </div>
+        <label class="field choice-section">
+          <span>发布时间</span>
+          <select id="publishTimeChoices"></select>
+        </label>
 
-        <div class="choice-section">
-          <h3>搜索范围</h3>
-          <div id="noteRangeChoices" class="choice-grid compact"></div>
-        </div>
+        <label class="field choice-section">
+          <span>搜索范围</span>
+          <select id="noteRangeChoices"></select>
+        </label>
 
-        <div class="choice-section">
-          <h3>位置距离</h3>
-          <div id="posDistanceChoices" class="choice-grid compact"></div>
-        </div>
+        <label class="field choice-section">
+          <span>位置距离</span>
+          <select id="posDistanceChoices"></select>
+        </label>
       </div>
     </section>
 

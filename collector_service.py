@@ -52,6 +52,8 @@ REWRITE_LOG_MARKERS = (
 )
 DEFAULT_REWRITE_REQUIREMENTS = "创业沙龙"
 MAX_REWRITE_REQUIREMENTS_LENGTH = 2000
+NOTE_ASSET_DIR_NAMES = {"assert", "assets", "asset", "media", "images", "imgs", "videos"}
+JOB_PAGE_SIZE_OPTIONS = {10, 20, 50, 100}
 
 SORT_LABELS = {
     0: "综合",
@@ -242,12 +244,21 @@ def note_asset_dir_for_markdown(markdown_path: Path) -> Path:
     return markdown_path.parent / "assert" / markdown_path.stem
 
 
+def note_asset_dir_candidates_for_markdown(markdown_path: Path) -> List[Path]:
+    names = ["assert", "assets", "asset", "media", "images", "imgs", "videos"]
+    return [markdown_path.parent / name / markdown_path.stem for name in names]
+
+
 def note_info_path_for_markdown(markdown_path: Path) -> Path:
+    for asset_dir in note_asset_dir_candidates_for_markdown(markdown_path):
+        info_path = asset_dir / "info.json"
+        if info_path.exists():
+            return info_path
     return note_asset_dir_for_markdown(markdown_path) / "info.json"
 
 
 def markdown_for_note_asset_dir(asset_dir: Path) -> Optional[Path]:
-    if asset_dir.parent.name != "assert":
+    if asset_dir.parent.name not in NOTE_ASSET_DIR_NAMES:
         return None
     note_parent = asset_dir.parent.parent
     for suffix in [".md", ".markdown"]:
@@ -619,6 +630,9 @@ class ConfigStore:
             "storage": {
                 "output_dir": "",
             },
+            "ui": {
+                "job_page_size": 10,
+            },
             "rewrite": {
                 "enabled": False,
                 "topic": DEFAULT_REWRITE_REQUIREMENTS,
@@ -751,7 +765,11 @@ class ConfigStore:
 
         storage = sanitized.setdefault("storage", {})
         storage["output_dir"] = str(storage.get("output_dir") or "").strip().strip("'").strip('"')
-        storage["show_note_metadata"] = bool(storage.get("show_note_metadata"))
+        storage.pop("show_note_metadata", None)
+
+        ui = sanitized.setdefault("ui", {})
+        job_page_size = to_int(ui.get("job_page_size"), 10)
+        ui["job_page_size"] = job_page_size if job_page_size in JOB_PAGE_SIZE_OPTIONS else 10
 
         rewrite = sanitized.setdefault("rewrite", {})
         rewrite["enabled"] = bool(rewrite.get("enabled"))
@@ -2294,16 +2312,16 @@ def has_visible_output_content(path: Path) -> bool:
 def is_note_metadata_entry(path: Path, parent: Path) -> bool:
     if path.name == "info.json" and resolve_note_reference_path(path):
         return True
-    if path.is_dir() and path.name == "assert":
+    if path.is_dir() and path.name in NOTE_ASSET_DIR_NAMES:
         return (
             parent.joinpath("info.json").exists()
-            or parent.joinpath("assert", "info.json").exists()
+            or any(parent.joinpath(name, "info.json").exists() for name in NOTE_ASSET_DIR_NAMES)
             or any(child.is_file() and child.suffix.lower() in [".md", ".markdown"] for child in parent.iterdir())
         )
     return False
 
 
-def list_output_files(output_root: Path, relative_path: str = "", show_note_metadata: bool = False) -> Dict[str, Any]:
+def list_output_files(output_root: Path, relative_path: str = "") -> Dict[str, Any]:
     ensure_data_dirs()
     output_root.mkdir(parents=True, exist_ok=True)
     target = safe_output_path(output_root, relative_path or "")
@@ -2313,7 +2331,7 @@ def list_output_files(output_root: Path, relative_path: str = "", show_note_meta
         target = target.parent
     sortable_entries = []
     for child in target.iterdir():
-        if not show_note_metadata and is_note_metadata_entry(child, target):
+        if is_note_metadata_entry(child, target):
             continue
         if is_hidden_output_entry(child):
             continue

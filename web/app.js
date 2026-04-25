@@ -78,7 +78,6 @@ const settingsEls = {
   searchDelayMaxInput: document.querySelector('#searchDelayMaxInput'),
   detailDelayMinInput: document.querySelector('#detailDelayMinInput'),
   detailDelayMaxInput: document.querySelector('#detailDelayMaxInput'),
-  showNoteMetadataInput: document.querySelector('#showNoteMetadataInput'),
   scheduleEnabledInput: document.querySelector('#scheduleEnabledInput'),
   cycleInput: document.querySelector('#cycleInput'),
   dailyRunsInput: document.querySelector('#dailyRunsInput'),
@@ -141,6 +140,7 @@ const state = {
   jobFilter: 'all',
   jobTypeFilter: 'all',
   jobPage: 1,
+  jobPageSize: 10,
   currentJobs: [],
   jobMultiSelectMode: false,
   selectedJobIds: new Set(),
@@ -169,7 +169,8 @@ const state = {
   selectedFilePaths: new Set(),
 };
 
-const JOB_PAGE_SIZE = 8;
+const JOB_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+const DEFAULT_JOB_PAGE_SIZE = 10;
 const FILE_LAYOUT_DEFAULT_LIST_PERCENT = 20;
 const FILE_LAYOUT_MIN_LIST_PERCENT = 16;
 const FILE_LAYOUT_MAX_LIST_PERCENT = 55;
@@ -577,7 +578,7 @@ function ensureJobVisibleOnCurrentPage(jobId) {
   const filteredJobs = filterJobs(state.currentJobs);
   const index = filteredJobs.findIndex((job) => job.id === jobId);
   if (index >= 0) {
-    state.jobPage = Math.floor(index / JOB_PAGE_SIZE) + 1;
+    state.jobPage = Math.floor(index / state.jobPageSize) + 1;
   }
 }
 
@@ -701,6 +702,11 @@ function clampNumber(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
+function normalizeJobPageSize(value) {
+  const size = Number(value);
+  return JOB_PAGE_SIZE_OPTIONS.includes(size) ? size : DEFAULT_JOB_PAGE_SIZE;
+}
+
 async function api(url, options = {}) {
   const response = await fetch(url, {
     headers: { 'Content-Type': 'application/json' },
@@ -776,24 +782,37 @@ function renderChoiceButtons(container, choiceMap, value, onSelect, { multi = fa
   });
 }
 
+function renderChoiceSelect(select, choiceMap, value, onSelect, { disabled = false } = {}) {
+  if (!select) return;
+  const entries = Object.entries(choiceMap || {}).sort((a, b) => Number(a[0]) - Number(b[0]));
+  select.innerHTML = entries.map(([key, label]) => (
+    `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`
+  )).join('');
+  select.value = String(value);
+  select.disabled = disabled;
+  select.onchange = () => {
+    onSelect(Number(select.value));
+  };
+}
+
 function renderHomeChoices() {
-  renderChoiceButtons(homeEls.sortTypeChoices, state.choices.sort_type, state.homeFilters.sort_type, (selected) => {
+  renderChoiceSelect(homeEls.sortTypeChoices, state.choices.sort_type, state.homeFilters.sort_type, (selected) => {
     state.homeFilters.sort_type = selected;
     renderHomeChoices();
   }, { disabled: state.collectBusy });
-  renderChoiceButtons(homeEls.contentTypeChoices, state.choices.content_type, state.homeFilters.content_type, (selected) => {
+  renderChoiceSelect(homeEls.contentTypeChoices, state.choices.content_type, state.homeFilters.content_type, (selected) => {
     state.homeFilters.content_type = selected;
     renderHomeChoices();
   }, { disabled: state.collectBusy });
-  renderChoiceButtons(homeEls.publishTimeChoices, state.choices.publish_time, state.homeFilters.publish_time, (selected) => {
+  renderChoiceSelect(homeEls.publishTimeChoices, state.choices.publish_time, state.homeFilters.publish_time, (selected) => {
     state.homeFilters.publish_time = selected;
     renderHomeChoices();
   }, { disabled: state.collectBusy });
-  renderChoiceButtons(homeEls.noteRangeChoices, state.choices.note_range, state.homeFilters.note_range, (selected) => {
+  renderChoiceSelect(homeEls.noteRangeChoices, state.choices.note_range, state.homeFilters.note_range, (selected) => {
     state.homeFilters.note_range = selected;
     renderHomeChoices();
   }, { disabled: state.collectBusy });
-  renderChoiceButtons(homeEls.posDistanceChoices, state.choices.pos_distance, state.homeFilters.pos_distance, (selected) => {
+  renderChoiceSelect(homeEls.posDistanceChoices, state.choices.pos_distance, state.homeFilters.pos_distance, (selected) => {
     state.homeFilters.pos_distance = selected;
     renderHomeChoices();
   }, { disabled: state.collectBusy });
@@ -820,6 +839,7 @@ function applyHomeConfig(config) {
   state.homeFilters.publish_time = Number(filters.publish_time ?? 2);
   state.homeFilters.note_range = Number(filters.note_range ?? 0);
   state.homeFilters.pos_distance = Number(filters.pos_distance ?? 0);
+  state.jobPageSize = normalizeJobPageSize(config.ui?.job_page_size);
   state.selectedOutputDir = config.storage?.output_dir ?? '';
   state.defaultOutputRoot = config.paths?.markdown_root || 'datas/markdown_datas';
   state.outputDirDisplay = config.paths?.output_root || state.defaultOutputRoot;
@@ -833,9 +853,6 @@ function applyHomeConfig(config) {
   }
   if (homeEls.publishDaysInput) {
     homeEls.publishDaysInput.value = filters.publish_days ?? 7;
-  }
-  if (settingsEls.showNoteMetadataInput) {
-    settingsEls.showNoteMetadataInput.checked = Boolean(config.storage?.show_note_metadata);
   }
   updateOutputRoot(config);
   renderKeywordList();
@@ -973,9 +990,6 @@ function readHomeDraft() {
     },
     storage: {
       output_dir: state.selectedOutputDir.trim() || '',
-      show_note_metadata: settingsEls.showNoteMetadataInput
-        ? Boolean(settingsEls.showNoteMetadataInput.checked)
-        : Boolean(state.config?.storage?.show_note_metadata),
     },
   };
 }
@@ -1040,7 +1054,7 @@ async function saveSettings() {
 }
 
 async function pickOutputFolder() {
-  const currentPath = state.selectedOutputDir || state.outputDirDisplay || state.currentOutputRoot || state.defaultOutputRoot;
+  const currentPath = state.outputDirDisplay || state.selectedOutputDir || state.currentOutputRoot || state.defaultOutputRoot;
   const data = await api('/api/storage/pick-folder', {
     method: 'POST',
     body: JSON.stringify({ current_path: currentPath }),
@@ -1572,8 +1586,8 @@ function jobCanBeDeleted(job = {}) {
 
 function currentPageJobs(jobs = state.currentJobs) {
   const filteredJobs = filterJobs(Array.isArray(jobs) ? jobs : []);
-  const pageStart = (state.jobPage - 1) * JOB_PAGE_SIZE;
-  return filteredJobs.slice(pageStart, pageStart + JOB_PAGE_SIZE);
+  const pageStart = (state.jobPage - 1) * state.jobPageSize;
+  return filteredJobs.slice(pageStart, pageStart + state.jobPageSize);
 }
 
 function pruneSelectedJobIds(jobs = state.currentJobs) {
@@ -1796,7 +1810,7 @@ function renderJobTypeFilters(jobs) {
 }
 
 function jobPageCount(total) {
-  return Math.max(1, Math.ceil(total / JOB_PAGE_SIZE));
+  return Math.max(1, Math.ceil(total / state.jobPageSize));
 }
 
 function clampJobPage(total) {
@@ -1841,8 +1855,8 @@ function renderJobPagination(totalJobs, pageCount = jobPageCount(totalJobs)) {
   }
 
   const currentPage = state.jobPage;
-  const from = (currentPage - 1) * JOB_PAGE_SIZE + 1;
-  const to = Math.min(totalJobs, currentPage * JOB_PAGE_SIZE);
+  const from = (currentPage - 1) * state.jobPageSize + 1;
+  const to = Math.min(totalJobs, currentPage * state.jobPageSize);
   const pageItems = jobPaginationItems(pageCount, currentPage).map((item, index) => {
     if (item === 'ellipsis') {
       return `<span class="job-page-ellipsis" aria-hidden="true" data-page-gap="${index}">…</span>`;
@@ -1857,10 +1871,19 @@ function renderJobPagination(totalJobs, pageCount = jobPageCount(totalJobs)) {
       >${item}</button>
     `;
   }).join('');
+  const pageSizeOptions = JOB_PAGE_SIZE_OPTIONS.map((size) => (
+    `<option value="${size}" ${state.jobPageSize === size ? 'selected' : ''}>每页 ${size} 条</option>`
+  )).join('');
 
   homeEls.jobPagination.classList.remove('is-hidden');
   homeEls.jobPagination.innerHTML = `
-    <div class="job-page-summary">第 ${escapeHtml(currentPage)} / ${escapeHtml(pageCount)} 页 · ${escapeHtml(from)}-${escapeHtml(to)} / ${escapeHtml(totalJobs)} 条</div>
+    <div class="job-page-summary-wrap">
+      <div class="job-page-summary">第 ${escapeHtml(currentPage)} / ${escapeHtml(pageCount)} 页 · ${escapeHtml(from)}-${escapeHtml(to)} / ${escapeHtml(totalJobs)} 条</div>
+      <label class="job-page-size-control">
+        <span>分页大小</span>
+        <select data-job-page-size aria-label="设置任务分页大小">${pageSizeOptions}</select>
+      </label>
+    </div>
     <div class="job-page-buttons">
       <button class="job-page-btn job-page-arrow" type="button" data-job-page="prev" title="上一页" aria-label="上一页" ${currentPage <= 1 ? 'disabled' : ''}>
         <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>
@@ -1871,6 +1894,26 @@ function renderJobPagination(totalJobs, pageCount = jobPageCount(totalJobs)) {
       </button>
     </div>
   `;
+}
+
+async function saveJobPageSize(size, previousSize) {
+  try {
+    const data = await api('/api/config', {
+      method: 'POST',
+      body: JSON.stringify({ ui: { job_page_size: size } }),
+    });
+    state.config = data.config;
+    state.choices = data.config?.choices || state.choices;
+    state.jobPageSize = normalizeJobPageSize(data.config?.ui?.job_page_size);
+    state.jobPage = 1;
+    renderJobs(state.currentJobs);
+    toast(`任务分页已设置为每页 ${state.jobPageSize} 条`);
+  } catch (error) {
+    state.jobPageSize = previousSize;
+    state.jobPage = 1;
+    renderJobs(state.currentJobs);
+    toast(error.message || '分页大小保存失败');
+  }
 }
 
 function saveJobLogOpenState() {
@@ -1973,8 +2016,8 @@ function renderJobs(jobs) {
     renderJobEmptyState('该状态下暂无任务');
     return;
   }
-  const pageStart = (state.jobPage - 1) * JOB_PAGE_SIZE;
-  const visibleJobs = filteredJobs.slice(pageStart, pageStart + JOB_PAGE_SIZE);
+  const pageStart = (state.jobPage - 1) * state.jobPageSize;
+  const visibleJobs = filteredJobs.slice(pageStart, pageStart + state.jobPageSize);
 
   homeEls.jobList.classList.remove('muted', 'job-list-empty');
   homeEls.jobList.innerHTML = visibleJobs.map((job) => {
@@ -3700,6 +3743,17 @@ function bindHomeEvents() {
       }
       state.jobPage = Math.min(Math.max(1, state.jobPage), pageCount);
       renderJobs(state.currentJobs);
+    });
+    homeEls.jobPagination.addEventListener('change', (event) => {
+      const select = event.target.closest('[data-job-page-size]');
+      if (!select) return;
+      const previousSize = state.jobPageSize;
+      const nextSize = normalizeJobPageSize(select.value);
+      if (nextSize === previousSize) return;
+      state.jobPageSize = nextSize;
+      state.jobPage = 1;
+      renderJobs(state.currentJobs);
+      saveJobPageSize(nextSize, previousSize);
     });
   }
   if (homeEls.jobList) {

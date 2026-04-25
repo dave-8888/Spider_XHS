@@ -455,13 +455,14 @@ def open_data_folder(relative_path: str = "") -> Dict[str, Any]:
 
 def folder_picker_start_path(current_path: str = "") -> Path:
     raw = str(current_path or "").strip()
+    fallback = resolve_output_root(config_store.load())
     if raw:
         expanded = os.path.expandvars(os.path.expanduser(raw))
         candidate = Path(expanded)
         if not candidate.is_absolute():
             candidate = RELATIVE_STORAGE_ROOT / candidate
     else:
-        candidate = resolve_output_root(config_store.load())
+        candidate = fallback
 
     candidate = candidate.resolve()
     if candidate.is_file():
@@ -470,7 +471,9 @@ def folder_picker_start_path(current_path: str = "") -> Path:
     while not candidate.exists() and candidate != candidate.parent:
         candidate = candidate.parent
 
-    return candidate if candidate.exists() else RELATIVE_STORAGE_ROOT
+    if candidate.exists():
+        return candidate
+    return fallback if fallback.exists() else RELATIVE_STORAGE_ROOT
 
 
 def run_folder_picker(command: List[str]) -> Optional[str]:
@@ -609,13 +612,11 @@ class AppHandler(BaseHTTPRequestHandler):
             elif path == "/api/files":
                 rel = query.get("path", [""])[0]
                 config = config_store.load()
-                storage = config.get("storage", {}) if isinstance(config.get("storage"), dict) else {}
                 json_response(self, {
                     "success": True,
                     "files": list_output_files(
                         resolve_output_root(config),
                         rel,
-                        show_note_metadata=bool(storage.get("show_note_metadata")),
                     ),
                 })
             elif path == "/api/recent-md":

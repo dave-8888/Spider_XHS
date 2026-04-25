@@ -23,8 +23,10 @@
     "pos_distance": 0
   },
   "storage": {
-    "output_dir": "",
-    "show_note_metadata": false
+    "output_dir": ""
+  },
+  "ui": {
+    "job_page_size": 10
   },
   "rewrite": {
     "enabled": false,
