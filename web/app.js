@@ -54,8 +54,19 @@ const homeEls = {
   filePreview: document.querySelector('#filePreview'),
   filePreviewMeta: document.querySelector('#filePreviewMeta'),
   filePreviewSubMeta: document.querySelector('#filePreviewSubMeta'),
+  previewRewriteBtn: document.querySelector('#previewRewriteBtn'),
+  previewRewritePopover: document.querySelector('#previewRewritePopover'),
+  previewRewriteInput: document.querySelector('#previewRewriteInput'),
+  previewRewriteName: document.querySelector('#previewRewriteName'),
+  submitPreviewRewriteBtn: document.querySelector('#submitPreviewRewriteBtn'),
+  cancelPreviewRewriteBtn: document.querySelector('#cancelPreviewRewriteBtn'),
   copyPreviewTextBtn: document.querySelector('#copyPreviewTextBtn'),
   closePreviewBtn: document.querySelector('#closePreviewBtn'),
+  markdownImageLightbox: document.querySelector('#markdownImageLightbox'),
+  markdownImageLightboxImg: document.querySelector('#markdownImageLightboxImg'),
+  markdownImageLightboxTitle: document.querySelector('#markdownImageLightboxTitle'),
+  markdownImageLightboxStatus: document.querySelector('#markdownImageLightboxStatus'),
+  closeMarkdownImageLightboxBtn: document.querySelector('#closeMarkdownImageLightboxBtn'),
   fileSelectionWrap: document.querySelector('#fileSelectionWrap'),
   fileSelectionSummary: document.querySelector('#fileSelectionSummary'),
   recentCrawledMdList: document.querySelector('#recentCrawledMdList'),
@@ -119,6 +130,9 @@ const state = {
   currentPreviewPath: '',
   currentPreviewContent: '',
   currentPreviewMode: 'text',
+  previewRewriteOpen: false,
+  previewRewritePath: '',
+  markdownImageLightboxPreviousFocus: null,
   jobPoller: null,
   loginPoller: null,
   homeFilters: {
@@ -560,6 +574,7 @@ function setHomeBusy(isBusy) {
   } else {
     updateFileToolbarState();
   }
+  updatePreviewRewriteState();
 }
 
 function findJobCard(jobId) {
@@ -2228,6 +2243,12 @@ function localMarkdownDownloadUrl(url, sourcePath = '') {
   return resolvedPath ? `/download?path=${encodeURIComponent(resolvedPath)}${hashPart}` : '';
 }
 
+function renderMarkdownImage(src, alt = '') {
+  const label = String(alt || '').trim();
+  const ariaLabel = label ? `预览图片：${label}` : '预览图片';
+  return `<img class="markdown-preview-image" src="${escapeHtml(src)}" alt="${escapeHtml(label)}" loading="lazy" tabindex="0" role="button" title="点击预览图片" aria-label="${escapeHtml(ariaLabel)}">`;
+}
+
 function renderInlineStyles(html) {
   return html
     .replace(/&lt;br\s*\/?&gt;/gi, '<br>')
@@ -2256,7 +2277,7 @@ function renderInlineMarkdown(text, sourcePath = '') {
       if (!href) {
         html += renderInlineStyles(escapeHtml(label));
       } else if (isImage) {
-        html += `<img src="${escapeHtml(href)}" alt="${escapeHtml(label)}" loading="lazy">`;
+        html += renderMarkdownImage(href, label);
       } else {
         const external = /^(https?:|mailto:|tel:)/i.test(href);
         const attrs = external ? ' target="_blank" rel="noopener noreferrer"' : '';
@@ -2435,7 +2456,7 @@ function renderMarkdown(content, sourcePath = '') {
     if (imageMatch) {
       const src = localMarkdownDownloadUrl(imageMatch[2], sourcePath);
       if (src) {
-        html.push(`<figure><img src="${escapeHtml(src)}" alt="${escapeHtml(imageMatch[1] || '')}" loading="lazy"></figure>`);
+        html.push(`<figure>${renderMarkdownImage(src, imageMatch[1] || '')}</figure>`);
       }
       index += 1;
       continue;
@@ -2460,6 +2481,92 @@ function renderMarkdown(content, sourcePath = '') {
   return html.join('\n') || '<p></p>';
 }
 
+function markdownImageTitleFromSrc(src = '') {
+  const safeDecode = (value) => {
+    try {
+      return decodeURIComponent(value || '');
+    } catch (_error) {
+      return value || '';
+    }
+  };
+  try {
+    const url = new URL(src, window.location.href);
+    const downloadPath = url.searchParams.get('path');
+    const name = fileBaseName(downloadPath || url.pathname || '');
+    return safeDecode(name) || '图片预览';
+  } catch (_error) {
+    const cleanSrc = String(src || '').split(/[?#]/)[0];
+    return safeDecode(fileBaseName(cleanSrc)) || '图片预览';
+  }
+}
+
+function setMarkdownImageLightboxStatus(message = '', tone = '') {
+  if (!homeEls.markdownImageLightboxStatus) return;
+  homeEls.markdownImageLightboxStatus.textContent = message;
+  homeEls.markdownImageLightboxStatus.className = `markdown-image-lightbox-status ${tone}`.trim();
+}
+
+function closeMarkdownImageLightbox({ restoreFocus = true } = {}) {
+  const lightbox = homeEls.markdownImageLightbox;
+  const image = homeEls.markdownImageLightboxImg;
+  if (!lightbox) return;
+  lightbox.hidden = true;
+  lightbox.setAttribute('aria-hidden', 'true');
+  lightbox.classList.remove('is-open', 'is-loading', 'is-error');
+  document.body.classList.remove('has-markdown-image-lightbox');
+  if (image) {
+    image.onload = null;
+    image.onerror = null;
+    image.removeAttribute('src');
+    image.alt = '';
+  }
+  setMarkdownImageLightboxStatus('');
+
+  const previousFocus = state.markdownImageLightboxPreviousFocus;
+  state.markdownImageLightboxPreviousFocus = null;
+  if (restoreFocus && previousFocus && typeof previousFocus.focus === 'function') {
+    previousFocus.focus();
+  }
+}
+
+function openMarkdownImageLightbox(imageElement) {
+  const lightbox = homeEls.markdownImageLightbox;
+  const image = homeEls.markdownImageLightboxImg;
+  if (!lightbox || !imageElement || !image) return;
+
+  const src = imageElement.currentSrc || imageElement.getAttribute('src') || '';
+  if (!src) return;
+  const alt = imageElement.getAttribute('alt') || '';
+  const title = alt.trim() || markdownImageTitleFromSrc(src);
+  state.markdownImageLightboxPreviousFocus = document.activeElement;
+
+  if (homeEls.markdownImageLightboxTitle) {
+    homeEls.markdownImageLightboxTitle.textContent = title;
+  }
+
+  image.onload = () => {
+    lightbox.classList.remove('is-loading', 'is-error');
+    setMarkdownImageLightboxStatus('');
+  };
+  image.onerror = () => {
+    lightbox.classList.remove('is-loading');
+    lightbox.classList.add('is-error');
+    setMarkdownImageLightboxStatus('图片加载失败', 'is-error');
+  };
+  image.alt = title;
+  image.src = src;
+
+  lightbox.hidden = false;
+  lightbox.setAttribute('aria-hidden', 'false');
+  lightbox.classList.add('is-open', 'is-loading');
+  lightbox.classList.remove('is-error');
+  document.body.classList.add('has-markdown-image-lightbox');
+  setMarkdownImageLightboxStatus('图片加载中...');
+  window.requestAnimationFrame(() => {
+    homeEls.closeMarkdownImageLightboxBtn?.focus();
+  });
+}
+
 function defaultPreviewState(overrides = {}) {
   return {
     path: '',
@@ -2476,6 +2583,131 @@ function defaultPreviewState(overrides = {}) {
 
 function setElementHidden(element, hidden) {
   if (element) element.hidden = Boolean(hidden);
+}
+
+function previewRewriteDefaultTopic() {
+  return (state.config?.rewrite?.topic || '创业沙龙').trim() || '创业沙龙';
+}
+
+function recentCrawledMarkdownEntry(path = '') {
+  const normalizedPath = normalizeFilePath(path);
+  if (!normalizedPath) return null;
+  return (state.recentMarkdown.crawled || [])
+    .find((item) => normalizeFilePath(item.path || '') === normalizedPath) || null;
+}
+
+function currentPreviewRewriteTarget() {
+  const path = normalizeFilePath(state.currentPreviewPath);
+  if (!path) return null;
+
+  const entry = state.currentFileEntries.get(path);
+  if (entry?.rewriteable) {
+    return {
+      path,
+      name: entry.name || fileBaseName(path),
+    };
+  }
+
+  const recentEntry = recentCrawledMarkdownEntry(path);
+  if (recentEntry?.rewriteable) {
+    return {
+      path,
+      name: recentEntry.name || fileBaseName(path),
+    };
+  }
+
+  return null;
+}
+
+function closePreviewRewritePopover({ restoreFocus = false } = {}) {
+  if (!homeEls.previewRewritePopover) return;
+  state.previewRewriteOpen = false;
+  state.previewRewritePath = '';
+  homeEls.previewRewritePopover.hidden = true;
+  if (homeEls.previewRewriteBtn) {
+    homeEls.previewRewriteBtn.setAttribute('aria-expanded', 'false');
+    homeEls.previewRewriteBtn.classList.remove('is-active');
+  }
+  if (restoreFocus && homeEls.previewRewriteBtn && !homeEls.previewRewriteBtn.disabled) {
+    homeEls.previewRewriteBtn.focus();
+  }
+  updatePreviewRewriteState();
+}
+
+function updatePreviewRewriteState() {
+  const target = currentPreviewRewriteTarget();
+  const busy = state.collectBusy || state.rewriteBusy;
+  const disabled = !target || busy;
+
+  if (!target && state.previewRewriteOpen) {
+    closePreviewRewritePopover({ restoreFocus: false });
+    return;
+  }
+
+  if (homeEls.previewRewriteBtn) {
+    homeEls.previewRewriteBtn.disabled = disabled;
+    homeEls.previewRewriteBtn.classList.toggle('is-active', state.previewRewriteOpen);
+    homeEls.previewRewriteBtn.setAttribute('aria-expanded', state.previewRewriteOpen ? 'true' : 'false');
+    homeEls.previewRewriteBtn.title = target ? '仿写当前预览' : '当前预览不可仿写';
+  }
+  if (homeEls.previewRewriteName) {
+    homeEls.previewRewriteName.textContent = target?.name || '当前预览';
+  }
+  if (homeEls.previewRewriteInput) {
+    homeEls.previewRewriteInput.disabled = busy;
+  }
+  if (homeEls.submitPreviewRewriteBtn) {
+    homeEls.submitPreviewRewriteBtn.disabled = disabled;
+    homeEls.submitPreviewRewriteBtn.textContent = state.rewriteBusy ? '启动中...' : '开始仿写';
+  }
+  if (homeEls.cancelPreviewRewriteBtn) {
+    homeEls.cancelPreviewRewriteBtn.disabled = busy;
+  }
+}
+
+function openPreviewRewritePopover() {
+  const target = currentPreviewRewriteTarget();
+  if (!target) {
+    toast('当前预览不可仿写');
+    updatePreviewRewriteState();
+    return;
+  }
+
+  state.previewRewriteOpen = true;
+  state.previewRewritePath = target.path;
+  if (homeEls.previewRewriteName) {
+    homeEls.previewRewriteName.textContent = target.name || fileBaseName(target.path);
+  }
+  if (homeEls.previewRewriteInput) {
+    homeEls.previewRewriteInput.value = previewRewriteDefaultTopic();
+  }
+  if (homeEls.previewRewritePopover) {
+    homeEls.previewRewritePopover.hidden = false;
+  }
+  updatePreviewRewriteState();
+  window.requestAnimationFrame(() => {
+    homeEls.previewRewriteInput?.focus();
+    homeEls.previewRewriteInput?.select();
+  });
+}
+
+async function submitPreviewRewrite() {
+  const target = currentPreviewRewriteTarget();
+  if (!target) {
+    closePreviewRewritePopover();
+    toast('当前预览不可仿写');
+    return;
+  }
+
+  const topic = (homeEls.previewRewriteInput?.value || '').trim();
+  if (!topic) {
+    toast('请填写仿写要求');
+    homeEls.previewRewriteInput?.focus();
+    return;
+  }
+
+  await rewriteEntries([target], { topic });
+  closePreviewRewritePopover({ restoreFocus: true });
 }
 
 function updateFileToolbarState() {
@@ -2528,6 +2760,7 @@ function updateFileToolbarState() {
   if (homeEls.clearFileSelectionBtn) {
     homeEls.clearFileSelectionBtn.disabled = busy || !multiSelectActive || selectedCount === 0;
   }
+  updatePreviewRewriteState();
   if (homeEls.refreshRecentMdBtn) {
     homeEls.refreshRecentMdBtn.disabled = busy;
   }
@@ -2648,6 +2881,7 @@ function renderRecentMarkdown(recent = {}) {
   };
   renderRecentMarkdownList('crawled', state.recentMarkdown.crawled);
   renderRecentMarkdownList('rewritten', state.recentMarkdown.rewritten);
+  updatePreviewRewriteState();
 }
 
 async function loadRecentMarkdown() {
@@ -2763,6 +2997,9 @@ function setPreviewState({
   open = Boolean(path),
 } = {}) {
   if (!homeEls.filePreview) return;
+  if (state.previewRewriteOpen) {
+    closePreviewRewritePopover({ restoreFocus: false });
+  }
   state.currentPreviewPath = path;
   state.currentPreviewContent = content;
   state.currentPreviewMode = mode;
@@ -2781,6 +3018,7 @@ function setPreviewState({
     if (homeEls.filePreviewSubMeta) homeEls.filePreviewSubMeta.textContent = '未选择文件';
     if (homeEls.copyPreviewTextBtn) homeEls.copyPreviewTextBtn.disabled = true;
     if (homeEls.closePreviewBtn) homeEls.closePreviewBtn.disabled = true;
+    updatePreviewRewriteState();
     homeEls.filePreview.className = 'file-preview is-empty';
     homeEls.filePreview.innerHTML = `
       <div class="file-preview-empty">
@@ -2806,6 +3044,7 @@ function setPreviewState({
   if (homeEls.closePreviewBtn) {
     homeEls.closePreviewBtn.disabled = false;
   }
+  updatePreviewRewriteState();
 
   homeEls.filePreview.className = `file-preview is-${mode}`;
   if (mode === 'markdown') {
@@ -3051,8 +3290,8 @@ async function deleteEntries(paths, label = '') {
   toast(targets.length === 1 ? '已删除' : `已删除 ${data.deleted_count || targets.length} 项`);
 }
 
-async function rewriteEntry(path, name = '') {
-  await rewriteEntries([{ path, name: name || fileBaseName(path) }]);
+async function rewriteEntry(path, name = '', options = {}) {
+  await rewriteEntries([{ path, name: name || fileBaseName(path) }], options);
 }
 
 async function rewriteSelectedEntries() {
@@ -3064,7 +3303,7 @@ async function rewriteSelectedEntries() {
   await rewriteEntries(entries, { confirmBulk: true });
 }
 
-async function rewriteEntries(entries, { confirmBulk = false } = {}) {
+async function rewriteEntries(entries, { confirmBulk = false, topic: topicOverride = '' } = {}) {
   const targets = (entries || [])
     .map((entry) => ({
       path: normalizeFilePath(entry.path || ''),
@@ -3076,9 +3315,10 @@ async function rewriteEntries(entries, { confirmBulk = false } = {}) {
     return;
   }
 
-  const topic = (state.config?.rewrite?.topic || '创业沙龙').trim() || '创业沙龙';
+  const topic = (topicOverride || state.config?.rewrite?.topic || '创业沙龙').trim() || '创业沙龙';
   state.rewriteBusy = true;
   updateFileToolbarState();
+  updatePreviewRewriteState();
   if (state.currentFiles) renderFiles(state.currentFiles);
 
   try {
@@ -3100,6 +3340,7 @@ async function rewriteEntries(entries, { confirmBulk = false } = {}) {
   } finally {
     state.rewriteBusy = false;
     updateFileToolbarState();
+    updatePreviewRewriteState();
     if (state.currentFiles) renderFiles(state.currentFiles);
   }
 }
@@ -3830,6 +4071,65 @@ function bindHomeEvents() {
         .catch((error) => toast(error.message));
     });
   }
+  if (homeEls.previewRewriteBtn) {
+    homeEls.previewRewriteBtn.addEventListener('click', () => {
+      if (state.previewRewriteOpen) {
+        closePreviewRewritePopover({ restoreFocus: true });
+        return;
+      }
+      openPreviewRewritePopover();
+    });
+  }
+  if (homeEls.cancelPreviewRewriteBtn) {
+    homeEls.cancelPreviewRewriteBtn.addEventListener('click', () => {
+      closePreviewRewritePopover({ restoreFocus: true });
+    });
+  }
+  if (homeEls.submitPreviewRewriteBtn) {
+    homeEls.submitPreviewRewriteBtn.addEventListener('click', () => {
+      submitPreviewRewrite().catch((error) => toast(error.message));
+    });
+  }
+  if (homeEls.filePreview) {
+    homeEls.filePreview.addEventListener('click', (event) => {
+      if (!(event.target instanceof Element)) return;
+      const image = event.target.closest('.markdown-preview-image');
+      if (!image || !homeEls.filePreview.contains(image)) return;
+      openMarkdownImageLightbox(image);
+    });
+    homeEls.filePreview.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      if (!(event.target instanceof Element)) return;
+      const image = event.target.closest('.markdown-preview-image');
+      if (!image || !homeEls.filePreview.contains(image)) return;
+      event.preventDefault();
+      openMarkdownImageLightbox(image);
+    });
+  }
+  if (homeEls.markdownImageLightbox) {
+    homeEls.markdownImageLightbox.addEventListener('click', (event) => {
+      if (!(event.target instanceof Element)) return;
+      if (event.target.closest('[data-lightbox-close]')) {
+        closeMarkdownImageLightbox();
+      }
+    });
+  }
+  if (homeEls.closeMarkdownImageLightboxBtn) {
+    homeEls.closeMarkdownImageLightboxBtn.addEventListener('click', () => {
+      closeMarkdownImageLightbox();
+    });
+  }
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      if (homeEls.markdownImageLightbox && !homeEls.markdownImageLightbox.hidden) {
+        closeMarkdownImageLightbox();
+        return;
+      }
+      if (state.previewRewriteOpen) {
+        closePreviewRewritePopover({ restoreFocus: true });
+      }
+    }
+  });
   if (homeEls.copyPreviewTextBtn) {
     homeEls.copyPreviewTextBtn.addEventListener('click', () => {
       const text = homeEls.filePreview?.innerText || state.currentPreviewContent;
@@ -3840,6 +4140,7 @@ function bindHomeEvents() {
   }
   if (homeEls.closePreviewBtn) {
     homeEls.closePreviewBtn.addEventListener('click', () => {
+      closePreviewRewritePopover({ restoreFocus: false });
       setPreviewState(defaultPreviewState());
     });
   }

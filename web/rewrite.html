@@ -166,6 +166,22 @@
               <span id="filePreviewSubMeta" class="file-preview-subtitle"></span>
             </div>
             <div class="file-preview-actions">
+              <div class="file-preview-rewrite-wrap">
+                <button id="previewRewriteBtn" class="btn btn-ghost file-preview-action file-preview-rewrite-btn" type="button" title="仿写当前预览" aria-label="仿写当前预览" aria-expanded="false" disabled>
+                  <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4.5 19.5 9.8-9.8 2 2-9.8 9.8h-2z"/><path d="m13.7 6.3 2-2 4 4-2 2"/><path d="M6 4.5v3M4.5 6h3M18 16.5v3M16.5 18h3"/></svg>
+                </button>
+                <div id="previewRewritePopover" class="preview-rewrite-popover" role="dialog" aria-labelledby="previewRewriteTitle" hidden>
+                  <div class="preview-rewrite-head">
+                    <strong id="previewRewriteTitle">仿写要求</strong>
+                    <span id="previewRewriteName">当前预览</span>
+                  </div>
+                  <textarea id="previewRewriteInput" class="preview-rewrite-input" rows="5" placeholder="请输入本次仿写要求"></textarea>
+                  <div class="preview-rewrite-actions">
+                    <button id="cancelPreviewRewriteBtn" class="btn btn-ghost preview-rewrite-cancel" type="button">取消</button>
+                    <button id="submitPreviewRewriteBtn" class="btn btn-secondary preview-rewrite-submit" type="button">开始仿写</button>
+                  </div>
+                </div>
+              </div>
               <button id="copyPreviewTextBtn" class="btn btn-ghost file-preview-action" type="button" title="复制文本" aria-label="复制文本" disabled>
                 <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h10v12H8z"/><path d="M6 16H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>
               </button>
@@ -185,6 +201,21 @@
     </section>
   </main>
 
+  <div id="markdownImageLightbox" class="markdown-image-lightbox" aria-hidden="true" hidden>
+    <div class="markdown-image-lightbox-backdrop" data-lightbox-close></div>
+    <div class="markdown-image-lightbox-panel" role="dialog" aria-modal="true" aria-labelledby="markdownImageLightboxTitle">
+      <div class="markdown-image-lightbox-head">
+        <strong id="markdownImageLightboxTitle">图片预览</strong>
+        <button id="closeMarkdownImageLightboxBtn" class="btn btn-ghost markdown-image-lightbox-close" type="button" title="关闭图片预览" aria-label="关闭图片预览">
+          <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg>
+        </button>
+      </div>
+      <div id="markdownImageLightboxStage" class="markdown-image-lightbox-stage">
+        <img id="markdownImageLightboxImg" class="markdown-image-lightbox-img" alt="">
+        <div id="markdownImageLightboxStatus" class="markdown-image-lightbox-status" aria-live="polite"></div>
+      </div>
+    </div>
+  </div>
   <div id="toast" class="toast" aria-live="polite"></div>
   <script src="/ui/app.js"></script>
 </body>
