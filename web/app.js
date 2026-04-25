@@ -2400,13 +2400,33 @@ function renderMarkdownList(lines, startIndex, sourcePath = '') {
   };
 }
 
+function parseMarkdownImageLine(line = '') {
+  const match = /^!\[([^\]]*)]\(([^)]+)\)$/.exec(String(line || '').trim());
+  if (!match) return null;
+  return {
+    alt: match[1] || '',
+    rawSrc: match[2] || '',
+  };
+}
+
+function renderMarkdownImageGrid(images = [], sourcePath = '') {
+  const items = images
+    .map((image) => {
+      const src = localMarkdownDownloadUrl(image.rawSrc, sourcePath);
+      if (!src) return '';
+      return `<figure>${renderMarkdownImage(src, image.alt)}</figure>`;
+    })
+    .filter(Boolean);
+  return items.length ? `<div class="markdown-image-grid">${items.join('')}</div>` : '';
+}
+
 function isMarkdownBlockStart(lines, index) {
   const trimmed = lines[index]?.trim() || '';
   return !trimmed
     || trimmed.startsWith('```')
     || /^#{1,6}\s+/.test(trimmed)
     || trimmed.startsWith('<video')
-    || /^!\[[^\]]*]\([^)]+\)$/.test(trimmed)
+    || Boolean(parseMarkdownImageLine(trimmed))
     || isMarkdownListLine(lines[index])
     || (trimmed.startsWith('|') && isMarkdownTableSeparator(lines[index + 1] || ''));
 }
@@ -2459,13 +2479,31 @@ function renderMarkdown(content, sourcePath = '') {
       continue;
     }
 
-    const imageMatch = /^!\[([^\]]*)]\(([^)]+)\)$/.exec(trimmed);
-    if (imageMatch) {
-      const src = localMarkdownDownloadUrl(imageMatch[2], sourcePath);
-      if (src) {
-        html.push(`<figure>${renderMarkdownImage(src, imageMatch[1] || '')}</figure>`);
-      }
+    const image = parseMarkdownImageLine(trimmed);
+    if (image) {
+      const images = [image];
       index += 1;
+      while (index < lines.length) {
+        if (!lines[index].trim()) {
+          let nextIndex = index + 1;
+          while (nextIndex < lines.length && !lines[nextIndex].trim()) {
+            nextIndex += 1;
+          }
+          const nextImageAfterGap = parseMarkdownImageLine(lines[nextIndex]);
+          if (!nextImageAfterGap) break;
+          images.push(nextImageAfterGap);
+          index = nextIndex + 1;
+          continue;
+        }
+        const nextImage = parseMarkdownImageLine(lines[index]);
+        if (!nextImage) break;
+        images.push(nextImage);
+        index += 1;
+      }
+      const imageGrid = renderMarkdownImageGrid(images, sourcePath);
+      if (imageGrid) {
+        html.push(imageGrid);
+      }
       continue;
     }
 

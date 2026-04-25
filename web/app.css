@@ -3384,16 +3384,29 @@ body.has-file-preview-fullscreen {
 }
 
 .file-preview.is-markdown figure {
+  margin: 0;
+}
+
+.markdown-image-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
   margin: 16px 0;
 }
 
 .file-preview.is-markdown img {
   display: block;
-  width: 25%;
+  width: 100%;
   max-width: 100%;
   height: auto;
   border-radius: var(--radius-sm);
   background: var(--panel-muted-bg);
+}
+
+.markdown-image-grid .markdown-preview-image {
+  aspect-ratio: 1 / 1;
+  height: 100%;
+  object-fit: cover;
 }
 
 .file-preview.is-markdown .markdown-preview-image {
@@ -3939,6 +3952,10 @@ body.has-markdown-image-lightbox {
     max-height: calc(100vh - 16px);
   }
 
+  .markdown-image-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .preview-rewrite-popover {
     right: 0;
     width: min(360px, calc(100vw - 32px));
@@ -4019,5 +4036,9 @@ body.has-markdown-image-lightbox {
     inset: 0;
     max-height: 100vh;
     border-radius: 0;
+  }
+
+  .markdown-image-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
