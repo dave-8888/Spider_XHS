@@ -127,6 +127,8 @@ const state = {
   fileTreeLoadingPaths: new Set(),
   fileTreeLoadPromises: new Map(),
   fileTreeVisibleNodes: [],
+  renamePath: '',
+  renameSaving: false,
   currentPreviewPath: '',
   currentPreviewContent: '',
   currentPreviewMode: 'text',
@@ -3345,7 +3347,43 @@ async function restorePreviewAfterRename(previewPath = '', previewMode = 'empty'
   }
 }
 
-async function renameEntry(path, name = '') {
+function cancelInlineRename({ render = true } = {}) {
+  state.renamePath = '';
+  state.renameSaving = false;
+  if (render) renderFiles(state.currentFiles);
+}
+
+function validateRenameName(name = '', currentName = '') {
+  const normalizedName = String(name || '').trim();
+  if (!normalizedName) return { error: '名称不能为空', name: '' };
+  if (normalizedName === currentName) return { unchanged: true, name: normalizedName };
+  if (normalizedName === '.' || normalizedName === '..') {
+    return { error: '名称不合法', name: normalizedName };
+  }
+  if (normalizedName.includes('/') || normalizedName.includes('\\')) {
+    return { error: '名称不能包含路径分隔符', name: normalizedName };
+  }
+  if (normalizedName.startsWith('.')) {
+    return { error: '名称不可用', name: normalizedName };
+  }
+  return { name: normalizedName };
+}
+
+function focusInlineRenameInput(path = '') {
+  const normalizedPath = normalizeFilePath(path);
+  if (!normalizedPath || !homeEls.fileList) return;
+  window.requestAnimationFrame(() => {
+    const input = homeEls.fileList.querySelector(`.file-rename-input[data-path="${cssEscape(normalizedPath)}"]`);
+    if (!input) return;
+    input.focus();
+    const value = input.value || '';
+    const entry = state.currentFileEntries.get(normalizedPath);
+    const dotIndex = entry?.type === 'file' ? value.lastIndexOf('.') : -1;
+    input.setSelectionRange(0, dotIndex > 0 ? dotIndex : value.length);
+  });
+}
+
+function renameEntry(path, name = '') {
   const normalizedPath = normalizeFilePath(path);
   if (!normalizedPath) {
     toast('请选择要重命名的文件或目录');
@@ -3355,33 +3393,38 @@ async function renameEntry(path, name = '') {
     toast('当前任务运行中，稍后再重命名');
     return;
   }
+  if (state.renameSaving) {
+    toast('正在保存重命名');
+    return;
+  }
 
-  const currentName = name || fileBaseName(normalizedPath);
-  const nextName = window.prompt(`重命名“${currentName}”`, currentName);
-  if (nextName === null) return;
+  state.renamePath = normalizedPath;
+  state.renameSaving = false;
+  renderFiles(state.currentFiles);
+  focusInlineRenameInput(normalizedPath);
+}
 
-  const normalizedName = nextName.trim();
-  if (!normalizedName) {
-    toast('名称不能为空');
+async function commitInlineRename(path, name = '', currentName = '') {
+  const normalizedPath = normalizeFilePath(path);
+  if (!normalizedPath) {
+    throw new Error('请选择要重命名的文件或目录');
+  }
+  const existingName = currentName || fileBaseName(normalizedPath);
+  const validation = validateRenameName(name, existingName);
+  if (validation.unchanged) {
+    cancelInlineRename();
     return;
   }
-  if (normalizedName === currentName) {
-    toast('名称未变化');
-    return;
+  if (validation.error) {
+    throw new Error(validation.error);
   }
-  if (normalizedName === '.' || normalizedName === '..' || normalizedName.includes('/') || normalizedName.includes('\\')) {
-    toast('名称不能包含路径分隔符');
-    return;
-  }
-  if (normalizedName.startsWith('.')) {
-    toast('名称不可用');
-    return;
-  }
+  const normalizedName = validation.name;
 
   const previewPath = state.currentPreviewPath;
   const previewMode = state.currentPreviewMode;
   const previewAffected = isSamePathOrChild(previewPath, normalizedPath);
 
+  state.renameSaving = true;
   const data = await api('/api/files/rename', {
     method: 'POST',
     body: JSON.stringify({ path: normalizedPath, name: normalizedName }),
@@ -3399,6 +3442,8 @@ async function renameEntry(path, name = '') {
   if (previewAffected) {
     setPreviewState(defaultPreviewState());
   }
+  state.renamePath = '';
+  state.renameSaving = false;
   rebaseFileTreeStateAfterRename(oldPath, newPath);
 
   await Promise.all([
@@ -3645,6 +3690,7 @@ function renderFileTreeRow(node, disabledAttr = '') {
   const entry = node.entry;
   const isDirectory = entry.type === 'directory';
   const previewMode = filePreviewMode(entry);
+  const isRenaming = state.renamePath === entry.path;
   const details = [
     fileKindLabel(entry),
     isDirectory ? directoryNodeMeta(node) : sizeText(entry.size),
@@ -3661,9 +3707,12 @@ function renderFileTreeRow(node, disabledAttr = '') {
     state.currentPreviewPath === entry.path ? 'is-active' : '',
     state.currentPath === entry.path ? 'is-focused' : '',
     state.fileDetailExpandedPaths.has(entry.path) ? 'is-details-open' : '',
+    isRenaming ? 'is-renaming' : '',
   ].filter(Boolean).join(' ');
-  const toggleDisabledAttr = (disabledAttr || node.loading) ? 'disabled' : '';
-  const selectDisabledAttr = (disabledAttr || !state.multiSelectMode) ? 'disabled' : '';
+  const toggleDisabledAttr = (disabledAttr || node.loading || isRenaming) ? 'disabled' : '';
+  const selectDisabledAttr = (disabledAttr || !state.multiSelectMode || isRenaming) ? 'disabled' : '';
+  const actionDisabledAttr = (disabledAttr || isRenaming) ? 'disabled' : '';
+  const renameSavingAttr = state.renameSaving ? 'disabled' : '';
   const detailOpen = state.fileDetailExpandedPaths.has(entry.path);
   const toggleControl = isDirectory ? `
     <button
@@ -3678,6 +3727,43 @@ function renderFileTreeRow(node, disabledAttr = '') {
       ${iconSvg('chevron')}
     </button>
   ` : '<span class="file-tree-toggle-placeholder" aria-hidden="true"></span>';
+  const entryControl = isRenaming ? `
+    <form
+      class="file-rename-form"
+      data-path="${escapeHtml(entry.path)}"
+      data-name="${escapeHtml(entry.name)}"
+    >
+      <span class="file-main">
+        <input
+          class="file-rename-input"
+          data-path="${escapeHtml(entry.path)}"
+          type="text"
+          value="${escapeHtml(entry.name)}"
+          aria-label="重命名 ${escapeHtml(entry.name)}"
+          autocomplete="off"
+          spellcheck="false"
+          ${renameSavingAttr}
+        >
+        <span class="file-details">${details.map((detail) => `<span>${escapeHtml(detail)}</span>`).join('')}</span>
+      </span>
+    </form>
+  ` : `
+    <button
+      class="file-entry-button"
+      data-kind="${entry.type}"
+      data-path="${escapeHtml(entry.path)}"
+      data-name="${escapeHtml(entry.name)}"
+      data-preview-mode="${escapeHtml(previewMode)}"
+      title="${escapeHtml(detailTitle)}"
+      type="button"
+      ${disabledAttr}
+    >
+      <span class="file-main">
+        <span class="file-name">${escapeHtml(entry.name)}</span>
+        <span class="file-details">${details.map((detail) => `<span>${escapeHtml(detail)}</span>`).join('')}</span>
+      </span>
+    </button>
+  `;
 
   return `
     <div class="${rowClasses}" data-path="${escapeHtml(entry.path)}" style="--tree-depth: ${node.depth};">
@@ -3685,22 +3771,8 @@ function renderFileTreeRow(node, disabledAttr = '') {
         <input class="file-select-input" data-path="${escapeHtml(entry.path)}" type="checkbox" ${state.multiSelectMode && state.selectedFilePaths.has(entry.path) ? 'checked' : ''} ${selectDisabledAttr}>
       </label>
       ${toggleControl}
-      <button
-        class="file-entry-button"
-        data-kind="${entry.type}"
-        data-path="${escapeHtml(entry.path)}"
-        data-name="${escapeHtml(entry.name)}"
-        data-preview-mode="${escapeHtml(previewMode)}"
-        title="${escapeHtml(detailTitle)}"
-        type="button"
-        ${disabledAttr}
-      >
-        <span class="file-main">
-          <span class="file-name">${escapeHtml(entry.name)}</span>
-          <span class="file-details">${details.map((detail) => `<span>${escapeHtml(detail)}</span>`).join('')}</span>
-        </span>
-      </button>
-      ${renderFileActionMenu(entry, previewMode, detailOpen, disabledAttr)}
+      ${entryControl}
+      ${renderFileActionMenu(entry, previewMode, detailOpen, actionDisabledAttr)}
     </div>
   `;
 }
@@ -3886,6 +3958,51 @@ function renderFiles(files = state.currentFiles) {
       } catch (error) {
         toast(error.message);
       }
+    });
+  });
+
+  homeEls.fileList.querySelectorAll('.file-rename-form').forEach((form) => {
+    const input = form.querySelector('.file-rename-input');
+    const path = form.dataset.path || '';
+    const currentName = form.dataset.name || fileBaseName(path);
+    if (!input) return;
+
+    const submitRename = async () => {
+      if (state.renameSaving || state.renamePath !== path) return;
+      try {
+        input.disabled = true;
+        await commitInlineRename(path, input.value, currentName);
+      } catch (error) {
+        const shouldRestoreRename = state.renamePath === path || state.renameSaving;
+        state.renameSaving = false;
+        toast(error.message);
+        if (shouldRestoreRename) {
+          state.renamePath = path;
+          renderFiles(state.currentFiles);
+          focusInlineRenameInput(path);
+        } else {
+          renderFiles(state.currentFiles);
+        }
+      }
+    };
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      submitRename();
+    });
+    input.addEventListener('click', (event) => {
+      event.stopPropagation();
+    });
+    input.addEventListener('keydown', (event) => {
+      event.stopPropagation();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        cancelInlineRename();
+      }
+    });
+    input.addEventListener('blur', () => {
+      submitRename();
     });
   });
 
@@ -4261,6 +4378,10 @@ function bindHomeEvents() {
     if (event.key === 'Escape') {
       if (homeEls.markdownImageLightbox && !homeEls.markdownImageLightbox.hidden) {
         closeMarkdownImageLightbox();
+        return;
+      }
+      if (state.renamePath) {
+        cancelInlineRename();
         return;
       }
       if (state.previewRewriteOpen) {
