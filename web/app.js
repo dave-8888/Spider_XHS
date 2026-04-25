@@ -1,10 +1,12 @@
 const page = document.body.dataset.page || 'home';
 const THEME_STORAGE_KEY = 'spider_xhs_theme';
+const SIDEBAR_STORAGE_KEY = 'spider_xhs_sidebar';
 const themeMedia = window.matchMedia('(prefers-color-scheme: dark)');
 
 const sharedEls = {
   toast: document.querySelector('#toast'),
   themeButtons: Array.from(document.querySelectorAll('[data-theme-option]')),
+  sidebarToggle: document.querySelector('[data-sidebar-toggle]'),
 };
 
 const homeEls = {
@@ -160,6 +162,7 @@ const state = {
   highlightedJobId: '',
   highlightTimer: null,
   themeMode: document.documentElement.dataset.themeMode || 'system',
+  sidebarCollapsed: document.documentElement.dataset.sidebar === 'collapsed',
   desktopMode: false,
   multiSelectMode: false,
   fileDetailExpandedPaths: new Set(),
@@ -230,6 +233,42 @@ function bindThemeEvents() {
   if (typeof themeMedia.addListener === 'function') {
     themeMedia.addListener(syncTheme);
   }
+}
+
+function applySidebarState(collapsed, { persist = false } = {}) {
+  state.sidebarCollapsed = Boolean(collapsed);
+  document.documentElement.dataset.sidebar = state.sidebarCollapsed ? 'collapsed' : 'expanded';
+
+  if (sharedEls.sidebarToggle) {
+    const label = state.sidebarCollapsed ? '展开左侧菜单' : '收起左侧菜单';
+    const labelNode = sharedEls.sidebarToggle.querySelector('.sidebar-toggle-label');
+    sharedEls.sidebarToggle.setAttribute('aria-label', label);
+    sharedEls.sidebarToggle.setAttribute('aria-expanded', state.sidebarCollapsed ? 'false' : 'true');
+    sharedEls.sidebarToggle.setAttribute('title', label);
+    if (labelNode) {
+      labelNode.textContent = state.sidebarCollapsed ? '展开菜单' : '收起菜单';
+    }
+  }
+
+  if (!persist) return;
+  try {
+    window.localStorage.setItem(
+      SIDEBAR_STORAGE_KEY,
+      state.sidebarCollapsed ? 'collapsed' : 'expanded',
+    );
+  } catch (_error) {
+    // Ignore storage failures and keep the current view state.
+  }
+}
+
+function bindSidebarEvents() {
+  applySidebarState(document.documentElement.dataset.sidebar === 'collapsed');
+
+  if (!sharedEls.sidebarToggle) return;
+  sharedEls.sidebarToggle.addEventListener('click', () => {
+    applySidebarState(!state.sidebarCollapsed, { persist: true });
+    toast(state.sidebarCollapsed ? '左侧菜单已收起' : '左侧菜单已展开');
+  });
 }
 
 function sleep(ms) {
@@ -3826,6 +3865,7 @@ function cleanup() {
 
 async function boot() {
   applyDesktopMode();
+  bindSidebarEvents();
   bindThemeEvents();
   if (page === 'settings') {
     await bootSettings();
