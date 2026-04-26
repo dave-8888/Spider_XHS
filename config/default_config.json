@@ -23,7 +23,8 @@
     "pos_distance": 0
   },
   "storage": {
-    "output_dir": ""
+    "output_dir": "",
+    "rewrite_output_dir": ""
   },
   "ui": {
     "job_page_size": 10

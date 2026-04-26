@@ -333,6 +333,32 @@
       <div id="rewriteApiStatus" class="status-panel muted">正在读取模型配置...</div>
 
       <div class="field-grid field-grid-2">
+        <div class="field full-width">
+          <span>AI 仿写存放目录</span>
+          <div class="directory-picker">
+            <details class="directory-display">
+              <summary>
+                <span class="directory-label">当前目录</span>
+                <strong id="rewriteOutputDirSummary" class="directory-summary">点击查看</strong>
+              </summary>
+              <div id="rewriteOutputDirText" class="directory-path">加载中...</div>
+            </details>
+            <div class="button-pair directory-actions">
+              <button id="openRewriteOutputDirBtn" class="btn btn-ghost btn-icon-text" type="button">
+                <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h8v8"/><path d="m8 16 8-8"/><path d="M5 5h5"/><path d="M5 5v14h14v-5"/></svg>
+                打开当前目录
+              </button>
+              <button id="pickRewriteOutputDirBtn" class="btn btn-secondary btn-icon-text" type="button">
+                <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l1.7 2h9.3v7.8a2.2 2.2 0 0 1-2.2 2.2H5.7a2.2 2.2 0 0 1-2.2-2.2z"/><path d="M3.5 9.5V6.7c0-1.2 1-2.2 2.2-2.2h4.1l1.7 2h6.8c1.2 0 2.2 1 2.2 2.2v.8"/></svg>
+                选择目录
+              </button>
+              <button id="resetRewriteOutputDirBtn" class="btn btn-ghost btn-icon-text" type="button">
+                <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 8a7 7 0 0 0-12.2-2.4L5 7.5"/><path d="M5 4v3.5h3.5"/></svg>
+                恢复默认
+              </button>
+            </div>
+          </div>
+        </div>
         <label class="field full-width">
           <span>DashScope API Key</span>
           <div class="secret-input-wrap">

@@ -34,6 +34,7 @@ from collector_service import (
     relative_to_root,
     rename_output_entry,
     resolve_output_root,
+    resolve_rewrite_output_root,
     safe_output_path,
     save_output_markdown_file,
 )
@@ -474,8 +475,17 @@ def open_in_file_manager(target: Path) -> None:
     subprocess.Popen([opener, str(target)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def open_data_folder(relative_path: str = "") -> Dict[str, Any]:
-    output_root = resolve_output_root(config_store.load())
+def normalize_file_root(value: Any = "") -> str:
+    return "rewrite" if str(value or "").strip().lower() == "rewrite" else "crawl"
+
+
+def resolve_file_output_root(config: Dict[str, Any], root: Any = "crawl") -> Path:
+    return resolve_rewrite_output_root(config) if normalize_file_root(root) == "rewrite" else resolve_output_root(config)
+
+
+def open_data_folder(relative_path: str = "", root: Any = "crawl") -> Dict[str, Any]:
+    normalized_root = normalize_file_root(root)
+    output_root = resolve_file_output_root(config_store.load(), normalized_root)
     output_root.mkdir(parents=True, exist_ok=True)
     target = safe_output_path(output_root, relative_path or "")
     if not target.exists():
@@ -484,9 +494,10 @@ def open_data_folder(relative_path: str = "") -> Dict[str, Any]:
     open_in_file_manager(folder)
     folder_path = "" if folder.resolve() == output_root.resolve() else relative_to_root(folder, output_root)
     return {
+        "root": normalized_root,
         "path": folder_path,
         "name": folder.name,
-        "root": str(output_root),
+        "output_root": str(output_root),
     }
 
 
@@ -523,15 +534,16 @@ def run_folder_picker(command: List[str]) -> Optional[str]:
     raise RuntimeError(result.stderr.strip() or "目录选择器执行失败")
 
 
-def pick_output_folder(current_path: str = "") -> Dict[str, Any]:
+def pick_output_folder(current_path: str = "", prompt: str = "选择采集存放目录") -> Dict[str, Any]:
     start_path = folder_picker_start_path(current_path)
+    safe_prompt = str(prompt or "选择采集存放目录").replace('"', '\\"')
 
     if sys.platform == "darwin":
         escaped = str(start_path).replace("\\", "\\\\").replace('"', '\\"')
         script = [
             f'set startFolder to POSIX file "{escaped}"',
             'try',
-            'set chosenFolder to choose folder with prompt "选择采集存放目录" default location startFolder',
+            f'set chosenFolder to choose folder with prompt "{safe_prompt}" default location startFolder',
             'return POSIX path of chosenFolder',
             'on error number -128',
             'return ""',
@@ -540,10 +552,11 @@ def pick_output_folder(current_path: str = "") -> Dict[str, Any]:
         selected = run_folder_picker(["osascript", *sum([["-e", line] for line in script], [])])
     elif os.name == "nt":
         escaped = str(start_path).replace("'", "''")
+        powershell_prompt = str(prompt or "选择采集存放目录").replace("'", "''")
         command = (
             "Add-Type -AssemblyName System.Windows.Forms; "
             "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; "
-            "$dialog.Description = '选择采集存放目录'; "
+            f"$dialog.Description = '{powershell_prompt}'; "
             "$dialog.ShowNewFolderButton = $true; "
             f"$dialog.SelectedPath = '{escaped}'; "
             "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { "
@@ -560,12 +573,12 @@ def pick_output_folder(current_path: str = "") -> Dict[str, Any]:
                 "--file-selection",
                 "--directory",
                 f"--filename={start_path}{os.sep}",
-                "--title=选择采集存放目录",
+                f"--title={prompt}",
             ])
         elif kdialog:
             selected = run_folder_picker([
                 kdialog,
-                "--title=选择采集存放目录",
+                f"--title={prompt}",
                 "--getexistingdirectory",
                 str(start_path),
             ])
@@ -599,7 +612,7 @@ def run_manual_rewrite(payload: Dict[str, Any]) -> Dict[str, Any]:
         rewrite_config["topic"] = topic
     if "generate_images" in payload:
         rewrite_config["generate_images"] = bool(payload.get("generate_images"))
-    service = RewriteService(resolve_output_root(config), rewrite_config)
+    service = RewriteService(resolve_output_root(config), resolve_rewrite_output_root(config), rewrite_config)
     return service.rewrite_note(relative_path, topic=topic)
 
 
@@ -648,13 +661,13 @@ class AppHandler(BaseHTTPRequestHandler):
                 json_response(self, {"success": True, "jobs": job_manager.list_jobs()})
             elif path == "/api/files":
                 rel = query.get("path", [""])[0]
+                root = normalize_file_root(query.get("root", ["crawl"])[0])
                 config = config_store.load()
+                files = list_output_files(resolve_file_output_root(config, root), rel)
+                files["root"] = root
                 json_response(self, {
                     "success": True,
-                    "files": list_output_files(
-                        resolve_output_root(config),
-                        rel,
-                    ),
+                    "files": files,
                 })
             elif path == "/api/recent-md":
                 limit_text = query.get("limit", ["8"])[0]
@@ -662,16 +675,25 @@ class AppHandler(BaseHTTPRequestHandler):
                     limit = int(limit_text)
                 except (TypeError, ValueError):
                     limit = 8
+                config = config_store.load()
                 json_response(self, {
                     "success": True,
-                    "recent": list_recent_markdown_files(resolve_output_root(config_store.load()), limit=limit),
+                    "recent": list_recent_markdown_files(
+                        resolve_output_root(config),
+                        limit=limit,
+                        rewrite_root=resolve_rewrite_output_root(config),
+                    ),
                 })
             elif path == "/api/file":
                 rel = query.get("path", [""])[0]
-                json_response(self, {"success": True, "file": read_output_text_file(resolve_output_root(config_store.load()), rel)})
+                root = normalize_file_root(query.get("root", ["crawl"])[0])
+                config = config_store.load()
+                file_info = read_output_text_file(resolve_file_output_root(config, root), rel)
+                file_info["root"] = root
+                json_response(self, {"success": True, "file": file_info})
             elif path == "/download":
                 rel = query.get("path", [""])[0]
-                self._serve_data_file(rel)
+                self._serve_data_file(rel, normalize_file_root(query.get("root", ["crawl"])[0]))
             elif path.startswith(VDITOR_VENDOR_PREFIX):
                 self._serve_vditor_vendor(path[len(VDITOR_VENDOR_PREFIX):])
             else:
@@ -707,13 +729,17 @@ class AppHandler(BaseHTTPRequestHandler):
             elif path == "/api/rewrite":
                 json_response(self, {"success": True, "rewrite": run_manual_rewrite(payload)})
             elif path == "/api/file/save":
+                root = normalize_file_root(payload.get("root"))
+                config = config_store.load()
+                file_info = save_output_markdown_file(
+                    resolve_file_output_root(config, root),
+                    str(payload.get("path") or ""),
+                    payload.get("content"),
+                )
+                file_info["root"] = root
                 json_response(self, {
                     "success": True,
-                    "file": save_output_markdown_file(
-                        resolve_output_root(config_store.load()),
-                        str(payload.get("path") or ""),
-                        payload.get("content"),
-                    ),
+                    "file": file_info,
                 })
             elif path == "/api/jobs/delete":
                 json_response(self, {
@@ -729,35 +755,45 @@ class AppHandler(BaseHTTPRequestHandler):
             elif path == "/api/login/browser/status":
                 json_response(self, {"success": True, "login": browser_login_manager.status()})
             elif path == "/api/files/open":
-                json_response(self, {"success": True, "folder": open_data_folder(str(payload.get("path") or ""))})
+                json_response(self, {
+                    "success": True,
+                    "folder": open_data_folder(str(payload.get("path") or ""), payload.get("root")),
+                })
             elif path == "/api/files/create-dir":
+                root = normalize_file_root(payload.get("root"))
                 json_response(self, {
                     "success": True,
                     "folder": create_output_directory(
-                        resolve_output_root(config_store.load()),
+                        resolve_file_output_root(config_store.load(), root),
                         str(payload.get("parent_path") or ""),
                         str(payload.get("name") or ""),
                     ),
                 })
             elif path == "/api/files/rename":
+                root = normalize_file_root(payload.get("root"))
                 json_response(self, {
                     "success": True,
                     "entry": rename_output_entry(
-                        resolve_output_root(config_store.load()),
+                        resolve_file_output_root(config_store.load(), root),
                         str(payload.get("path") or ""),
                         str(payload.get("name") or ""),
                     ),
                 })
             elif path == "/api/files/delete":
+                root = normalize_file_root(payload.get("root"))
                 json_response(self, {
                     "success": True,
                     **delete_output_entries(
-                        resolve_output_root(config_store.load()),
+                        resolve_file_output_root(config_store.load(), root),
                         payload.get("paths") if isinstance(payload.get("paths"), list) else [],
                     ),
                 })
             elif path == "/api/storage/pick-folder":
-                json_response(self, {"success": True, **pick_output_folder(str(payload.get("current_path") or ""))})
+                prompt = "选择 AI 仿写存放目录" if normalize_file_root(payload.get("root")) == "rewrite" else "选择采集存放目录"
+                json_response(self, {
+                    "success": True,
+                    **pick_output_folder(str(payload.get("current_path") or ""), prompt=prompt),
+                })
             else:
                 error_response(self, "接口不存在", status=404)
         except json.JSONDecodeError:
@@ -794,8 +830,9 @@ class AppHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _serve_data_file(self, rel: str) -> None:
-        target = safe_output_path(resolve_output_root(config_store.load()), rel)
+    def _serve_data_file(self, rel: str, root: Any = "crawl") -> None:
+        config = config_store.load()
+        target = safe_output_path(resolve_file_output_root(config, root), rel)
         if not target.exists() or not target.is_file():
             raise FileNotFoundError("文件不存在")
         content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"

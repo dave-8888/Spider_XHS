@@ -17,6 +17,11 @@ const homeEls = {
   openOutputDirBtn: document.querySelector('#openOutputDirBtn'),
   pickOutputDirBtn: document.querySelector('#pickOutputDirBtn'),
   resetOutputDirBtn: document.querySelector('#resetOutputDirBtn'),
+  rewriteOutputDirText: document.querySelector('#rewriteOutputDirText'),
+  rewriteOutputDirSummary: document.querySelector('#rewriteOutputDirSummary'),
+  openRewriteOutputDirBtn: document.querySelector('#openRewriteOutputDirBtn'),
+  pickRewriteOutputDirBtn: document.querySelector('#pickRewriteOutputDirBtn'),
+  resetRewriteOutputDirBtn: document.querySelector('#resetRewriteOutputDirBtn'),
   countInput: document.querySelector('#countInput'),
   likeTopInput: document.querySelector('#likeTopInput'),
   publishDaysInput: document.querySelector('#publishDaysInput'),
@@ -54,6 +59,7 @@ const homeEls = {
   filePreview: document.querySelector('#filePreview'),
   filePreviewMeta: document.querySelector('#filePreviewMeta'),
   filePreviewSubMeta: document.querySelector('#filePreviewSubMeta'),
+  fileRootSwitch: document.querySelector('#fileRootSwitch'),
   previewEditBtn: document.querySelector('#previewEditBtn'),
   previewRewriteBtn: document.querySelector('#previewRewriteBtn'),
   previewRewritePopover: document.querySelector('#previewRewritePopover'),
@@ -121,6 +127,8 @@ const state = {
   config: null,
   choices: {},
   currentOutputRoot: 'datas/markdown_datas',
+  currentRewriteRoot: 'datas/ai_rewrites',
+  currentFileRoot: 'crawl',
   currentFiles: null,
   currentFileEntries: new Map(),
   currentPath: '',
@@ -132,6 +140,7 @@ const state = {
   renamePath: '',
   renameSaving: false,
   currentPreviewPath: '',
+  currentPreviewRoot: 'crawl',
   currentPreviewContent: '',
   currentPreviewMode: 'text',
   currentPreviewSubMeta: '',
@@ -166,6 +175,9 @@ const state = {
   selectedOutputDir: '',
   defaultOutputRoot: 'datas/markdown_datas',
   outputDirDisplay: 'datas/markdown_datas',
+  selectedRewriteOutputDir: '',
+  defaultRewriteOutputRoot: 'datas/ai_rewrites',
+  rewriteOutputDirDisplay: 'datas/ai_rewrites',
   settingsWeekdays: [1, 2, 3, 4, 5, 6, 7],
   jobLogScrollState: new Map(),
   jobLogOpenState: new Map(),
@@ -512,6 +524,25 @@ function renderOutputDirSelection() {
   if (homeEls.resetOutputDirBtn) {
     homeEls.resetOutputDirBtn.disabled = state.collectBusy || !state.selectedOutputDir;
   }
+
+  const rewriteDisplayPath = state.rewriteOutputDirDisplay || state.defaultRewriteOutputRoot;
+  const isDefaultRewritePath = !state.selectedRewriteOutputDir;
+  if (homeEls.rewriteOutputDirSummary) {
+    homeEls.rewriteOutputDirSummary.textContent = isDefaultRewritePath ? '默认目录' : '自定义目录';
+  }
+  if (homeEls.rewriteOutputDirText) {
+    homeEls.rewriteOutputDirText.textContent = rewriteDisplayPath;
+    homeEls.rewriteOutputDirText.classList.toggle('is-default', isDefaultRewritePath);
+  }
+  if (homeEls.openRewriteOutputDirBtn) {
+    homeEls.openRewriteOutputDirBtn.disabled = state.collectBusy;
+  }
+  if (homeEls.pickRewriteOutputDirBtn) {
+    homeEls.pickRewriteOutputDirBtn.disabled = state.collectBusy;
+  }
+  if (homeEls.resetRewriteOutputDirBtn) {
+    homeEls.resetRewriteOutputDirBtn.disabled = state.collectBusy || !state.selectedRewriteOutputDir;
+  }
 }
 
 const collectStepOrder = ['validating', 'starting', 'waiting_job_render', 'success'];
@@ -591,6 +622,9 @@ function setHomeBusy(isBusy) {
     homeEls.countInput,
     homeEls.likeTopInput,
     homeEls.publishDaysInput,
+    homeEls.openRewriteOutputDirBtn,
+    homeEls.pickRewriteOutputDirBtn,
+    homeEls.resetRewriteOutputDirBtn,
     homeEls.jobMultiSelectModeBtn,
     homeEls.selectAllJobsBtn,
     homeEls.clearJobSelectionBtn,
@@ -776,6 +810,25 @@ async function api(url, options = {}) {
   return data;
 }
 
+function normalizeFileRoot(root = '') {
+  return root === 'rewrite' ? 'rewrite' : 'crawl';
+}
+
+function fileRootLabel(root = state.currentFileRoot) {
+  return normalizeFileRoot(root) === 'rewrite' ? 'AI仿写' : '爬取素材';
+}
+
+function fileApiPath(path = '', root = state.currentFileRoot) {
+  const params = new URLSearchParams();
+  params.set('root', normalizeFileRoot(root));
+  params.set('path', normalizeFilePath(path));
+  return params.toString();
+}
+
+function fileDownloadUrl(path = '', root = state.currentFileRoot) {
+  return `/download?${fileApiPath(path, root)}`;
+}
+
 function detectDesktopMode(config = state.config) {
   const bridgeDesktop = Boolean(desktopBridge && desktopBridge.isDesktop());
   return bridgeDesktop || Boolean(config?.paths?.desktop_mode);
@@ -809,6 +862,7 @@ async function getConfigRaw() {
 
 function updateOutputRoot(config) {
   state.currentOutputRoot = config.paths?.output_root || config.paths?.markdown_root || 'datas/markdown_datas';
+  state.currentRewriteRoot = config.paths?.rewrite_root || config.paths?.rewrite_default_root || 'datas/ai_rewrites';
 }
 
 function renderChoiceButtons(container, choiceMap, value, onSelect, { multi = false, disabled = false } = {}) {
@@ -900,6 +954,9 @@ function applyHomeConfig(config) {
   state.selectedOutputDir = config.storage?.output_dir ?? '';
   state.defaultOutputRoot = config.paths?.markdown_root || 'datas/markdown_datas';
   state.outputDirDisplay = config.paths?.output_root || state.defaultOutputRoot;
+  state.selectedRewriteOutputDir = config.storage?.rewrite_output_dir ?? '';
+  state.defaultRewriteOutputRoot = config.paths?.rewrite_default_root || 'datas/ai_rewrites';
+  state.rewriteOutputDirDisplay = config.paths?.rewrite_root || state.defaultRewriteOutputRoot;
 
   setKeywordItems(config.keywords || ['男士穿搭']);
   if (homeEls.countInput) {
@@ -1047,6 +1104,7 @@ function readHomeDraft() {
     },
     storage: {
       output_dir: state.selectedOutputDir.trim() || '',
+      rewrite_output_dir: state.selectedRewriteOutputDir.trim() || '',
     },
   };
 }
@@ -1110,24 +1168,39 @@ async function saveSettings() {
   toast('设置已保存，尚未配置 DashScope API Key');
 }
 
-async function pickOutputFolder() {
-  const currentPath = state.outputDirDisplay || state.selectedOutputDir || state.currentOutputRoot || state.defaultOutputRoot;
+async function pickOutputFolder(root = 'crawl') {
+  const normalizedRoot = normalizeFileRoot(root);
+  const currentPath = normalizedRoot === 'rewrite'
+    ? (state.rewriteOutputDirDisplay || state.selectedRewriteOutputDir || state.currentRewriteRoot || state.defaultRewriteOutputRoot)
+    : (state.outputDirDisplay || state.selectedOutputDir || state.currentOutputRoot || state.defaultOutputRoot);
   const data = await api('/api/storage/pick-folder', {
     method: 'POST',
-    body: JSON.stringify({ current_path: currentPath }),
+    body: JSON.stringify({ current_path: currentPath, root: normalizedRoot }),
   });
   if (data.canceled) return;
-  state.selectedOutputDir = data.folder?.path || '';
-  state.outputDirDisplay = data.folder?.path || state.outputDirDisplay;
+  if (normalizedRoot === 'rewrite') {
+    state.selectedRewriteOutputDir = data.folder?.path || '';
+    state.rewriteOutputDirDisplay = data.folder?.path || state.rewriteOutputDirDisplay;
+  } else {
+    state.selectedOutputDir = data.folder?.path || '';
+    state.outputDirDisplay = data.folder?.path || state.outputDirDisplay;
+  }
   renderOutputDirSelection();
-  toast(`已选择目录：${state.outputDirDisplay}，保存设置后生效`);
+  const displayPath = normalizedRoot === 'rewrite' ? state.rewriteOutputDirDisplay : state.outputDirDisplay;
+  toast(`已选择${fileRootLabel(normalizedRoot)}目录：${displayPath}，保存设置后生效`);
 }
 
-function resetOutputFolder() {
-  state.selectedOutputDir = '';
-  state.outputDirDisplay = state.defaultOutputRoot;
+function resetOutputFolder(root = 'crawl') {
+  const normalizedRoot = normalizeFileRoot(root);
+  if (normalizedRoot === 'rewrite') {
+    state.selectedRewriteOutputDir = '';
+    state.rewriteOutputDirDisplay = state.defaultRewriteOutputRoot;
+  } else {
+    state.selectedOutputDir = '';
+    state.outputDirDisplay = state.defaultOutputRoot;
+  }
   renderOutputDirSelection();
-  toast('已恢复默认目录，保存设置后生效');
+  toast(`已恢复${fileRootLabel(normalizedRoot)}默认目录，保存设置后生效`);
 }
 
 async function startCollect() {
@@ -2256,7 +2329,7 @@ function filePathDepth(path = '') {
   return filePathParts(path).length;
 }
 
-function localMarkdownDownloadUrl(url, sourcePath = '') {
+function localMarkdownDownloadUrl(url, sourcePath = '', sourceRoot = state.currentPreviewRoot || state.currentFileRoot) {
   let raw = String(url || '').trim();
   if (raw.startsWith('<') && raw.endsWith('>')) {
     raw = raw.slice(1, -1).trim();
@@ -2285,7 +2358,7 @@ function localMarkdownDownloadUrl(url, sourcePath = '') {
   });
 
   const resolvedPath = resolvedParts.join('/');
-  return resolvedPath ? `/download?path=${encodeURIComponent(resolvedPath)}${hashPart}` : '';
+  return resolvedPath ? `${fileDownloadUrl(resolvedPath, sourceRoot)}${hashPart}` : '';
 }
 
 function unwrapMarkdownDestination(value = '') {
@@ -2313,7 +2386,7 @@ function relativeMarkdownPathFromSource(targetPath = '', sourcePath = '') {
 
 function markdownResourceUrlForEditor(rawUrl = '', sourcePath = '') {
   const downloadUrl = localMarkdownDownloadUrl(rawUrl, sourcePath);
-  return downloadUrl.startsWith('/download?path=') ? downloadUrl : String(rawUrl || '').trim();
+  return downloadUrl.startsWith('/download?') ? downloadUrl : String(rawUrl || '').trim();
 }
 
 function markdownResourceUrlFromEditor(rawUrl = '', sourcePath = '') {
@@ -2716,6 +2789,7 @@ function openMarkdownImageLightbox(imageElement) {
 
 function defaultPreviewState(overrides = {}) {
   return {
+    root: state.currentFileRoot,
     path: '',
     url: '',
     meta: '',
@@ -3016,7 +3090,7 @@ async function saveMarkdownPreviewDraft({ force = false } = {}) {
 
   const savePromise = api('/api/file/save', {
     method: 'POST',
-    body: JSON.stringify({ path, content }),
+    body: JSON.stringify({ root: state.currentPreviewRoot, path, content }),
   })
     .then((data) => {
       if (normalizeFilePath(state.currentPreviewPath) !== path || !state.previewEditorActive) {
@@ -3101,12 +3175,13 @@ function recentCrawledMarkdownEntry(path = '') {
   const normalizedPath = normalizeFilePath(path);
   if (!normalizedPath) return null;
   return (state.recentMarkdown.crawled || [])
-    .find((item) => normalizeFilePath(item.path || '') === normalizedPath) || null;
+    .find((item) => normalizeFileRoot(item.root) === 'crawl' && normalizeFilePath(item.path || '') === normalizedPath) || null;
 }
 
 function currentPreviewRewriteTarget() {
   const path = normalizeFilePath(state.currentPreviewPath);
   if (!path) return null;
+  if (state.currentPreviewRoot !== 'crawl') return null;
 
   const entry = state.currentFileEntries.get(path);
   if (entry?.rewriteable) {
@@ -3280,12 +3355,51 @@ function updateFileToolbarState() {
   if (homeEls.refreshRecentMdBtn) {
     homeEls.refreshRecentMdBtn.disabled = busy;
   }
+  renderFileRootSwitch();
+}
+
+function renderFileRootSwitch() {
+  if (!homeEls.fileRootSwitch) return;
+  const busy = state.collectBusy || state.rewriteBusy;
+  homeEls.fileRootSwitch.querySelectorAll('[data-file-root]').forEach((button) => {
+    const root = normalizeFileRoot(button.dataset.fileRoot);
+    const active = root === state.currentFileRoot;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', active ? 'true' : 'false');
+    button.disabled = busy && !active;
+  });
+}
+
+function resetFileBrowserForRoot(root = state.currentFileRoot) {
+  state.currentFileRoot = normalizeFileRoot(root);
+  state.currentPath = '';
+  state.currentFiles = null;
+  state.currentFileEntries = new Map();
+  state.fileTreeCache = new Map();
+  state.fileTreeExpandedPaths = new Set(['']);
+  state.fileTreeLoadingPaths = new Set();
+  state.fileTreeLoadPromises = new Map();
+  state.fileTreeVisibleNodes = [];
+  state.fileDetailExpandedPaths = new Set();
+  state.selectedFilePaths = new Set();
+  state.renamePath = '';
+  state.renameSaving = false;
+  setPreviewState(defaultPreviewState({ root: state.currentFileRoot }));
+  renderFileRootSwitch();
+}
+
+async function switchFileRoot(root = 'crawl') {
+  const normalizedRoot = normalizeFileRoot(root);
+  if (normalizedRoot === state.currentFileRoot) return;
+  if (!await ensurePreviewEditorSavedBeforePreviewChange()) return;
+  resetFileBrowserForRoot(normalizedRoot);
+  await loadFiles('', { force: true });
 }
 
 function renderFileBreadcrumbs(currentPath = '') {
   if (!homeEls.fileBreadcrumbs) return;
   const parts = filePathParts(currentPath);
-  const rootButton = `<button class="file-crumb ${parts.length ? '' : 'active'}" data-path="" type="button">全部结果</button>`;
+  const rootButton = `<button class="file-crumb ${parts.length ? '' : 'active'}" data-path="" type="button">${escapeHtml(fileRootLabel(state.currentFileRoot))}</button>`;
   const crumbs = parts.map((part, index) => `
     <span class="file-crumb-separator" aria-hidden="true">/</span>
     <button class="file-crumb ${index === parts.length - 1 ? 'active' : ''}" data-path="${escapeHtml(pathFromParts(parts, index + 1))}" type="button">
@@ -3336,6 +3450,7 @@ function renderRecentMarkdownList(type, items = []) {
 
   container.innerHTML = items.map((item) => {
     const path = String(item.path || '');
+    const root = normalizeFileRoot(item.root || (type === 'rewritten' ? 'rewrite' : 'crawl'));
     const name = item.name || fileBaseName(path) || 'Markdown 文件';
     const details = [
       item.context || item.folder || '',
@@ -3350,7 +3465,7 @@ function renderRecentMarkdownList(type, items = []) {
 
     return `
       <article class="md-quick-row">
-        <button class="md-quick-main" data-action="preview" data-path="${escapeHtml(path)}" type="button">
+        <button class="md-quick-main" data-action="preview" data-root="${escapeHtml(root)}" data-path="${escapeHtml(path)}" type="button">
           <span class="md-quick-icon" aria-hidden="true">${iconSvg('markdown')}</span>
           <span class="md-quick-copy">
             <span class="md-quick-name">${escapeHtml(name)}</span>
@@ -3358,7 +3473,7 @@ function renderRecentMarkdownList(type, items = []) {
           </span>
         </button>
         <div class="md-quick-actions">
-          <button class="btn btn-ghost md-quick-action" data-action="locate" data-path="${escapeHtml(path)}" data-folder="${escapeHtml(item.folder || '')}" type="button" title="定位" aria-label="定位 ${escapeHtml(name)}">
+          <button class="btn btn-ghost md-quick-action" data-action="locate" data-root="${escapeHtml(root)}" data-path="${escapeHtml(path)}" data-folder="${escapeHtml(item.folder || '')}" type="button" title="定位" aria-label="定位 ${escapeHtml(name)}">
             ${iconSvg('open')}
           </button>
           ${rewriteButton}
@@ -3373,12 +3488,13 @@ function renderRecentMarkdownList(type, items = []) {
         const action = button.dataset.action || '';
         const path = button.dataset.path || '';
         if (!path) return;
+        const root = normalizeFileRoot(button.dataset.root);
         if (action === 'preview') {
-          await previewFile(path);
+          await previewFile(path, root);
           return;
         }
         if (action === 'locate') {
-          await locateFileInTree(path, button.dataset.folder || pathFromParts(fileDirectoryParts(path)));
+          await locateFileInTree(path, button.dataset.folder || pathFromParts(fileDirectoryParts(path)), root);
           return;
         }
         if (action === 'rewrite') {
@@ -3477,12 +3593,15 @@ function bindFileLayoutResize() {
 function renderFileEmptyState(files = {}, disabledAttr = '') {
   const currentPath = String(files.cwd || '');
   const pathParts = filePathParts(currentPath);
-  const currentName = pathParts[pathParts.length - 1] || '采集结果';
-  const pathLabel = currentPath || '输出根目录';
+  const rootLabel = fileRootLabel(state.currentFileRoot);
+  const currentName = pathParts[pathParts.length - 1] || rootLabel;
+  const pathLabel = currentPath || `${rootLabel}根目录`;
   const hasParent = Boolean(currentPath);
   const description = hasParent
     ? '这个目录里还没有文件或子目录，可以返回上一级，或者先打开目录确认当前位置。'
-    : '采集完成后，结果、素材和 Markdown 文件会出现在这里。';
+    : (state.currentFileRoot === 'rewrite'
+      ? 'AI 仿写完成后，文案、分析报告和图片提示词会出现在这里。'
+      : '采集完成后，结果、素材和 Markdown 文件会出现在这里。');
   const secondaryAction = hasParent
     ? `<button class="btn btn-ghost btn-icon-text file-empty-action" data-action="back" data-path="${escapeHtml(files.parent || '')}" type="button" ${disabledAttr}>${iconSvg('back')}返回上级</button>`
     : `<button class="btn btn-ghost btn-icon-text file-empty-action" data-action="refresh" type="button" ${disabledAttr}>${iconSvg('refresh')}刷新列表</button>`;
@@ -3504,6 +3623,7 @@ function renderFileEmptyState(files = {}, disabledAttr = '') {
 }
 
 function setPreviewState({
+  root = state.currentFileRoot,
   path = '',
   url = '',
   meta = '',
@@ -3518,6 +3638,7 @@ function setPreviewState({
     closePreviewRewritePopover({ restoreFocus: false });
   }
   resetPreviewEditorState();
+  state.currentPreviewRoot = normalizeFileRoot(root);
   state.currentPreviewPath = path;
   state.currentPreviewContent = content;
   state.currentPreviewMode = mode;
@@ -3580,15 +3701,15 @@ function setPreviewState({
 
   if (homeEls.fileList) {
     homeEls.fileList.querySelectorAll('.file-row').forEach((row) => {
-      row.classList.toggle('is-active', row.dataset.path === path);
+      row.classList.toggle('is-active', state.currentPreviewRoot === state.currentFileRoot && row.dataset.path === path);
     });
   }
 }
 
-async function openFolder(path = '') {
+async function openFolder(path = '', root = state.currentFileRoot) {
   await api('/api/files/open', {
     method: 'POST',
-    body: JSON.stringify({ path }),
+    body: JSON.stringify({ root: normalizeFileRoot(root), path }),
   });
   toast('已打开文件夹');
 }
@@ -3709,6 +3830,7 @@ function selectAllVisibleFiles() {
 }
 
 function selectedRewriteableEntries() {
+  if (state.currentFileRoot !== 'crawl') return [];
   return Array.from(state.selectedFilePaths)
     .map((path) => state.currentFileEntries.get(path))
     .filter((entry) => entry?.path && entry.rewriteable)
@@ -3837,7 +3959,7 @@ async function deleteEntries(paths, label = '') {
 
   const data = await api('/api/files/delete', {
     method: 'POST',
-    body: JSON.stringify({ paths: targets }),
+    body: JSON.stringify({ root: state.currentFileRoot, paths: targets }),
   });
 
   const deletedPaths = (data.deleted_paths || targets).map((path) => normalizeFilePath(path)).filter(Boolean);
@@ -3860,7 +3982,7 @@ async function restorePreviewAfterRename(previewPath = '', previewMode = 'empty'
     return;
   }
   if (previewMode === 'image' || previewMode === 'video') {
-    previewMediaFile(normalizedPath, previewMeta || fileBaseName(normalizedPath), previewMode);
+    previewMediaFile(normalizedPath, previewMeta || fileBaseName(normalizedPath), previewMode, state.currentPreviewRoot);
   }
 }
 
@@ -3944,7 +4066,7 @@ async function commitInlineRename(path, name = '', currentName = '') {
   state.renameSaving = true;
   const data = await api('/api/files/rename', {
     method: 'POST',
-    body: JSON.stringify({ path: normalizedPath, name: normalizedName }),
+    body: JSON.stringify({ root: state.currentFileRoot, path: normalizedPath, name: normalizedName }),
   });
 
   const entry = data.entry || {};
@@ -4130,7 +4252,7 @@ function renderFileActionMenu(entry, previewMode, detailOpen, disabledAttr = '')
     },
   ];
 
-  if (entry.rewriteable) {
+  if (entry.rewriteable && state.currentFileRoot === 'crawl') {
     actions.push({
       action: 'rewrite',
       icon: 'rewrite',
@@ -4324,12 +4446,20 @@ async function fetchFileDirectory(path = '', { force = false } = {}) {
   state.fileTreeLoadingPaths.add(normalizedPath);
   if (state.fileTreeCache.size) renderFiles(state.currentFiles);
 
-  const promise = api(`/api/files?path=${encodeURIComponent(normalizedPath)}`)
-    .then((data) => cacheFileDirectory(data.files || {}, normalizedPath))
+  const requestRoot = state.currentFileRoot;
+  const promise = api(`/api/files?${fileApiPath(normalizedPath, requestRoot)}`)
+    .then((data) => {
+      if (requestRoot !== state.currentFileRoot) {
+        return normalizeFilesPayload(data.files || {}, normalizedPath);
+      }
+      return cacheFileDirectory(data.files || {}, normalizedPath);
+    })
     .finally(() => {
-      state.fileTreeLoadingPaths.delete(normalizedPath);
-      state.fileTreeLoadPromises.delete(normalizedPath);
-      if (state.fileTreeCache.size) renderFiles(state.currentFiles);
+      if (requestRoot === state.currentFileRoot) {
+        state.fileTreeLoadingPaths.delete(normalizedPath);
+        state.fileTreeLoadPromises.delete(normalizedPath);
+        if (state.fileTreeCache.size) renderFiles(state.currentFiles);
+      }
     });
   state.fileTreeLoadPromises.set(normalizedPath, promise);
   return promise;
@@ -4393,11 +4523,16 @@ async function toggleFileTreeDirectory(path = '') {
   scrollFileTreePathIntoView(normalizedPath);
 }
 
-async function locateFileInTree(path = '', folder = '') {
+async function locateFileInTree(path = '', folder = '', root = state.currentFileRoot) {
+  const normalizedRoot = normalizeFileRoot(root);
+  if (normalizedRoot !== state.currentFileRoot) {
+    if (!await ensurePreviewEditorSavedBeforePreviewChange()) return;
+    resetFileBrowserForRoot(normalizedRoot);
+  }
   const filePath = normalizeFilePath(path);
   const folderPath = normalizeFilePath(folder || pathFromParts(fileDirectoryParts(filePath)));
   await loadFiles(folderPath, { resetSelection: false, scroll: false });
-  await previewFile(filePath);
+  await previewFile(filePath, normalizedRoot);
   scrollFileTreePathIntoView(filePath);
 }
 
@@ -4550,7 +4685,7 @@ function renderFiles(files = state.currentFiles) {
 
         if (!await ensurePreviewEditorSavedBeforePreviewChange()) return;
         setPreviewState(defaultPreviewState());
-        window.open(`/download?path=${encodeURIComponent(path)}`, '_blank', 'noopener');
+        window.open(fileDownloadUrl(path, state.currentFileRoot), '_blank', 'noopener');
         toast(`${name} 不支持文本预览，已在新窗口打开`);
       } catch (error) {
         toast(error.message);
@@ -4650,9 +4785,11 @@ async function ensurePreviewEditorSavedBeforePreviewChange() {
   return true;
 }
 
-function previewMediaFile(path, name = '', mode = 'image') {
-  const url = `/download?path=${encodeURIComponent(path)}`;
+function previewMediaFile(path, name = '', mode = 'image', root = state.currentFileRoot) {
+  const normalizedRoot = normalizeFileRoot(root);
+  const url = fileDownloadUrl(path, normalizedRoot);
   setPreviewState({
+    root: normalizedRoot,
     path,
     url,
     meta: name || fileBaseName(path) || '文件预览',
@@ -4663,15 +4800,17 @@ function previewMediaFile(path, name = '', mode = 'image') {
   });
 }
 
-async function previewFile(path) {
+async function previewFile(path, root = state.currentFileRoot) {
   if (!await ensurePreviewEditorSavedBeforePreviewChange()) return;
-  const data = await api(`/api/file?path=${encodeURIComponent(path)}`);
+  const normalizedRoot = normalizeFileRoot(root);
+  const data = await api(`/api/file?${fileApiPath(path, normalizedRoot)}`);
   const previewPath = data.file.path || path;
   const entryName = state.currentFileEntries.get(path)?.name || fileBaseName(previewPath);
   const isMarkdown = isMarkdownPath(previewPath);
   setPreviewState({
+    root: normalizedRoot,
     path: previewPath,
-    url: `/download?path=${encodeURIComponent(previewPath)}`,
+    url: fileDownloadUrl(previewPath, normalizedRoot),
     meta: entryName || '文件预览',
     subMeta: isMarkdown ? 'Markdown 预览' : '文本预览',
     content: data.file.content || '',
@@ -4691,15 +4830,28 @@ function bindCollectionConfigEvents() {
   }
   if (homeEls.pickOutputDirBtn) {
     homeEls.pickOutputDirBtn.addEventListener('click', () => {
-      pickOutputFolder().catch((error) => toast(error.message));
+      pickOutputFolder('crawl').catch((error) => toast(error.message));
     });
   }
   if (homeEls.resetOutputDirBtn) {
-    homeEls.resetOutputDirBtn.addEventListener('click', resetOutputFolder);
+    homeEls.resetOutputDirBtn.addEventListener('click', () => resetOutputFolder('crawl'));
   }
   if (homeEls.openOutputDirBtn) {
     homeEls.openOutputDirBtn.addEventListener('click', () => {
-      openFolder('').catch((error) => toast(error.message));
+      openFolder('', 'crawl').catch((error) => toast(error.message));
+    });
+  }
+  if (homeEls.pickRewriteOutputDirBtn) {
+    homeEls.pickRewriteOutputDirBtn.addEventListener('click', () => {
+      pickOutputFolder('rewrite').catch((error) => toast(error.message));
+    });
+  }
+  if (homeEls.resetRewriteOutputDirBtn) {
+    homeEls.resetRewriteOutputDirBtn.addEventListener('click', () => resetOutputFolder('rewrite'));
+  }
+  if (homeEls.openRewriteOutputDirBtn) {
+    homeEls.openRewriteOutputDirBtn.addEventListener('click', () => {
+      openFolder('', 'rewrite').catch((error) => toast(error.message));
     });
   }
 }
@@ -4858,6 +5010,13 @@ function bindHomeEvents() {
       loadRecentMarkdown()
         .then(() => toast('Markdown 列表已刷新'))
         .catch((error) => toast(error.message));
+    });
+  }
+  if (homeEls.fileRootSwitch) {
+    homeEls.fileRootSwitch.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-file-root]');
+      if (!button || button.disabled) return;
+      switchFileRoot(button.dataset.fileRoot || 'crawl').catch((error) => toast(error.message));
     });
   }
   if (homeEls.previewRewriteBtn) {

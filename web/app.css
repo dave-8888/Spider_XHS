@@ -2144,6 +2144,44 @@ select:focus {
   color: var(--text);
 }
 
+.file-root-switch {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(112px, 1fr));
+  gap: 4px;
+  width: min(100%, 300px);
+  margin: -4px 0 12px;
+  padding: 4px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-muted-bg);
+}
+
+.file-root-option {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-soft);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.file-root-option:hover {
+  color: var(--blue);
+}
+
+.file-root-option.active {
+  color: var(--text);
+  background: var(--panel-bg);
+  box-shadow: var(--shadow-soft);
+}
+
+.file-root-option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .md-quick-shell {
   display: grid;
   gap: 10px;

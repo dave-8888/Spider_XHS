@@ -30,6 +30,7 @@ from xhs_utils.data_util import handle_note_info, norm_str
 ROOT_DIR = PROJECT_ROOT
 RELATIVE_STORAGE_ROOT = DATA_ROOT if is_desktop_mode() else ROOT_DIR
 DEFAULT_MARKDOWN_ROOT = DATA_ROOT / "markdown_datas"
+DEFAULT_REWRITE_ROOT = DATA_ROOT / "ai_rewrites"
 CONFIG_PATH = DATA_ROOT / "collector_config.json"
 JOB_HISTORY_PATH = DATA_ROOT / "collector_jobs.json"
 SCHEDULER_STATE_PATH = DATA_ROOT / "scheduler_state.json"
@@ -97,7 +98,7 @@ WEEKDAY_LABELS = {
 
 
 def ensure_data_dirs() -> None:
-    for path in [DATA_ROOT, DEFAULT_MARKDOWN_ROOT]:
+    for path in [DATA_ROOT, DEFAULT_MARKDOWN_ROOT, DEFAULT_REWRITE_ROOT]:
         path.mkdir(parents=True, exist_ok=True)
 
 
@@ -221,6 +222,18 @@ def resolve_output_root(config: Optional[Dict[str, Any]] = None) -> Path:
     configured = str(storage.get("output_dir") or "").strip()
     if not configured:
         return DEFAULT_MARKDOWN_ROOT.resolve()
+    expanded = os.path.expandvars(os.path.expanduser(configured))
+    output_root = Path(expanded)
+    if not output_root.is_absolute():
+        output_root = RELATIVE_STORAGE_ROOT / output_root
+    return output_root.resolve()
+
+
+def resolve_rewrite_output_root(config: Optional[Dict[str, Any]] = None) -> Path:
+    storage = config.get("storage", {}) if config else {}
+    configured = str(storage.get("rewrite_output_dir") or "").strip()
+    if not configured:
+        return DEFAULT_REWRITE_ROOT.resolve()
     expanded = os.path.expandvars(os.path.expanduser(configured))
     output_root = Path(expanded)
     if not output_root.is_absolute():
@@ -596,6 +609,7 @@ def summarize_config(config: Dict[str, Any]) -> Dict[str, Any]:
         "rewrite_enabled": bool(config.get("rewrite", {}).get("enabled")),
         "rewrite_topic": rewrite_requirements_label(config.get("rewrite", {}).get("topic")),
         "output_root": str(resolve_output_root(config)),
+        "rewrite_root": str(resolve_rewrite_output_root(config)),
     }
 
 
@@ -629,6 +643,7 @@ class ConfigStore:
             },
             "storage": {
                 "output_dir": "",
+                "rewrite_output_dir": "",
             },
             "ui": {
                 "job_page_size": 10,
@@ -692,7 +707,9 @@ class ConfigStore:
         public_config["paths"] = {
             "data_root": str(DATA_ROOT),
             "markdown_root": str(DEFAULT_MARKDOWN_ROOT),
+            "rewrite_default_root": str(DEFAULT_REWRITE_ROOT),
             "output_root": str(resolve_output_root(config)),
+            "rewrite_root": str(resolve_rewrite_output_root(config)),
             "resource_root": str(RESOURCE_ROOT),
             "desktop_mode": is_desktop_mode(),
         }
@@ -765,6 +782,7 @@ class ConfigStore:
 
         storage = sanitized.setdefault("storage", {})
         storage["output_dir"] = str(storage.get("output_dir") or "").strip().strip("'").strip('"')
+        storage["rewrite_output_dir"] = str(storage.get("rewrite_output_dir") or "").strip().strip("'").strip('"')
         storage.pop("show_note_metadata", None)
 
         ui = sanitized.setdefault("ui", {})
@@ -975,8 +993,15 @@ class ContentCollector:
 
 
 class RewriteService:
-    def __init__(self, output_root: Path, config: Optional[Dict[str, Any]] = None) -> None:
-        self.output_root = output_root.resolve()
+    def __init__(
+        self,
+        source_root: Path,
+        rewrite_root: Optional[Path] = None,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self.source_root = source_root.resolve()
+        self.rewrite_root = (rewrite_root or source_root).resolve()
+        self.output_root = self.rewrite_root
         self.config = config or {}
         self.topic = normalize_rewrite_requirements(self.config.get("topic"))
         self.text_model = str(self.config.get("text_model") or "qwen-plus").strip() or "qwen-plus"
@@ -994,8 +1019,8 @@ class RewriteService:
         notes = self._notes_from_collection_result(result)
         if not notes:
             return None
-        batch_dir = self._collection_batch_dir(result, notes)
-        return self.generate(notes, batch_dir, mode="batch", progress=progress)
+        rewrite_dir = self._collection_rewrite_dir(result, notes)
+        return self.generate(notes, rewrite_dir, mode="batch", progress=progress)
 
     def rewrite_note(
         self,
@@ -1009,7 +1034,7 @@ class RewriteService:
         target_note = self._load_note_folder(note_ref)
         peers = self._peer_notes(note_ref)
         notes = [target_note] + [note for note in peers if note.get("note_id") != target_note.get("note_id")]
-        output_parent = note_ref.parent if note_ref.is_file() else note_ref
+        output_parent = self._rewrite_parent_for_note(note_ref)
         target_dir = available_child_path(
             output_parent,
             f"AI仿写_{safe_filename(self.topic_label(), fallback='requirements', max_len=28)}_{batch_name()}",
@@ -1085,12 +1110,13 @@ class RewriteService:
             "analysis_report": analysis_report,
             "articles": articles,
         }
-        result["output_dir"] = relative_to_root(output_dir, self.output_root)
-        result["analysis_path"] = relative_to_root(output_dir / "爆款分析报告.md", self.output_root)
-        result["articles_path"] = relative_to_root(output_dir / "仿写文案.md", self.output_root)
-        result["image_prompts_path"] = relative_to_root(output_dir / "图片提示词.md", self.output_root)
-        result["result_path"] = relative_to_root(output_dir / "result.json", self.output_root)
-        result["log_path"] = relative_to_root(output_dir / "仿写日志.md", self.output_root)
+        result["root"] = "rewrite"
+        result["output_dir"] = relative_to_root(output_dir, self.rewrite_root)
+        result["analysis_path"] = relative_to_root(output_dir / "爆款分析报告.md", self.rewrite_root)
+        result["articles_path"] = relative_to_root(output_dir / "仿写文案.md", self.rewrite_root)
+        result["image_prompts_path"] = relative_to_root(output_dir / "图片提示词.md", self.rewrite_root)
+        result["result_path"] = relative_to_root(output_dir / "result.json", self.rewrite_root)
+        result["log_path"] = relative_to_root(output_dir / "仿写日志.md", self.rewrite_root)
         result["finished_at"] = now_text()
         record("正在写入仿写结果文件")
         self._write_result_files(output_dir, result)
@@ -1123,20 +1149,28 @@ class RewriteService:
         notes.sort(key=lambda item: parse_count(item.get("liked_count")), reverse=True)
         return notes
 
-    def _collection_batch_dir(self, result: Dict[str, Any], notes: List[Dict[str, Any]]) -> Path:
+    def _rewrite_parent_for_note(self, note_ref: Path) -> Path:
+        source_parent = note_ref.parent if note_ref.is_file() else note_ref
+        try:
+            rel_parent = source_parent.resolve().relative_to(self.source_root)
+            return (self.rewrite_root / rel_parent).resolve()
+        except ValueError:
+            return (self.rewrite_root / safe_filename(source_parent.name, fallback="manual", max_len=60)).resolve()
+
+    def _collection_rewrite_dir(self, result: Dict[str, Any], notes: List[Dict[str, Any]]) -> Path:
         run_dir = str(result.get("run_dir") or "").strip()
         if run_dir:
-            batch_dir = safe_output_path(self.output_root, run_dir)
+            batch_dir = safe_output_path(self.rewrite_root, run_dir)
         else:
-            first_folder = safe_output_path(self.output_root, notes[0]["folder"])
-            batch_dir = first_folder.parent.parent if len(first_folder.parents) >= 2 else first_folder.parent
+            source_parts = Path(str(notes[0].get("folder") or "")).parts
+            batch_dir = safe_output_path(self.rewrite_root, source_parts[0] if source_parts else batch_name())
         return available_child_path(
             batch_dir,
             f"AI仿写_{safe_filename(self.topic_label(), fallback='requirements', max_len=28)}_{batch_name()}",
         )
 
     def _resolve_note_folder(self, relative_path: str) -> Path:
-        target = safe_output_path(self.output_root, str(relative_path or "").strip())
+        target = safe_output_path(self.source_root, str(relative_path or "").strip())
         note_ref = resolve_note_reference_path(target)
         if note_ref:
             return note_ref
@@ -1156,7 +1190,7 @@ class RewriteService:
         if assert_dir.exists():
             for child in sorted(assert_dir.iterdir()):
                 if child.is_file() and child.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp", ".gif"]:
-                    local_images.append(relative_to_root(child, self.output_root))
+                    local_images.append(relative_to_root(child, self.source_root))
         fallback_name = markdown_path.stem if markdown_path else note_ref.name
         return {
             "note_id": str(info.get("note_id") or fallback_name),
@@ -1171,9 +1205,9 @@ class RewriteService:
             "note_type": info.get("note_type"),
             "tags": info.get("tags") or [],
             "image_list": info.get("image_list") or [],
-            "folder": relative_to_root(note_ref, self.output_root),
-            "markdown": relative_to_root(markdown_path, self.output_root) if markdown_path else "",
-            "info": relative_to_root(info_path, self.output_root),
+            "folder": relative_to_root(note_ref, self.source_root),
+            "markdown": relative_to_root(markdown_path, self.source_root) if markdown_path else "",
+            "info": relative_to_root(info_path, self.source_root),
             "local_images": local_images,
         }
 
@@ -1184,7 +1218,7 @@ class RewriteService:
         search_roots = [note_ref.parent, note_ref.parent.parent]
         seen = set()
         for root in search_roots:
-            if not root.exists() or root.resolve() == self.output_root:
+            if not root.exists() or root.resolve() == self.source_root:
                 continue
             for info_path in root.rglob("info.json"):
                 candidate = resolve_note_reference_path(info_path)
@@ -1579,7 +1613,7 @@ class RewriteService:
         if not note:
             return ""
         for rel_path in note.get("local_images") or []:
-            path = safe_output_path(self.output_root, rel_path)
+            path = safe_output_path(self.source_root, rel_path)
             if path.exists() and path.stat().st_size <= 10 * 1024 * 1024:
                 mime = mimetypes.guess_type(str(path))[0] or "image/jpeg"
                 data = base64.b64encode(path.read_bytes()).decode("ascii")
@@ -1780,12 +1814,17 @@ class JobManager:
                     def rewrite_progress(message: str) -> None:
                         progress(message, "rewrite")
 
-                    rewrite_result = RewriteService(resolve_output_root(config), rewrite_config).rewrite_from_collection(
+                    rewrite_result = RewriteService(
+                        resolve_output_root(config),
+                        resolve_rewrite_output_root(config),
+                        rewrite_config,
+                    ).rewrite_from_collection(
                         result,
                         progress=rewrite_progress,
                     )
                     if rewrite_result:
                         result["rewrite"] = {
+                            "root": rewrite_result.get("root") or "rewrite",
                             "topic": rewrite_result.get("topic"),
                             "article_count": rewrite_result.get("article_count"),
                             "output_dir": rewrite_result.get("output_dir"),
@@ -1839,7 +1878,7 @@ class JobManager:
         }
         rewrite_config = dict(config.get("rewrite", {}) if isinstance(config.get("rewrite"), dict) else {})
         rewrite_config["topic"] = topic
-        service = RewriteService(resolve_output_root(config), rewrite_config)
+        service = RewriteService(resolve_output_root(config), resolve_rewrite_output_root(config), rewrite_config)
 
         try:
             with self.lock:
@@ -1874,6 +1913,7 @@ class JobManager:
                 try:
                     rewrite_result = service.rewrite_note(target_path, topic=topic, progress=progress)
                     item.update({
+                        "root": rewrite_result.get("root") or "rewrite",
                         "output_dir": rewrite_result.get("output_dir"),
                         "articles_path": rewrite_result.get("articles_path"),
                         "analysis_path": rewrite_result.get("analysis_path"),
@@ -2407,6 +2447,7 @@ def summarize_recent_markdown_file(path: Path, output_root: Path, kind: str) -> 
         context_parts = list(parent_parts[-3:])
     context = " / ".join(part for part in context_parts if part)
     return {
+        "root": "rewrite" if kind == "rewrite" else "crawl",
         "name": path.name,
         "path": relative_to_root(path, output_root),
         "folder": relative_to_root(folder, output_root),
@@ -2419,9 +2460,11 @@ def summarize_recent_markdown_file(path: Path, output_root: Path, kind: str) -> 
     }
 
 
-def list_recent_markdown_files(output_root: Path, limit: int = 8) -> Dict[str, Any]:
+def list_recent_markdown_files(output_root: Path, limit: int = 8, rewrite_root: Optional[Path] = None) -> Dict[str, Any]:
     ensure_data_dirs()
     output_root.mkdir(parents=True, exist_ok=True)
+    if rewrite_root:
+        rewrite_root.mkdir(parents=True, exist_ok=True)
     try:
         limit = int(limit or 8)
     except (TypeError, ValueError):
@@ -2435,13 +2478,23 @@ def list_recent_markdown_files(output_root: Path, limit: int = 8) -> Dict[str, A
             if not is_output_markdown_file(path) or is_hidden_output_path(path, output_root):
                 continue
             if is_rewrite_markdown_path(path, output_root):
-                if path.name == "仿写文案.md":
+                if not rewrite_root and path.name == "仿写文案.md":
                     rewritten.append(summarize_recent_markdown_file(path, output_root, "rewrite"))
                 continue
             if resolve_note_reference_path(path):
                 crawled.append(summarize_recent_markdown_file(path, output_root, "crawled"))
         except OSError:
             continue
+
+    if rewrite_root:
+        for path in rewrite_root.rglob("*"):
+            try:
+                if not is_output_markdown_file(path) or is_hidden_output_path(path, rewrite_root):
+                    continue
+                if path.name == "仿写文案.md":
+                    rewritten.append(summarize_recent_markdown_file(path, rewrite_root, "rewrite"))
+            except OSError:
+                continue
 
     def recent_first(item: Dict[str, Any]) -> Tuple[float, str]:
         return (-float(item.get("modified_ts") or 0), str(item.get("path") or "").lower())
