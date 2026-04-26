@@ -3003,6 +3003,20 @@ body.has-file-preview-fullscreen {
   line-height: 1.35;
 }
 
+.file-preview-subtitle.is-saving,
+.file-preview-subtitle.is-dirty,
+.file-preview-subtitle.is-editing {
+  color: var(--blue);
+}
+
+.file-preview-subtitle.is-saved {
+  color: var(--success);
+}
+
+.file-preview-subtitle.is-error {
+  color: var(--danger);
+}
+
 .file-preview-actions {
   display: flex;
   flex: 0 0 auto;
@@ -3016,6 +3030,16 @@ body.has-file-preview-fullscreen {
 
 .file-preview-rewrite-btn {
   color: var(--accent);
+}
+
+.file-preview-edit-btn {
+  color: var(--blue);
+}
+
+.file-preview-edit-btn.is-active,
+.file-preview-edit-btn:not(:disabled):hover {
+  border-color: var(--blue-soft);
+  background: var(--blue-soft);
 }
 
 .file-preview-rewrite-btn.is-active,
@@ -3272,6 +3296,105 @@ body.has-file-preview-fullscreen {
   white-space: normal;
   font-family: var(--font-text);
   font-size: 14px;
+}
+
+.file-preview.is-markdown-editing {
+  padding: 0;
+  cursor: text;
+}
+
+.markdown-vditor-editor {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  background: var(--panel-bg);
+}
+
+.file-preview-panel.is-fullscreen .file-preview.is-markdown-editing,
+.file-preview-panel.is-fullscreen .markdown-vditor-editor {
+  height: 100%;
+  min-height: calc(100vh - 92px);
+}
+
+.markdown-vditor-editor.vditor {
+  display: flex;
+  flex-direction: column;
+  height: 100% !important;
+  border: 0;
+  border-radius: 0;
+  background: var(--panel-bg);
+  color: var(--text);
+  --toolbar-background: var(--panel-muted-bg);
+  --toolbar-icon-color: var(--text-soft);
+  --toolbar-icon-hover-color: var(--accent);
+  --textarea-background-color: var(--panel-bg);
+  --textarea-text-color: var(--text);
+}
+
+.markdown-vditor-editor .vditor-toolbar {
+  border-bottom-color: var(--line-soft);
+  background: var(--panel-muted-bg);
+}
+
+.markdown-vditor-editor .vditor-toolbar__item button {
+  border-radius: 6px;
+}
+
+.markdown-vditor-editor .vditor-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--panel-bg) !important;
+}
+
+.markdown-vditor-editor .vditor-reset,
+.markdown-vditor-editor .vditor-wysiwyg,
+.markdown-vditor-editor .vditor-ir,
+.markdown-vditor-editor .vditor-sv {
+  background: var(--panel-bg) !important;
+  color: var(--text) !important;
+  font-family: var(--font-text);
+  font-size: 14px;
+  line-height: 1.6;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}
+
+.markdown-vditor-editor .vditor-wysiwyg,
+.markdown-vditor-editor .vditor-ir,
+.markdown-vditor-editor .vditor-sv {
+  padding: 16px 20px !important;
+}
+
+.markdown-vditor-editor .vditor-reset h1,
+.markdown-vditor-editor .vditor-reset h2,
+.markdown-vditor-editor .vditor-reset h3,
+.markdown-vditor-editor .vditor-reset h4,
+.markdown-vditor-editor .vditor-reset h5,
+.markdown-vditor-editor .vditor-reset h6,
+.markdown-vditor-editor .vditor-reset p,
+.markdown-vditor-editor .vditor-reset li,
+.markdown-vditor-editor .vditor-reset blockquote {
+  color: inherit !important;
+}
+
+.markdown-vditor-editor .vditor-reset a {
+  color: var(--accent) !important;
+}
+
+.markdown-vditor-editor .vditor-tip {
+  z-index: 60;
+}
+
+.markdown-vditor-error {
+  display: grid;
+  place-items: center;
+  min-height: 220px;
+  padding: 20px;
+  color: var(--danger);
+  text-align: center;
 }
 
 .file-preview.is-markdown > :first-child {

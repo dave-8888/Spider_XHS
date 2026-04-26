@@ -2594,6 +2594,31 @@ def read_output_text_file(output_root: Path, relative_path: str, limit: int = 30
     }
 
 
+def save_output_markdown_file(output_root: Path, relative_path: str, content: Any) -> Dict[str, Any]:
+    ensure_data_dirs()
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    rel = str(relative_path or "").strip()
+    if not rel:
+        raise ValueError("请选择要保存的 Markdown 文件")
+
+    target = ensure_manageable_output_target(output_root, safe_output_path(output_root, rel))
+    if not target.exists():
+        raise FileNotFoundError("文件不存在")
+    if not target.is_file():
+        raise ValueError("只能保存 Markdown 文件")
+    if target.suffix.lower() not in [".md", ".markdown"]:
+        raise ValueError("该文件不支持 Markdown 编辑")
+
+    target.write_text(str(content if content is not None else ""), encoding="utf-8")
+    stat = target.stat()
+    return {
+        "path": relative_to_root(target, output_root),
+        "size": stat.st_size,
+        "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
 def clean_empty_batch_dirs(output_root: Path, include_root: bool = False) -> None:
     if not output_root.exists():
         return

@@ -54,6 +54,7 @@ const homeEls = {
   filePreview: document.querySelector('#filePreview'),
   filePreviewMeta: document.querySelector('#filePreviewMeta'),
   filePreviewSubMeta: document.querySelector('#filePreviewSubMeta'),
+  previewEditBtn: document.querySelector('#previewEditBtn'),
   previewRewriteBtn: document.querySelector('#previewRewriteBtn'),
   previewRewritePopover: document.querySelector('#previewRewritePopover'),
   previewRewriteInput: document.querySelector('#previewRewriteInput'),
@@ -133,7 +134,20 @@ const state = {
   currentPreviewPath: '',
   currentPreviewContent: '',
   currentPreviewMode: 'text',
+  currentPreviewSubMeta: '',
+  currentPreviewTruncated: false,
   previewFullscreen: false,
+  previewEditorActive: false,
+  previewEditorDraft: '',
+  previewEditorDirty: false,
+  previewEditorSaving: false,
+  previewEditorSaveTimer: null,
+  previewEditorSavePromise: null,
+  previewEditorSaveError: '',
+  previewEditorLastSavedContent: '',
+  previewEditorSavedOnce: false,
+  previewEditorInstance: null,
+  previewEditorMount: null,
   previewRewriteOpen: false,
   previewRewritePath: '',
   markdownImageLightboxPreviousFocus: null,
@@ -192,6 +206,30 @@ const DEFAULT_JOB_PAGE_SIZE = 10;
 const FILE_LAYOUT_DEFAULT_LIST_PERCENT = 20;
 const FILE_LAYOUT_MIN_LIST_PERCENT = 16;
 const FILE_LAYOUT_MAX_LIST_PERCENT = 55;
+const MARKDOWN_AUTOSAVE_DELAY_MS = 700;
+const VDITOR_CDN = '/vendor/vditor';
+const MARKDOWN_EDITOR_TOOLBAR = [
+  'headings',
+  'bold',
+  'italic',
+  'strike',
+  'link',
+  '|',
+  'list',
+  'ordered-list',
+  'check',
+  'outdent',
+  'indent',
+  '|',
+  'quote',
+  'line',
+  'code',
+  'inline-code',
+  'table',
+  '|',
+  'undo',
+  'redo',
+];
 
 function getThemeMode() {
   return ['light', 'dark', 'system'].includes(state.themeMode) ? state.themeMode : 'system';
@@ -2250,6 +2288,70 @@ function localMarkdownDownloadUrl(url, sourcePath = '') {
   return resolvedPath ? `/download?path=${encodeURIComponent(resolvedPath)}${hashPart}` : '';
 }
 
+function unwrapMarkdownDestination(value = '') {
+  const raw = String(value || '').trim();
+  return raw.startsWith('<') && raw.endsWith('>') ? raw.slice(1, -1).trim() : raw;
+}
+
+function wrapMarkdownDestination(value = '') {
+  const raw = String(value || '').trim();
+  return /\s/.test(raw) ? `<${raw}>` : raw;
+}
+
+function relativeMarkdownPathFromSource(targetPath = '', sourcePath = '') {
+  const targetParts = filePathParts(targetPath);
+  if (!targetParts.length) return '';
+  const sourceParts = fileDirectoryParts(sourcePath);
+  let shared = 0;
+  while (shared < sourceParts.length && shared < targetParts.length && sourceParts[shared] === targetParts[shared]) {
+    shared += 1;
+  }
+  const upParts = sourceParts.slice(shared).map(() => '..');
+  const downParts = targetParts.slice(shared);
+  return [...upParts, ...downParts].join('/') || fileBaseName(targetPath);
+}
+
+function markdownResourceUrlForEditor(rawUrl = '', sourcePath = '') {
+  const downloadUrl = localMarkdownDownloadUrl(rawUrl, sourcePath);
+  return downloadUrl.startsWith('/download?path=') ? downloadUrl : String(rawUrl || '').trim();
+}
+
+function markdownResourceUrlFromEditor(rawUrl = '', sourcePath = '') {
+  const raw = unwrapMarkdownDestination(String(rawUrl || '').replaceAll('&amp;', '&'));
+  if (!raw) return raw;
+  try {
+    const url = new URL(raw, window.location.href);
+    if (url.pathname !== '/download') return raw;
+    const targetPath = url.searchParams.get('path') || '';
+    if (!targetPath) return raw;
+    const relativePath = relativeMarkdownPathFromSource(targetPath, sourcePath);
+    return `${relativePath}${url.hash || ''}`;
+  } catch (_error) {
+    return raw;
+  }
+}
+
+function rewriteMarkdownResourceUrls(content = '', sourcePath = '', mapper) {
+  const mapUrl = (url) => (typeof mapper === 'function' ? mapper(unwrapMarkdownDestination(url), sourcePath) : url);
+  return String(content ?? '')
+    .replace(/(!?\[[^\]\n]*]\()([^)\n]+)(\))/g, (_match, prefix, rawUrl, suffix) => {
+      const mappedUrl = mapUrl(rawUrl);
+      return `${prefix}${wrapMarkdownDestination(mappedUrl)}${suffix}`;
+    })
+    .replace(/(<(?:video|img|source)\b[^>]*?\s(?:src|poster)\s*=\s*)(["'])([^"']*)(\2)/gi, (_match, prefix, quote, rawUrl, closingQuote) => {
+      const mappedUrl = mapUrl(rawUrl);
+      return `${prefix}${quote}${escapeHtml(mappedUrl)}${closingQuote}`;
+    });
+}
+
+function markdownToEditorValue(content = '', sourcePath = '') {
+  return rewriteMarkdownResourceUrls(content, sourcePath, markdownResourceUrlForEditor);
+}
+
+function markdownFromEditorValue(content = '', sourcePath = '') {
+  return rewriteMarkdownResourceUrls(content, sourcePath, markdownResourceUrlFromEditor);
+}
+
 function renderMarkdownImage(src, alt = '') {
   const label = String(alt || '').trim();
   const ariaLabel = label ? `预览图片：${label}` : '预览图片';
@@ -2648,6 +2750,349 @@ function setElementHidden(element, hidden) {
   if (element) element.hidden = Boolean(hidden);
 }
 
+function isCurrentPreviewMarkdown() {
+  return state.currentPreviewMode === 'markdown' && Boolean(state.currentPreviewPath);
+}
+
+function canEditCurrentMarkdownPreview() {
+  return isCurrentPreviewMarkdown() && !state.currentPreviewTruncated;
+}
+
+function previewEditorSubtitle() {
+  if (!isCurrentPreviewMarkdown()) {
+    return { text: state.currentPreviewSubMeta || '', tone: '' };
+  }
+  if (!state.previewEditorActive) {
+    return {
+      text: state.currentPreviewTruncated ? 'Markdown 预览 · 内容过长不可编辑' : 'Markdown 预览',
+      tone: state.currentPreviewTruncated ? 'is-muted' : '',
+    };
+  }
+  if (state.previewEditorSaving) {
+    return { text: '保存中...', tone: 'is-saving' };
+  }
+  if (state.previewEditorSaveError) {
+    return { text: '保存失败，继续编辑后会重试', tone: 'is-error' };
+  }
+  if (state.previewEditorDirty) {
+    return { text: '未保存', tone: 'is-dirty' };
+  }
+  if (state.previewEditorSavedOnce) {
+    return { text: '已自动保存', tone: 'is-saved' };
+  }
+  return { text: '所见即所得编辑', tone: 'is-editing' };
+}
+
+function updatePreviewHeaderState() {
+  if (homeEls.filePreviewSubMeta) {
+    const subtitle = previewEditorSubtitle();
+    homeEls.filePreviewSubMeta.textContent = subtitle.text;
+    homeEls.filePreviewSubMeta.classList.remove('is-saving', 'is-error', 'is-dirty', 'is-saved', 'is-editing', 'is-muted');
+    if (subtitle.tone) {
+      homeEls.filePreviewSubMeta.classList.add(subtitle.tone);
+    }
+  }
+
+  if (!homeEls.previewEditBtn) return;
+  const showEdit = isCurrentPreviewMarkdown();
+  const canEdit = canEditCurrentMarkdownPreview();
+  const active = Boolean(state.previewEditorActive);
+  homeEls.previewEditBtn.hidden = !showEdit;
+  homeEls.previewEditBtn.disabled = !canEdit;
+  homeEls.previewEditBtn.classList.toggle('is-active', active);
+  homeEls.previewEditBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  const label = active
+    ? '退出 Markdown 编辑'
+    : (state.currentPreviewTruncated ? '内容过长不可编辑' : '编辑 Markdown');
+  homeEls.previewEditBtn.title = label;
+  homeEls.previewEditBtn.setAttribute('aria-label', label);
+}
+
+function destroyPreviewEditorInstance() {
+  const editor = state.previewEditorInstance;
+  state.previewEditorInstance = null;
+  state.previewEditorMount = null;
+  if (editor && typeof editor.destroy === 'function') {
+    try {
+      editor.destroy();
+    } catch (_error) {
+      // Vditor may already have removed its DOM during a preview rerender.
+    }
+  }
+}
+
+function resetPreviewEditorState() {
+  if (state.previewEditorSaveTimer) {
+    window.clearTimeout(state.previewEditorSaveTimer);
+  }
+  destroyPreviewEditorInstance();
+  state.previewEditorActive = false;
+  state.previewEditorDraft = '';
+  state.previewEditorDirty = false;
+  state.previewEditorSaving = false;
+  state.previewEditorSaveTimer = null;
+  state.previewEditorSavePromise = null;
+  state.previewEditorSaveError = '';
+  state.previewEditorLastSavedContent = '';
+  state.previewEditorSavedOnce = false;
+}
+
+function syncPreviewEditorDraftFromInstance() {
+  const editor = state.previewEditorInstance;
+  if (!editor || typeof editor.getValue !== 'function') return;
+  state.previewEditorDraft = markdownFromEditorValue(editor.getValue(), state.currentPreviewPath);
+  state.previewEditorDirty = state.previewEditorDraft !== state.previewEditorLastSavedContent;
+}
+
+function normalizeVditorEditorLayout(editor) {
+  const instance = editor?.vditor;
+  const elements = [
+    instance?.wysiwyg?.element,
+    instance?.ir?.element,
+    instance?.sv?.element,
+  ];
+  elements.forEach((element) => {
+    if (!element) return;
+    element.style.padding = '16px 20px';
+    element.style.maxWidth = 'none';
+    element.style.width = '100%';
+    element.style.boxSizing = 'border-box';
+  });
+  if (instance?.toolbar?.element) {
+    instance.toolbar.element.style.paddingLeft = '8px';
+  }
+}
+
+function createMarkdownVditorEditor(mount, { focusEditor = false } = {}) {
+  if (!mount) return;
+  if (typeof window.Vditor !== 'function') {
+    state.previewEditorSaveError = 'Vditor 资源加载失败';
+    mount.innerHTML = '<div class="markdown-vditor-error">编辑器资源加载失败，请刷新页面后重试。</div>';
+    updatePreviewHeaderState();
+    return;
+  }
+
+  destroyPreviewEditorInstance();
+  const editorValue = markdownToEditorValue(state.previewEditorDraft, state.currentPreviewPath);
+  let editor = null;
+  const options = {
+    value: editorValue,
+    mode: 'wysiwyg',
+    lang: 'zh_CN',
+    cdn: VDITOR_CDN,
+    width: '100%',
+    height: '100%',
+    minHeight: 320,
+    cache: {
+      enable: false,
+    },
+    toolbar: MARKDOWN_EDITOR_TOOLBAR,
+    toolbarConfig: {
+      hide: false,
+      pin: false,
+    },
+    preview: {
+      delay: 300,
+      maxWidth: 100000,
+      mode: 'both',
+      theme: {
+        current: 'light',
+        path: `${VDITOR_CDN}/dist/css/content-theme`,
+      },
+      hljs: {
+        style: 'github',
+      },
+    },
+    link: {
+      isOpen: false,
+    },
+    image: {
+      isPreview: false,
+    },
+    input(value) {
+      handleMarkdownEditorInput(markdownFromEditorValue(value, state.currentPreviewPath));
+    },
+    after() {
+      if (!editor) return;
+      state.previewEditorInstance = editor;
+      normalizeVditorEditorLayout(editor);
+      window.requestAnimationFrame(() => normalizeVditorEditorLayout(editor));
+      if (typeof editor.disabledCache === 'function') {
+        editor.disabledCache();
+      }
+      if (focusEditor && typeof editor.focus === 'function') {
+        editor.focus();
+      }
+    },
+  };
+
+  editor = new window.Vditor(mount, options);
+
+  state.previewEditorInstance = editor;
+  state.previewEditorMount = mount;
+}
+
+function renderMarkdownPreviewContent({ focusEditor = false } = {}) {
+  if (!homeEls.filePreview || !isCurrentPreviewMarkdown()) return;
+  homeEls.filePreview.className = `file-preview is-markdown${state.previewEditorActive ? ' is-markdown-editing' : ''}`;
+
+  if (state.previewEditorActive) {
+    homeEls.filePreview.innerHTML = '';
+    const editorMount = document.createElement('div');
+    editorMount.className = 'markdown-vditor-editor';
+    editorMount.dataset.path = state.currentPreviewPath;
+    homeEls.filePreview.appendChild(editorMount);
+    window.requestAnimationFrame(() => {
+      if (!state.previewEditorActive || editorMount.dataset.path !== state.currentPreviewPath) return;
+      createMarkdownVditorEditor(editorMount, { focusEditor });
+    });
+    return;
+  }
+
+  destroyPreviewEditorInstance();
+  const truncatedHtml = state.currentPreviewTruncated ? '<p class="file-preview-notice">内容过长，已截断预览</p>' : '';
+  homeEls.filePreview.innerHTML = `${renderMarkdown(state.currentPreviewContent, state.currentPreviewPath)}${truncatedHtml}`;
+}
+
+function updateCachedFileMetadata(file = {}) {
+  const path = normalizeFilePath(file.path || state.currentPreviewPath);
+  if (!path) return;
+  let changed = false;
+  state.fileTreeCache.forEach((files) => {
+    (files.entries || []).forEach((entry) => {
+      if (normalizeFilePath(entry.path || '') !== path) return;
+      if (typeof file.size === 'number') entry.size = file.size;
+      if (file.modified) entry.modified = file.modified;
+      changed = true;
+    });
+  });
+  if (!changed) return;
+  rebuildFileEntryMap();
+  if (state.currentFiles) {
+    renderFiles(state.currentFiles);
+  }
+}
+
+function handleMarkdownEditorInput(value = '') {
+  state.previewEditorDraft = String(value ?? '');
+  state.previewEditorDirty = state.previewEditorDraft !== state.previewEditorLastSavedContent;
+  state.previewEditorSaveError = '';
+  if (state.previewEditorSaveTimer) {
+    window.clearTimeout(state.previewEditorSaveTimer);
+    state.previewEditorSaveTimer = null;
+  }
+  if (state.previewEditorDirty) {
+    state.previewEditorSaveTimer = window.setTimeout(() => {
+      saveMarkdownPreviewDraft().catch((error) => toast(error.message));
+    }, MARKDOWN_AUTOSAVE_DELAY_MS);
+  }
+  updatePreviewHeaderState();
+}
+
+async function saveMarkdownPreviewDraft({ force = false } = {}) {
+  if (!state.previewEditorActive || !canEditCurrentMarkdownPreview()) return true;
+  syncPreviewEditorDraftFromInstance();
+  if (state.previewEditorSaveTimer) {
+    window.clearTimeout(state.previewEditorSaveTimer);
+    state.previewEditorSaveTimer = null;
+  }
+  if (!force && !state.previewEditorDirty) return true;
+  if (state.previewEditorSaving) {
+    return state.previewEditorSavePromise || false;
+  }
+
+  const path = normalizeFilePath(state.currentPreviewPath);
+  const content = state.previewEditorDraft;
+  if (!path) return false;
+  if (content === state.previewEditorLastSavedContent) {
+    state.previewEditorDirty = false;
+    updatePreviewHeaderState();
+    return true;
+  }
+
+  state.previewEditorSaving = true;
+  state.previewEditorSaveError = '';
+  updatePreviewHeaderState();
+
+  const savePromise = api('/api/file/save', {
+    method: 'POST',
+    body: JSON.stringify({ path, content }),
+  })
+    .then((data) => {
+      if (normalizeFilePath(state.currentPreviewPath) !== path || !state.previewEditorActive) {
+        return true;
+      }
+      state.currentPreviewContent = content;
+      state.previewEditorLastSavedContent = content;
+      state.previewEditorDirty = state.previewEditorDraft !== content;
+      state.previewEditorSaveError = '';
+      state.previewEditorSavedOnce = true;
+      updateCachedFileMetadata(data.file || {});
+      loadRecentMarkdown().catch(() => {});
+      return !state.previewEditorDirty;
+    })
+    .catch((error) => {
+      if (normalizeFilePath(state.currentPreviewPath) === path && state.previewEditorActive) {
+        state.previewEditorSaveError = error.message || '保存失败';
+        state.previewEditorDirty = true;
+      }
+      return false;
+    })
+    .finally(() => {
+      if (normalizeFilePath(state.currentPreviewPath) === path) {
+        state.previewEditorSaving = false;
+        state.previewEditorSavePromise = null;
+        if (state.previewEditorActive && state.previewEditorDirty && !state.previewEditorSaveError && !state.previewEditorSaveTimer) {
+          state.previewEditorSaveTimer = window.setTimeout(() => {
+            saveMarkdownPreviewDraft().catch((error) => toast(error.message));
+          }, MARKDOWN_AUTOSAVE_DELAY_MS);
+        }
+        updatePreviewHeaderState();
+      }
+    });
+
+  state.previewEditorSavePromise = savePromise;
+  return savePromise;
+}
+
+async function toggleMarkdownPreviewEditor() {
+  if (!canEditCurrentMarkdownPreview()) {
+    if (state.currentPreviewTruncated) {
+      toast('内容过长，不能在预览中编辑');
+    }
+    updatePreviewHeaderState();
+    return;
+  }
+
+  if (state.previewEditorActive) {
+    syncPreviewEditorDraftFromInstance();
+    if (state.previewEditorDirty || state.previewEditorSaving) {
+      const saved = await saveMarkdownPreviewDraft({ force: true });
+      if (!saved || state.previewEditorDirty) {
+        toast('保存失败，已保留编辑内容');
+        return;
+      }
+    }
+    state.previewEditorActive = false;
+    state.currentPreviewContent = state.previewEditorDraft;
+    destroyPreviewEditorInstance();
+    updatePreviewHeaderState();
+    renderMarkdownPreviewContent();
+    return;
+  }
+
+  closePreviewRewritePopover({ restoreFocus: false });
+  state.previewEditorActive = true;
+  state.previewEditorDraft = state.currentPreviewContent || '';
+  state.previewEditorLastSavedContent = state.currentPreviewContent || '';
+  state.previewEditorDirty = false;
+  state.previewEditorSaving = false;
+  state.previewEditorSaveError = '';
+  state.previewEditorSavedOnce = false;
+  updatePreviewHeaderState();
+  renderMarkdownPreviewContent({ focusEditor: true });
+}
+
 function previewRewriteDefaultTopic() {
   return (state.config?.rewrite?.topic || '创业沙龙').trim() || '创业沙龙';
 }
@@ -2769,6 +3214,14 @@ async function submitPreviewRewrite() {
     return;
   }
 
+  if (state.previewEditorActive && (state.previewEditorDirty || state.previewEditorSaving)) {
+    const saved = await saveMarkdownPreviewDraft({ force: true });
+    if (!saved || state.previewEditorDirty) {
+      toast('Markdown 尚未保存成功，暂不开始仿写');
+      return;
+    }
+  }
+
   await rewriteEntries([target], { topic });
   closePreviewRewritePopover({ restoreFocus: true });
 }
@@ -2842,9 +3295,10 @@ function renderFileBreadcrumbs(currentPath = '') {
   homeEls.fileBreadcrumbs.innerHTML = rootButton + crumbs;
 
   homeEls.fileBreadcrumbs.querySelectorAll('.file-crumb').forEach((button) => {
-    button.addEventListener('click', () => {
+    button.addEventListener('click', async () => {
       const path = button.dataset.path || '';
       if (path === state.currentPath && state.fileTreeExpandedPaths.has(normalizeFilePath(path))) return;
+      if (!await ensurePreviewEditorSavedBeforePreviewChange()) return;
       setPreviewState(defaultPreviewState());
       loadFiles(path).catch((error) => toast(error.message));
     });
@@ -3063,9 +3517,12 @@ function setPreviewState({
   if (state.previewRewriteOpen) {
     closePreviewRewritePopover({ restoreFocus: false });
   }
+  resetPreviewEditorState();
   state.currentPreviewPath = path;
   state.currentPreviewContent = content;
   state.currentPreviewMode = mode;
+  state.currentPreviewSubMeta = subMeta;
+  state.currentPreviewTruncated = Boolean(truncated);
 
   const shouldShow = Boolean(open && (path || meta || content));
   if (homeEls.fileLayout) {
@@ -3078,7 +3535,8 @@ function setPreviewState({
 
   if (!shouldShow) {
     if (homeEls.filePreviewMeta) homeEls.filePreviewMeta.textContent = '预览';
-    if (homeEls.filePreviewSubMeta) homeEls.filePreviewSubMeta.textContent = '未选择文件';
+    state.currentPreviewSubMeta = '未选择文件';
+    updatePreviewHeaderState();
     if (homeEls.copyPreviewTextBtn) homeEls.copyPreviewTextBtn.disabled = true;
     if (homeEls.closePreviewBtn) homeEls.closePreviewBtn.disabled = true;
     setPreviewFullscreen(false);
@@ -3099,9 +3557,7 @@ function setPreviewState({
   if (homeEls.filePreviewMeta) {
     homeEls.filePreviewMeta.textContent = meta;
   }
-  if (homeEls.filePreviewSubMeta) {
-    homeEls.filePreviewSubMeta.textContent = subMeta;
-  }
+  updatePreviewHeaderState();
   if (homeEls.copyPreviewTextBtn) {
     homeEls.copyPreviewTextBtn.disabled = !content || !['markdown', 'text'].includes(mode);
   }
@@ -3113,8 +3569,7 @@ function setPreviewState({
 
   homeEls.filePreview.className = `file-preview is-${mode}`;
   if (mode === 'markdown') {
-    const truncatedHtml = truncated ? '<p class="file-preview-notice">内容过长，已截断预览</p>' : '';
-    homeEls.filePreview.innerHTML = `${renderMarkdown(content, path)}${truncatedHtml}`;
+    renderMarkdownPreviewContent();
   } else if (mode === 'image') {
     homeEls.filePreview.innerHTML = `<img class="file-preview-media" src="${escapeHtml(url)}" alt="${escapeHtml(meta)}" loading="lazy">`;
   } else if (mode === 'video') {
@@ -4076,6 +4531,7 @@ function renderFiles(files = state.currentFiles) {
         const name = button.dataset.name || fileBaseName(path);
         const mode = button.dataset.previewMode || 'download';
         if (button.dataset.kind === 'directory') {
+          if (!await ensurePreviewEditorSavedBeforePreviewChange()) return;
           setPreviewState(defaultPreviewState());
           await toggleFileTreeDirectory(path);
           return;
@@ -4087,10 +4543,12 @@ function renderFiles(files = state.currentFiles) {
         }
 
         if (mode === 'image' || mode === 'video') {
+          if (!await ensurePreviewEditorSavedBeforePreviewChange()) return;
           previewMediaFile(path, name, mode);
           return;
         }
 
+        if (!await ensurePreviewEditorSavedBeforePreviewChange()) return;
         setPreviewState(defaultPreviewState());
         window.open(`/download?path=${encodeURIComponent(path)}`, '_blank', 'noopener');
         toast(`${name} 不支持文本预览，已在新窗口打开`);
@@ -4143,6 +4601,7 @@ function renderFiles(files = state.currentFiles) {
           if (mode === 'markdown' || mode === 'text') {
             await previewFile(path);
           } else if (mode === 'image' || mode === 'video') {
+            if (!await ensurePreviewEditorSavedBeforePreviewChange()) return;
             previewMediaFile(path, button.dataset.name || fileBaseName(path), mode);
           }
           return;
@@ -4179,6 +4638,18 @@ async function loadFiles(path = state.currentPath, { force = false, resetSelecti
   return files;
 }
 
+async function ensurePreviewEditorSavedBeforePreviewChange() {
+  if (!state.previewEditorActive || (!state.previewEditorDirty && !state.previewEditorSaving)) {
+    return true;
+  }
+  const saved = await saveMarkdownPreviewDraft({ force: true });
+  if (!saved || state.previewEditorDirty) {
+    toast('保存失败，已保留编辑内容');
+    return false;
+  }
+  return true;
+}
+
 function previewMediaFile(path, name = '', mode = 'image') {
   const url = `/download?path=${encodeURIComponent(path)}`;
   setPreviewState({
@@ -4193,6 +4664,7 @@ function previewMediaFile(path, name = '', mode = 'image') {
 }
 
 async function previewFile(path) {
+  if (!await ensurePreviewEditorSavedBeforePreviewChange()) return;
   const data = await api(`/api/file?path=${encodeURIComponent(path)}`);
   const previewPath = data.file.path || path;
   const entryName = state.currentFileEntries.get(path)?.name || fileBaseName(previewPath);
@@ -4407,6 +4879,11 @@ function bindHomeEvents() {
       submitPreviewRewrite().catch((error) => toast(error.message));
     });
   }
+  if (homeEls.previewEditBtn) {
+    homeEls.previewEditBtn.addEventListener('click', () => {
+      toggleMarkdownPreviewEditor().catch((error) => toast(error.message));
+    });
+  }
   if (homeEls.filePreview) {
     homeEls.filePreview.addEventListener('click', (event) => {
       if (!(event.target instanceof Element)) return;
@@ -4457,7 +4934,9 @@ function bindHomeEvents() {
   });
   if (homeEls.copyPreviewTextBtn) {
     homeEls.copyPreviewTextBtn.addEventListener('click', () => {
-      const text = homeEls.filePreview?.innerText || state.currentPreviewContent;
+      const text = state.previewEditorActive
+        ? state.previewEditorDraft
+        : (homeEls.filePreview?.innerText || state.currentPreviewContent);
       copyText(text)
         .then(() => toast('预览文本已复制'))
         .catch((error) => toast(error.message || '复制失败'));
@@ -4474,7 +4953,8 @@ function bindHomeEvents() {
     });
   }
   if (homeEls.closePreviewBtn) {
-    homeEls.closePreviewBtn.addEventListener('click', () => {
+    homeEls.closePreviewBtn.addEventListener('click', async () => {
+      if (!await ensurePreviewEditorSavedBeforePreviewChange()) return;
       closePreviewRewritePopover({ restoreFocus: false });
       setPreviewState(defaultPreviewState());
     });

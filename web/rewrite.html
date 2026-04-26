@@ -28,6 +28,7 @@
       }
     })();
   </script>
+  <link rel="stylesheet" href="/vendor/vditor/dist/index.css">
   <link rel="stylesheet" href="/ui/app.css">
 </head>
 <body data-page="rewrite">
@@ -166,6 +167,9 @@
               <span id="filePreviewSubMeta" class="file-preview-subtitle"></span>
             </div>
             <div class="file-preview-actions">
+              <button id="previewEditBtn" class="btn btn-ghost file-preview-action file-preview-edit-btn" type="button" title="编辑 Markdown" aria-label="编辑 Markdown" aria-pressed="false" hidden disabled>
+                <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4.5 19.5 4.2-.8 9.8-9.8-3.4-3.4-9.8 9.8z"/><path d="m13.8 6.8 3.4 3.4"/><path d="M12 19.5h7.5"/></svg>
+              </button>
               <div class="file-preview-rewrite-wrap">
                 <button id="previewRewriteBtn" class="btn btn-ghost file-preview-action file-preview-rewrite-btn" type="button" title="仿写当前预览" aria-label="仿写当前预览" aria-expanded="false" disabled>
                   <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4.5 19.5 9.8-9.8 2 2-9.8 9.8h-2z"/><path d="m13.7 6.3 2-2 4 4-2 2"/><path d="M6 4.5v3M4.5 6h3M18 16.5v3M16.5 18h3"/></svg>
@@ -220,6 +224,7 @@
     </div>
   </div>
   <div id="toast" class="toast" aria-live="polite"></div>
+  <script src="/vendor/vditor/dist/index.min.js"></script>
   <script src="/ui/app.js"></script>
 </body>
 </html>

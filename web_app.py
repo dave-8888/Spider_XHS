@@ -35,6 +35,7 @@ from collector_service import (
     rename_output_entry,
     resolve_output_root,
     safe_output_path,
+    save_output_markdown_file,
 )
 from runtime_paths import DATA_ROOT, RESOURCE_ROOT, WEB_ROOT, is_desktop_mode
 
@@ -44,6 +45,7 @@ LOGIN_URL = "https://www.xiaohongshu.com/explore"
 BROWSER_READY_TIMEOUT_SECONDS = 10.0
 BROWSER_READY_POLL_SECONDS = 0.25
 RELATIVE_STORAGE_ROOT = DATA_ROOT if is_desktop_mode() else RESOURCE_ROOT
+VDITOR_VENDOR_PREFIX = "/vendor/vditor/"
 
 config_store = ConfigStore()
 job_manager = JobManager(config_store)
@@ -376,6 +378,40 @@ def safe_web_path(url_path: str) -> Path:
     return resolved
 
 
+def vditor_vendor_roots() -> List[Path]:
+    project_root = Path(__file__).resolve().parent
+    candidates = [
+        RESOURCE_ROOT.parent / "js-runtime" / "node_modules" / "vditor",
+        RESOURCE_ROOT / "node_modules" / "vditor",
+        project_root / "node_modules" / "vditor",
+        project_root / "build" / "js-runtime" / "node_modules" / "vditor",
+    ]
+    roots: List[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        key = str(resolved)
+        if key in seen or not resolved.is_dir():
+            continue
+        roots.append(resolved)
+        seen.add(key)
+    return roots
+
+
+def safe_vditor_vendor_path(relative_path: str) -> Path:
+    rel = unquote(str(relative_path or "").lstrip("/"))
+    if not rel or rel.endswith("/") or not rel.startswith("dist/"):
+        raise FileNotFoundError("Vditor 资源不存在")
+    for root in vditor_vendor_roots():
+        dist_root = (root / "dist").resolve()
+        target = (root / rel).resolve()
+        if target != dist_root and dist_root not in target.parents:
+            continue
+        if target.is_file():
+            return target
+    raise FileNotFoundError("Vditor 资源不存在")
+
+
 def parse_user_info(res: Dict[str, Any]) -> Dict[str, Any]:
     data = res.get("data") if isinstance(res, dict) else {}
     if not isinstance(data, dict):
@@ -636,6 +672,8 @@ class AppHandler(BaseHTTPRequestHandler):
             elif path == "/download":
                 rel = query.get("path", [""])[0]
                 self._serve_data_file(rel)
+            elif path.startswith(VDITOR_VENDOR_PREFIX):
+                self._serve_vditor_vendor(path[len(VDITOR_VENDOR_PREFIX):])
             else:
                 self._serve_static(path)
         except ValueError as exc:
@@ -668,6 +706,15 @@ class AppHandler(BaseHTTPRequestHandler):
                 json_response(self, {"success": True, "job": run_manual_rewrite_job(payload)})
             elif path == "/api/rewrite":
                 json_response(self, {"success": True, "rewrite": run_manual_rewrite(payload)})
+            elif path == "/api/file/save":
+                json_response(self, {
+                    "success": True,
+                    "file": save_output_markdown_file(
+                        resolve_output_root(config_store.load()),
+                        str(payload.get("path") or ""),
+                        payload.get("content"),
+                    ),
+                })
             elif path == "/api/jobs/delete":
                 json_response(self, {
                     "success": True,
@@ -729,6 +776,16 @@ class AppHandler(BaseHTTPRequestHandler):
         target = safe_web_path(path)
         if not target.exists() or not target.is_file():
             target = WEB_ROOT / "index.html"
+        content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+        body = target.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_vditor_vendor(self, rel: str) -> None:
+        target = safe_vditor_vendor_path(rel)
         content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
         body = target.read_bytes()
         self.send_response(200)
