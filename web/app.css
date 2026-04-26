@@ -630,11 +630,11 @@ h3 {
   }
 
   body[data-page="rewrite"] .file-section {
-    grid-template-rows: auto auto auto auto minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto auto minmax(0, 1fr);
   }
 
   body[data-page="rewrite"] .file-section.md-quick-disabled {
-    grid-template-rows: auto auto auto minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto minmax(0, 1fr);
   }
 
   body[data-page="rewrite"] .file-layout,
