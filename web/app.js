@@ -7,6 +7,7 @@ const sharedEls = {
   toast: document.querySelector('#toast'),
   themeButtons: Array.from(document.querySelectorAll('[data-theme-option]')),
   sidebarToggle: document.querySelector('[data-sidebar-toggle]'),
+  rewriteRootLinks: Array.from(document.querySelectorAll('[data-rewrite-root-nav]')),
 };
 
 const homeEls = {
@@ -54,6 +55,8 @@ const homeEls = {
   fileLayoutResizer: document.querySelector('#fileLayoutResizer'),
   fileList: document.querySelector('#fileList'),
   fileListMeta: document.querySelector('#fileListMeta'),
+  fileSectionTitle: document.querySelector('#fileSectionTitle'),
+  fileSectionDescription: document.querySelector('#fileSectionDescription'),
   fileBreadcrumbs: document.querySelector('#fileBreadcrumbs'),
   filePreviewPanel: document.querySelector('#filePreviewPanel'),
   filePreview: document.querySelector('#filePreview'),
@@ -108,6 +111,17 @@ const settingsEls = {
   rewriteApiKeyToggleBtn: document.querySelector('#rewriteApiKeyToggleBtn'),
   rewriteTopicSettingsInput: document.querySelector('#rewriteTopicSettingsInput'),
   rewriteRequirementSummary: document.querySelector('#rewriteRequirementSummary'),
+  rewriteProfileEnabledInput: document.querySelector('#rewriteProfileEnabledInput'),
+  rewriteProfileSummary: document.querySelector('#rewriteProfileSummary'),
+  rewriteProfileIdentityInput: document.querySelector('#rewriteProfileIdentityInput'),
+  rewriteProfileBusinessInput: document.querySelector('#rewriteProfileBusinessInput'),
+  rewriteProfileAudienceInput: document.querySelector('#rewriteProfileAudienceInput'),
+  rewriteProfileConversionInput: document.querySelector('#rewriteProfileConversionInput'),
+  rewriteProfileStyleInput: document.querySelector('#rewriteProfileStyleInput'),
+  rewriteProfilePersonaInput: document.querySelector('#rewriteProfilePersonaInput'),
+  rewriteProfileForbiddenInput: document.querySelector('#rewriteProfileForbiddenInput'),
+  rewriteProfileSamplesInput: document.querySelector('#rewriteProfileSamplesInput'),
+  rewriteProfileInputs: Array.from(document.querySelectorAll('[data-rewrite-profile-input]')),
   rewriteTextModelInput: document.querySelector('#rewriteTextModelInput'),
   rewriteImageModelInput: document.querySelector('#rewriteImageModelInput'),
   rewriteRegionInput: document.querySelector('#rewriteRegionInput'),
@@ -333,11 +347,42 @@ function applySidebarState(collapsed, { persist = false } = {}) {
 function bindSidebarEvents() {
   applySidebarState(document.documentElement.dataset.sidebar === 'collapsed');
 
-  if (!sharedEls.sidebarToggle) return;
-  sharedEls.sidebarToggle.addEventListener('click', () => {
-    applySidebarState(!state.sidebarCollapsed, { persist: true });
-    toast(state.sidebarCollapsed ? '左侧菜单已收起' : '左侧菜单已展开');
+  if (sharedEls.sidebarToggle) {
+    sharedEls.sidebarToggle.addEventListener('click', () => {
+      applySidebarState(!state.sidebarCollapsed, { persist: true });
+      toast(state.sidebarCollapsed ? '左侧菜单已收起' : '左侧菜单已展开');
+    });
+  }
+
+  sharedEls.rewriteRootLinks.forEach((link) => {
+    link.addEventListener('click', (event) => {
+      if (page !== 'rewrite') return;
+      const root = normalizeFileRoot(link.dataset.rewriteRootNav || 'crawl');
+      event.preventDefault();
+      if (root === state.currentFileRoot) return;
+      if (state.collectBusy || state.rewriteBusy) {
+        toast('任务进行中，稍后再切换视图');
+        return;
+      }
+      switchFileRoot(root).catch((error) => toast(error.message));
+    });
   });
+
+  if (page === 'rewrite') {
+    window.addEventListener('popstate', () => {
+      const root = fileRootFromLocation();
+      if (root === state.currentFileRoot) {
+        renderFileRootSwitch();
+        return;
+      }
+      if (state.collectBusy || state.rewriteBusy) {
+        updateRewriteRootUrl(state.currentFileRoot, { replace: true });
+        toast('任务进行中，稍后再切换视图');
+        return;
+      }
+      switchFileRoot(root, { updateUrl: false }).catch((error) => toast(error.message));
+    });
+  }
 }
 
 function sleep(ms) {
@@ -815,7 +860,33 @@ function normalizeFileRoot(root = '') {
 }
 
 function fileRootLabel(root = state.currentFileRoot) {
-  return normalizeFileRoot(root) === 'rewrite' ? 'AI仿写' : '爬取素材';
+  return normalizeFileRoot(root) === 'rewrite' ? 'AI创作' : '素材库';
+}
+
+function fileRootDescription(root = state.currentFileRoot) {
+  return normalizeFileRoot(root) === 'rewrite'
+    ? 'AI 仿写文案、分析报告与生成素材。'
+    : '采集结果、素材与 Markdown 预览。';
+}
+
+function fileRootFromLocation() {
+  if (page !== 'rewrite') return 'crawl';
+  try {
+    return normalizeFileRoot(new URLSearchParams(window.location.search).get('root') || 'crawl');
+  } catch (_error) {
+    return 'crawl';
+  }
+}
+
+function updateRewriteRootUrl(root = state.currentFileRoot, { replace = false } = {}) {
+  if (page !== 'rewrite' || !window.history?.pushState) return;
+  const url = new URL(window.location.href);
+  url.searchParams.set('root', normalizeFileRoot(root));
+  const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+  const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (nextUrl === currentUrl) return;
+  const method = replace ? 'replaceState' : 'pushState';
+  window.history[method]({}, '', nextUrl);
 }
 
 function fileApiPath(path = '', root = state.currentFileRoot) {
@@ -1010,6 +1081,53 @@ function updateRewriteRequirementSummary() {
   settingsEls.rewriteRequirementSummary.textContent = truncateText(requirement.replace(/\s+/g, ' '), 34);
 }
 
+function compactFieldValue(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function updateRewriteProfileSummary() {
+  if (!settingsEls.rewriteProfileSummary) return;
+  if (!settingsEls.rewriteProfileEnabledInput?.checked) {
+    settingsEls.rewriteProfileSummary.textContent = '未启用';
+    return;
+  }
+  const identity = compactFieldValue(settingsEls.rewriteProfileIdentityInput?.value);
+  const audience = compactFieldValue(settingsEls.rewriteProfileAudienceInput?.value);
+  const style = compactFieldValue(settingsEls.rewriteProfileStyleInput?.value);
+  const persona = compactFieldValue(settingsEls.rewriteProfilePersonaInput?.value);
+  const summary = [identity, audience, style || persona].filter(Boolean).join(' · ');
+  settingsEls.rewriteProfileSummary.textContent = summary ? truncateText(summary, 44) : '使用默认人格';
+}
+
+function applyRewriteProfileConfig(profile = {}) {
+  if (settingsEls.rewriteProfileEnabledInput) {
+    settingsEls.rewriteProfileEnabledInput.checked = profile.enabled !== false;
+  }
+  if (settingsEls.rewriteProfileIdentityInput) settingsEls.rewriteProfileIdentityInput.value = profile.identity || '';
+  if (settingsEls.rewriteProfileBusinessInput) settingsEls.rewriteProfileBusinessInput.value = profile.business_context || '';
+  if (settingsEls.rewriteProfileAudienceInput) settingsEls.rewriteProfileAudienceInput.value = profile.target_audience || '';
+  if (settingsEls.rewriteProfileConversionInput) settingsEls.rewriteProfileConversionInput.value = profile.conversion_goal || '';
+  if (settingsEls.rewriteProfileStyleInput) settingsEls.rewriteProfileStyleInput.value = profile.writing_style || '';
+  if (settingsEls.rewriteProfilePersonaInput) settingsEls.rewriteProfilePersonaInput.value = profile.content_persona || '';
+  if (settingsEls.rewriteProfileForbiddenInput) settingsEls.rewriteProfileForbiddenInput.value = profile.forbidden_rules || '';
+  if (settingsEls.rewriteProfileSamplesInput) settingsEls.rewriteProfileSamplesInput.value = profile.sample_texts || '';
+  updateRewriteProfileSummary();
+}
+
+function readRewriteProfileDraft() {
+  return {
+    enabled: settingsEls.rewriteProfileEnabledInput?.checked !== false,
+    identity: (settingsEls.rewriteProfileIdentityInput?.value || '').trim(),
+    business_context: (settingsEls.rewriteProfileBusinessInput?.value || '').trim(),
+    target_audience: (settingsEls.rewriteProfileAudienceInput?.value || '').trim(),
+    conversion_goal: (settingsEls.rewriteProfileConversionInput?.value || '').trim(),
+    writing_style: (settingsEls.rewriteProfileStyleInput?.value || '').trim(),
+    content_persona: (settingsEls.rewriteProfilePersonaInput?.value || '').trim(),
+    forbidden_rules: (settingsEls.rewriteProfileForbiddenInput?.value || '').trim(),
+    sample_texts: (settingsEls.rewriteProfileSamplesInput?.value || '').trim(),
+  };
+}
+
 function setRewriteApiKeyVisible(visible) {
   const input = settingsEls.rewriteApiKeyInput;
   const toggle = settingsEls.rewriteApiKeyToggleBtn;
@@ -1059,6 +1177,7 @@ function applySettingsConfig(config) {
   applyRewriteApiKeyField(rewrite);
   if (settingsEls.rewriteTopicSettingsInput) settingsEls.rewriteTopicSettingsInput.value = rewrite.topic || '创业沙龙';
   updateRewriteRequirementSummary();
+  applyRewriteProfileConfig(rewrite.creator_profile || {});
   if (settingsEls.rewriteTextModelInput) settingsEls.rewriteTextModelInput.value = rewrite.text_model || 'qwen-plus';
   if (settingsEls.rewriteImageModelInput) settingsEls.rewriteImageModelInput.value = rewrite.image_model || 'wan2.6-image';
   if (settingsEls.rewriteRegionInput) settingsEls.rewriteRegionInput.value = rewrite.region || 'cn-beijing';
@@ -1142,6 +1261,7 @@ function readSettingsDraft() {
       region: settingsEls.rewriteRegionInput?.value || 'cn-beijing',
       generate_image_prompts: true,
       generate_images: Boolean(settingsEls.rewriteGenerateImagesInput?.checked),
+      creator_profile: readRewriteProfileDraft(),
     },
   };
 }
@@ -3359,11 +3479,36 @@ function updateFileToolbarState() {
 }
 
 function renderFileRootSwitch() {
-  if (!homeEls.fileRootSwitch) return;
   const busy = state.collectBusy || state.rewriteBusy;
+  const activeRoot = normalizeFileRoot(state.currentFileRoot);
+
+  sharedEls.rewriteRootLinks.forEach((link) => {
+    const root = normalizeFileRoot(link.dataset.rewriteRootNav || 'crawl');
+    const active = root === activeRoot;
+    link.classList.toggle('active', page === 'rewrite' && active);
+    if (page === 'rewrite' && active) {
+      link.setAttribute('aria-current', 'page');
+    } else {
+      link.removeAttribute('aria-current');
+    }
+    if (page === 'rewrite' && busy && !active) {
+      link.setAttribute('aria-disabled', 'true');
+    } else {
+      link.removeAttribute('aria-disabled');
+    }
+  });
+
+  if (homeEls.fileSectionTitle) {
+    homeEls.fileSectionTitle.textContent = fileRootLabel(activeRoot);
+  }
+  if (homeEls.fileSectionDescription) {
+    homeEls.fileSectionDescription.textContent = fileRootDescription(activeRoot);
+  }
+
+  if (!homeEls.fileRootSwitch) return;
   homeEls.fileRootSwitch.querySelectorAll('[data-file-root]').forEach((button) => {
     const root = normalizeFileRoot(button.dataset.fileRoot);
-    const active = root === state.currentFileRoot;
+    const active = root === activeRoot;
     button.classList.toggle('active', active);
     button.setAttribute('aria-selected', active ? 'true' : 'false');
     button.disabled = busy && !active;
@@ -3388,11 +3533,14 @@ function resetFileBrowserForRoot(root = state.currentFileRoot) {
   renderFileRootSwitch();
 }
 
-async function switchFileRoot(root = 'crawl') {
+async function switchFileRoot(root = 'crawl', { updateUrl = true } = {}) {
   const normalizedRoot = normalizeFileRoot(root);
   if (normalizedRoot === state.currentFileRoot) return;
   if (!await ensurePreviewEditorSavedBeforePreviewChange()) return;
   resetFileBrowserForRoot(normalizedRoot);
+  if (updateUrl) {
+    updateRewriteRootUrl(normalizedRoot);
+  }
   await loadFiles('', { force: true });
 }
 
@@ -3600,7 +3748,7 @@ function renderFileEmptyState(files = {}, disabledAttr = '') {
   const description = hasParent
     ? '这个目录里还没有文件或子目录，可以返回上一级，或者先打开目录确认当前位置。'
     : (state.currentFileRoot === 'rewrite'
-      ? 'AI 仿写完成后，文案、分析报告和图片提示词会出现在这里。'
+      ? 'AI 创作完成后，文案、分析报告和图片提示词会出现在这里。'
       : '采集完成后，结果、素材和 Markdown 文件会出现在这里。');
   const secondaryAction = hasParent
     ? `<button class="btn btn-ghost btn-icon-text file-empty-action" data-action="back" data-path="${escapeHtml(files.parent || '')}" type="button" ${disabledAttr}>${iconSvg('back')}返回上级</button>`
@@ -5140,6 +5288,12 @@ function bindSettingsEvents() {
   if (settingsEls.rewriteTopicSettingsInput) {
     settingsEls.rewriteTopicSettingsInput.addEventListener('input', updateRewriteRequirementSummary);
   }
+  if (settingsEls.rewriteProfileEnabledInput) {
+    settingsEls.rewriteProfileEnabledInput.addEventListener('change', updateRewriteProfileSummary);
+  }
+  settingsEls.rewriteProfileInputs.forEach((input) => {
+    input.addEventListener('input', updateRewriteProfileSummary);
+  });
   if (settingsEls.checkLoginBtn) {
     settingsEls.checkLoginBtn.addEventListener('click', () => {
       checkLogin().catch((error) => toast(error.message));
@@ -5170,9 +5324,12 @@ async function bootHome() {
 }
 
 async function bootRewrite() {
+  state.currentFileRoot = fileRootFromLocation();
+  updateRewriteRootUrl(state.currentFileRoot, { replace: true });
+  renderFileRootSwitch();
   bindHomeEvents();
   await loadHomeConfig();
-  setPreviewState(defaultPreviewState());
+  setPreviewState(defaultPreviewState({ root: state.currentFileRoot }));
   await Promise.all([
     loadFiles(''),
     loadRecentMarkdown(),

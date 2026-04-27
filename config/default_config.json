@@ -37,7 +37,18 @@
     "image_model": "wan2.6-image",
     "region": "cn-beijing",
     "generate_image_prompts": true,
-    "generate_images": false
+    "generate_images": false,
+    "creator_profile": {
+      "enabled": true,
+      "identity": "",
+      "business_context": "",
+      "target_audience": "",
+      "conversion_goal": "",
+      "writing_style": "",
+      "content_persona": "真诚、具体、懂业务、有判断力；像朋友一样说人话，不制造焦虑，不夸大承诺。",
+      "forbidden_rules": "",
+      "sample_texts": ""
+    }
   },
   "schedule": {
     "enabled": false,

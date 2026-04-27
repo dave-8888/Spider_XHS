@@ -51,9 +51,13 @@
             <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 13h4l2-6 4 10 2-4h4"/><path d="M4 19h16"/></svg></span>
             <span class="nav-label">任务监控</span>
           </a>
-          <a class="nav-link" href="/rewrite" title="文案创作">
-            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m4.5 19.5 9.8-9.8 2 2-9.8 9.8h-2z"/><path d="m13.7 6.3 2-2 4 4-2 2"/><path d="M6 5h5"/></svg></span>
-            <span class="nav-label">文案创作</span>
+          <a class="nav-link" href="/rewrite?root=crawl" data-rewrite-root-nav="crawl" title="素材库">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5v7A2.5 2.5 0 0 1 17.5 18h-11A2.5 2.5 0 0 1 4 15.5z"/><path d="M4 9h16"/></svg></span>
+            <span class="nav-label">素材库</span>
+          </a>
+          <a class="nav-link" href="/rewrite?root=rewrite" data-rewrite-root-nav="rewrite" title="AI创作">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m4.5 19.5 9.8-9.8 2 2-9.8 9.8h-2z"/><path d="m13.7 6.3 2-2 4 4-2 2"/><path d="M6 4.5v3M4.5 6h3M18 16.5v3M16.5 18h3"/></svg></span>
+            <span class="nav-label">AI创作</span>
           </a>
           <a class="nav-link active" href="/settings" aria-current="page" title="设置">
             <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z"/><path d="M19 12a7.1 7.1 0 0 0-.1-1l2-1.5-2-3.5-2.4 1a7.6 7.6 0 0 0-1.7-1L14.5 3h-5l-.3 3a7.6 7.6 0 0 0-1.7 1L5.1 6l-2 3.5 2 1.5a7.1 7.1 0 0 0 0 2l-2 1.5 2 3.5 2.4-1a7.6 7.6 0 0 0 1.7 1l.3 3h5l.3-3a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.5-2-1.5a7.1 7.1 0 0 0 .1-1z"/></svg></span>
@@ -375,6 +379,56 @@
             <strong id="rewriteRequirementSummary">创业沙龙</strong>
           </summary>
           <textarea id="rewriteTopicSettingsInput" rows="5" placeholder="创业沙龙">创业沙龙</textarea>
+        </details>
+        <div class="row spread switch-row full-width">
+          <div>
+            <strong>启用创作画像</strong>
+            <p class="muted">用于长期保留账号定位、用户风格、项目人格和合规边界。</p>
+          </div>
+          <label class="switch">
+            <input id="rewriteProfileEnabledInput" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+        <details class="field full-width collapsible-field rewrite-profile-panel" open>
+          <summary>
+            <span>创作画像</span>
+            <strong id="rewriteProfileSummary">未配置</strong>
+          </summary>
+          <div class="field-grid field-grid-2">
+            <label class="field">
+              <span>账号定位</span>
+              <textarea id="rewriteProfileIdentityInput" data-rewrite-profile-input rows="3" placeholder="例如：一个做本地创业沙龙的组织者，擅长把资源、经验和同频人连接起来。"></textarea>
+            </label>
+            <label class="field">
+              <span>业务背景</span>
+              <textarea id="rewriteProfileBusinessInput" data-rewrite-profile-input rows="3" placeholder="你在做什么业务、主要服务、优势和当前阶段。"></textarea>
+            </label>
+            <label class="field">
+              <span>目标人群</span>
+              <textarea id="rewriteProfileAudienceInput" data-rewrite-profile-input rows="3" placeholder="用户是谁、他们在焦虑什么、最在意什么。"></textarea>
+            </label>
+            <label class="field">
+              <span>转化目标</span>
+              <textarea id="rewriteProfileConversionInput" data-rewrite-profile-input rows="3" placeholder="例如：引导评论关键词、私信咨询、报名活动、领取资料。"></textarea>
+            </label>
+            <label class="field full-width">
+              <span>我的文案风格</span>
+              <textarea id="rewriteProfileStyleInput" data-rewrite-profile-input rows="4" placeholder="例如：短句多、先讲真实观察，再给判断；不喊口号，少用夸张词，结尾自然引导。"></textarea>
+            </label>
+            <label class="field full-width">
+              <span>项目人格</span>
+              <textarea id="rewriteProfilePersonaInput" data-rewrite-profile-input rows="4" placeholder="这个项目稳定的性格底色。"></textarea>
+            </label>
+            <label class="field full-width">
+              <span>禁用表达与边界</span>
+              <textarea id="rewriteProfileForbiddenInput" data-rewrite-profile-input rows="4" placeholder="不能承诺的效果、不能出现的词、品牌或行业合规边界。"></textarea>
+            </label>
+            <label class="field full-width">
+              <span>历史文案样本</span>
+              <textarea id="rewriteProfileSamplesInput" data-rewrite-profile-input rows="7" placeholder="粘贴 3-10 段你自己的代表性文案，模型只学习语气、节奏和句式，不照抄原文。"></textarea>
+            </label>
+          </div>
         </details>
         <label class="field">
           <span>文本模型</span>

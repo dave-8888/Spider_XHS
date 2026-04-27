@@ -40,6 +40,10 @@ INTERNAL_DATA_FILES = {
     "scheduler_state.json",
     "login_browser_profile",
 }
+REWRITE_AUXILIARY_OUTPUT_FILES = {"仿写日志.md", "图片提示词.md", "result.json"}
+REWRITE_RECENT_EXCLUDED_FILES = REWRITE_AUXILIARY_OUTPUT_FILES | {"爆款分析报告.md"}
+REWRITE_OUTPUT_DIR_PREFIX = "ai仿写+"
+LEGACY_REWRITE_OUTPUT_DIR_PREFIXES = ("AI仿写_",)
 JOB_LOG_TYPES = {"crawl", "rewrite"}
 REWRITE_LOG_MARKERS = (
     "仿写",
@@ -53,6 +57,9 @@ REWRITE_LOG_MARKERS = (
 )
 DEFAULT_REWRITE_REQUIREMENTS = "创业沙龙"
 MAX_REWRITE_REQUIREMENTS_LENGTH = 2000
+DEFAULT_CREATOR_PERSONA = "真诚、具体、懂业务、有判断力；像朋友一样说人话，不制造焦虑，不夸大承诺。"
+MAX_REWRITE_PROFILE_TEXT_LENGTH = 1800
+MAX_REWRITE_PROFILE_SAMPLE_LENGTH = 6000
 NOTE_ASSET_DIR_NAMES = {"assert", "assets", "asset", "media", "images", "imgs", "videos"}
 JOB_PAGE_SIZE_OPTIONS = {10, 20, 50, 100}
 
@@ -108,6 +115,10 @@ def now_text() -> str:
 
 def batch_name() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+def crawl_batch_name() -> str:
+    return datetime.now().strftime("%Y年%m月%d日%H时%M分")
 
 
 def deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
@@ -203,6 +214,12 @@ def available_child_path(parent: Path, preferred_name: str) -> Path:
         if not candidate.exists():
             return candidate
         index += 1
+
+
+def is_rewrite_output_dir_name(name: str) -> bool:
+    return name.startswith(REWRITE_OUTPUT_DIR_PREFIX) or any(
+        name.startswith(prefix) for prefix in LEGACY_REWRITE_OUTPUT_DIR_PREFIXES
+    )
 
 
 def available_note_markdown_path(keyword_dir: Path, preferred_stem: str) -> Path:
@@ -657,6 +674,17 @@ class ConfigStore:
                 "region": "cn-beijing",
                 "generate_image_prompts": True,
                 "generate_images": False,
+                "creator_profile": {
+                    "enabled": True,
+                    "identity": "",
+                    "business_context": "",
+                    "target_audience": "",
+                    "conversion_goal": "",
+                    "writing_style": "",
+                    "content_persona": DEFAULT_CREATOR_PERSONA,
+                    "forbidden_rules": "",
+                    "sample_texts": "",
+                },
             },
             "schedule": {
                 "enabled": False,
@@ -799,6 +827,41 @@ class ConfigStore:
         rewrite["region"] = region if region in {"cn-beijing", "ap-southeast-1"} else "cn-beijing"
         rewrite["generate_image_prompts"] = bool(rewrite.get("generate_image_prompts", True))
         rewrite["generate_images"] = bool(rewrite.get("generate_images"))
+        raw_profile = rewrite.get("creator_profile")
+        profile = raw_profile if isinstance(raw_profile, dict) else {}
+        default_profile = (
+            self.default_config.get("rewrite", {}).get("creator_profile", {})
+            if isinstance(self.default_config.get("rewrite"), dict)
+            else {}
+        )
+
+        def profile_enabled(value: Any) -> bool:
+            if isinstance(value, bool):
+                return value
+            return str(value).strip().lower() not in {"0", "false", "no", "off", "关闭"}
+
+        def profile_text(key: str, max_len: int = MAX_REWRITE_PROFILE_TEXT_LENGTH) -> str:
+            fallback = default_profile.get(key, "") if isinstance(default_profile, dict) else ""
+            text = str(profile.get(key, fallback) or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+            text = re.sub(r"\n{4,}", "\n\n\n", text)
+            return text[:max_len].strip()
+
+        default_enabled = (
+            default_profile.get("enabled", True)
+            if isinstance(default_profile, dict)
+            else True
+        )
+        rewrite["creator_profile"] = {
+            "enabled": profile_enabled(profile.get("enabled", default_enabled)),
+            "identity": profile_text("identity"),
+            "business_context": profile_text("business_context"),
+            "target_audience": profile_text("target_audience"),
+            "conversion_goal": profile_text("conversion_goal"),
+            "writing_style": profile_text("writing_style"),
+            "content_persona": profile_text("content_persona") or DEFAULT_CREATOR_PERSONA,
+            "forbidden_rules": profile_text("forbidden_rules"),
+            "sample_texts": profile_text("sample_texts", MAX_REWRITE_PROFILE_SAMPLE_LENGTH),
+        }
 
         schedule = sanitized.setdefault("schedule", {})
         schedule["enabled"] = bool(schedule.get("enabled"))
@@ -843,7 +906,7 @@ class ContentCollector:
 
         output_root = resolve_output_root(config)
         output_root.mkdir(parents=True, exist_ok=True)
-        batch_dir = output_root / batch_name()
+        batch_dir = available_child_path(output_root, crawl_batch_name())
         batch_dir.mkdir(parents=True, exist_ok=True)
         result = {
             "source": source,
@@ -1010,6 +1073,11 @@ class RewriteService:
         self.generate_image_prompts = bool(self.config.get("generate_image_prompts", True))
         self.generate_images = bool(self.config.get("generate_images"))
         self.api_key = str(self.config.get("api_key") or os.getenv("DASHSCOPE_API_KEY", "")).strip()
+        self.creator_profile = (
+            self.config.get("creator_profile")
+            if isinstance(self.config.get("creator_profile"), dict)
+            else {}
+        )
 
     def rewrite_from_collection(
         self,
@@ -1037,12 +1105,41 @@ class RewriteService:
         output_parent = self._rewrite_parent_for_note(note_ref)
         target_dir = available_child_path(
             output_parent,
-            f"AI仿写_{safe_filename(self.topic_label(), fallback='requirements', max_len=28)}_{batch_name()}",
+            self._rewrite_output_dir_name(target_note),
         )
         return self.generate(notes[:10], target_dir, mode="single", target_note=target_note, progress=progress)
 
     def topic_label(self, max_len: int = 48) -> str:
         return rewrite_requirements_label(self.topic, max_len=max_len)
+
+    def _rewrite_output_dir_name(self, note: Optional[Dict[str, Any]]) -> str:
+        candidates: List[Any] = []
+        if isinstance(note, dict):
+            candidates.extend([
+                note.get("title"),
+                Path(str(note.get("markdown") or "")).stem if note.get("markdown") else "",
+                Path(str(note.get("folder") or "")).name if note.get("folder") else "",
+                note.get("note_id"),
+            ])
+        for candidate in candidates:
+            stem = safe_filename(candidate, fallback="", max_len=60)
+            if stem:
+                return f"{REWRITE_OUTPUT_DIR_PREFIX}{stem}"
+        return f"{REWRITE_OUTPUT_DIR_PREFIX}{safe_filename('', fallback='无标题', max_len=60)}"
+
+    def _article_output_filename(self, articles: List[Dict[str, Any]]) -> str:
+        for article in articles or []:
+            title_options = article.get("title_options") if isinstance(article, dict) else []
+            if not isinstance(title_options, list):
+                continue
+            for title in title_options:
+                stem = safe_filename(title, fallback="", max_len=80)
+                if not stem:
+                    continue
+                filename = f"{stem}.md"
+                if filename not in REWRITE_RECENT_EXCLUDED_FILES:
+                    return filename
+        return "仿写文案.md"
 
     def generate(
         self,
@@ -1068,6 +1165,7 @@ class RewriteService:
         payload = self._call_text_model(notes, mode=mode, target_note=target_note)
         record("文本模型已返回，正在整理仿写结构")
         articles = self._normalize_articles(payload.get("articles"), notes, mode=mode, target_note=target_note)
+        article_filename = self._article_output_filename(articles)
         analysis_report = str(payload.get("analysis_report") or payload.get("analysis") or "").strip()
         if not analysis_report:
             record("模型未返回分析报告，正在生成兜底分析")
@@ -1113,7 +1211,7 @@ class RewriteService:
         result["root"] = "rewrite"
         result["output_dir"] = relative_to_root(output_dir, self.rewrite_root)
         result["analysis_path"] = relative_to_root(output_dir / "爆款分析报告.md", self.rewrite_root)
-        result["articles_path"] = relative_to_root(output_dir / "仿写文案.md", self.rewrite_root)
+        result["articles_path"] = relative_to_root(output_dir / article_filename, self.rewrite_root)
         result["image_prompts_path"] = relative_to_root(output_dir / "图片提示词.md", self.rewrite_root)
         result["result_path"] = relative_to_root(output_dir / "result.json", self.rewrite_root)
         result["log_path"] = relative_to_root(output_dir / "仿写日志.md", self.rewrite_root)
@@ -1166,7 +1264,7 @@ class RewriteService:
             batch_dir = safe_output_path(self.rewrite_root, source_parts[0] if source_parts else batch_name())
         return available_child_path(
             batch_dir,
-            f"AI仿写_{safe_filename(self.topic_label(), fallback='requirements', max_len=28)}_{batch_name()}",
+            self._rewrite_output_dir_name(notes[0] if notes else None),
         )
 
     def _resolve_note_folder(self, relative_path: str) -> Path:
@@ -1239,6 +1337,28 @@ class RewriteService:
         peers.sort(key=lambda item: parse_count(item.get("liked_count")), reverse=True)
         return peers[:9]
 
+    def _creator_profile_payload(self) -> Dict[str, Any]:
+        profile = self.creator_profile if isinstance(self.creator_profile, dict) else {}
+        field_limits = {
+            "identity": MAX_REWRITE_PROFILE_TEXT_LENGTH,
+            "business_context": MAX_REWRITE_PROFILE_TEXT_LENGTH,
+            "target_audience": MAX_REWRITE_PROFILE_TEXT_LENGTH,
+            "conversion_goal": MAX_REWRITE_PROFILE_TEXT_LENGTH,
+            "writing_style": MAX_REWRITE_PROFILE_TEXT_LENGTH,
+            "content_persona": MAX_REWRITE_PROFILE_TEXT_LENGTH,
+            "forbidden_rules": MAX_REWRITE_PROFILE_TEXT_LENGTH,
+            "sample_texts": MAX_REWRITE_PROFILE_SAMPLE_LENGTH,
+        }
+        payload = {"enabled": bool(profile.get("enabled", True))}
+        for key, max_len in field_limits.items():
+            value = profile.get(key, DEFAULT_CREATOR_PERSONA if key == "content_persona" else "")
+            text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+            text = re.sub(r"\n{4,}", "\n\n\n", text)
+            payload[key] = text[:max_len].strip()
+        if not payload["content_persona"]:
+            payload["content_persona"] = DEFAULT_CREATOR_PERSONA
+        return payload
+
     def _call_text_model(
         self,
         notes: List[Dict[str, Any]],
@@ -1268,11 +1388,19 @@ class RewriteService:
             "mode": mode,
             "article_count": article_count,
             "target_note_id": target_note.get("note_id") if target_note else "",
+            "creator_profile": self._creator_profile_payload(),
             "notes": request_notes,
         }
         user_prompt = (
-            "请基于以下小红书创业类爆款样本做爆款拆解，并根据 rewrite_requirements 生成仿写文案。"
+            "请基于以下小红书爆款样本做爆款拆解，并根据 rewrite_requirements 生成仿写文案。"
             "要求：只学习结构、节奏、选题角度和视觉风格，不照抄原文，不复用原文连续 8 个字以上。"
+            "如果 creator_profile.enabled 为 true，必须把 creator_profile 当作长期创作档案："
+            "identity 是账号定位，business_context 是业务背景，target_audience 是目标人群，"
+            "conversion_goal 是转化目标，writing_style 是用户自己的表达习惯，"
+            "content_persona 是这个项目稳定的人格底色，forbidden_rules 是禁用表达和合规边界，"
+            "sample_texts 只用于学习语气、句式、节奏和词汇偏好，不得照抄其中连续 8 个字以上。"
+            "最终文案要先像 creator_profile 里的用户，再吸收参考笔记的爆款结构；"
+            "如果用户风格与参考笔记冲突，优先保留用户风格和人格底色。"
             "如果 mode=batch，请给每篇参考笔记生成一篇不同风格的最终文案；如果 mode=single，只围绕 target_note_id 的套路生成一篇。"
             "每篇最终文案必须符合 rewrite_requirements；如果要求里包含目标人群、风格、禁用表达、转化目标或主题，请全部遵守。"
             "图片提示词要求：image_prompt 必须使用中文撰写，不要输出英文句子或英文关键词；"
@@ -1295,7 +1423,7 @@ class RewriteService:
                 "messages": [
                     {
                         "role": "system",
-                        "content": "你是资深小红书内容策略师，擅长爆款拆解、合规仿写和商业转化文案。",
+                        "content": "你是资深小红书内容策略师，也是用户长期内容共创顾问，擅长爆款拆解、合规仿写、用户风格还原和商业转化文案。",
                     },
                     {"role": "user", "content": user_prompt},
                 ],
@@ -1420,6 +1548,7 @@ class RewriteService:
 
     def _write_result_files(self, output_dir: Path, result: Dict[str, Any]) -> None:
         label = self.topic_label()
+        article_filename = Path(str(result.get("articles_path") or "仿写文案.md")).name
         (output_dir / "爆款分析报告.md").write_text(
             f"# {label} 爆款分析报告\n\n{result['analysis_report'].strip()}\n",
             encoding="utf-8",
@@ -1461,7 +1590,7 @@ class RewriteService:
                 str(article.get("image_prompt") or "").strip(),
                 "",
             ])
-        (output_dir / "仿写文案.md").write_text("\n".join(article_lines), encoding="utf-8")
+        (output_dir / article_filename).write_text("\n".join(article_lines), encoding="utf-8")
         (output_dir / "图片提示词.md").write_text("\n".join(prompt_lines), encoding="utf-8")
         (output_dir / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -2328,13 +2457,17 @@ def ensure_manageable_output_target(output_root: Path, target: Path) -> Path:
     return resolved
 
 
-def is_hidden_output_entry(path: Path) -> bool:
-    return path.name.startswith(".") or path.name in INTERNAL_DATA_FILES
+def is_hidden_output_entry(path: Path, hide_rewrite_auxiliary: bool = False) -> bool:
+    return (
+        path.name.startswith(".")
+        or path.name in INTERNAL_DATA_FILES
+        or (hide_rewrite_auxiliary and path.name in REWRITE_AUXILIARY_OUTPUT_FILES)
+    )
 
 
-def has_visible_output_content(path: Path) -> bool:
+def has_visible_output_content(path: Path, hide_rewrite_auxiliary: bool = False) -> bool:
     if path.is_file():
-        return True
+        return not is_hidden_output_entry(path, hide_rewrite_auxiliary)
     if not path.is_dir():
         return False
     try:
@@ -2342,9 +2475,11 @@ def has_visible_output_content(path: Path) -> bool:
     except OSError:
         return False
     for child in children:
-        if is_hidden_output_entry(child):
+        if is_hidden_output_entry(child, hide_rewrite_auxiliary):
             continue
-        if child.is_file() or (child.is_dir() and has_visible_output_content(child)):
+        if child.is_file() or (
+            child.is_dir() and has_visible_output_content(child, hide_rewrite_auxiliary)
+        ):
             return True
     return False
 
@@ -2361,7 +2496,11 @@ def is_note_metadata_entry(path: Path, parent: Path) -> bool:
     return False
 
 
-def list_output_files(output_root: Path, relative_path: str = "") -> Dict[str, Any]:
+def list_output_files(
+    output_root: Path,
+    relative_path: str = "",
+    hide_rewrite_auxiliary: bool = False,
+) -> Dict[str, Any]:
     ensure_data_dirs()
     output_root.mkdir(parents=True, exist_ok=True)
     target = safe_output_path(output_root, relative_path or "")
@@ -2373,9 +2512,9 @@ def list_output_files(output_root: Path, relative_path: str = "") -> Dict[str, A
     for child in target.iterdir():
         if is_note_metadata_entry(child, target):
             continue
-        if is_hidden_output_entry(child):
+        if is_hidden_output_entry(child, hide_rewrite_auxiliary):
             continue
-        if child.is_dir() and not has_visible_output_content(child):
+        if child.is_dir() and not has_visible_output_content(child, hide_rewrite_auxiliary):
             continue
         stat = child.stat()
         rewriteable = bool(resolve_note_reference_path(child)) and (
@@ -2418,7 +2557,11 @@ def is_rewrite_markdown_path(path: Path, output_root: Path) -> bool:
         parts = path.resolve().relative_to(output_root.resolve()).parts
     except ValueError:
         return False
-    return any(part.startswith("AI仿写_") for part in parts)
+    return any(is_rewrite_output_dir_name(part) for part in parts)
+
+
+def is_recent_rewrite_markdown_file(path: Path) -> bool:
+    return is_output_markdown_file(path) and path.name not in REWRITE_RECENT_EXCLUDED_FILES
 
 
 def is_hidden_output_path(path: Path, output_root: Path) -> bool:
@@ -2438,7 +2581,10 @@ def summarize_recent_markdown_file(path: Path, output_root: Path, kind: str) -> 
     except ValueError:
         parent_parts = ()
     if kind == "rewrite":
-        rewrite_index = next((index for index, part in enumerate(parent_parts) if part.startswith("AI仿写_")), -1)
+        rewrite_index = next(
+            (index for index, part in enumerate(parent_parts) if is_rewrite_output_dir_name(part)),
+            -1,
+        )
         if rewrite_index > 0:
             context_parts.append(parent_parts[rewrite_index - 1])
         if rewrite_index >= 0:
@@ -2478,7 +2624,7 @@ def list_recent_markdown_files(output_root: Path, limit: int = 8, rewrite_root: 
             if not is_output_markdown_file(path) or is_hidden_output_path(path, output_root):
                 continue
             if is_rewrite_markdown_path(path, output_root):
-                if not rewrite_root and path.name == "仿写文案.md":
+                if not rewrite_root and is_recent_rewrite_markdown_file(path):
                     rewritten.append(summarize_recent_markdown_file(path, output_root, "rewrite"))
                 continue
             if resolve_note_reference_path(path):
@@ -2491,7 +2637,7 @@ def list_recent_markdown_files(output_root: Path, limit: int = 8, rewrite_root: 
             try:
                 if not is_output_markdown_file(path) or is_hidden_output_path(path, rewrite_root):
                     continue
-                if path.name == "仿写文案.md":
+                if is_rewrite_markdown_path(path, rewrite_root) and is_recent_rewrite_markdown_file(path):
                     rewritten.append(summarize_recent_markdown_file(path, rewrite_root, "rewrite"))
             except OSError:
                 continue

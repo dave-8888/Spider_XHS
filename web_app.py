@@ -663,7 +663,11 @@ class AppHandler(BaseHTTPRequestHandler):
                 rel = query.get("path", [""])[0]
                 root = normalize_file_root(query.get("root", ["crawl"])[0])
                 config = config_store.load()
-                files = list_output_files(resolve_file_output_root(config, root), rel)
+                files = list_output_files(
+                    resolve_file_output_root(config, root),
+                    rel,
+                    hide_rewrite_auxiliary=root == "rewrite",
+                )
                 files["root"] = root
                 json_response(self, {
                     "success": True,
