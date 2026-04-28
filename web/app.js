@@ -146,6 +146,7 @@ const advancedEls = {
   status: document.querySelector('#advancedConfigStatus'),
   saveBtn: document.querySelector('#saveAdvancedRewriteBtn'),
   resetBtn: document.querySelector('#resetAdvancedRewriteBtn'),
+  templateVariables: document.querySelector('#advancedTemplateVariables'),
   textModelInput: document.querySelector('#advancedTextModelInput'),
   visionModelInput: document.querySelector('#advancedVisionModelInput'),
   imageModelInput: document.querySelector('#advancedImageModelInput'),
@@ -1846,6 +1847,61 @@ async function saveSettings() {
   toast('设置已保存，尚未配置 DashScope API Key');
 }
 
+const TEMPLATE_VARIABLE_SCOPE_LABELS = {
+  text_user_prompt_template: '文案模型 User Prompt',
+  vision_user_prompt_template: '视觉模型 User Prompt',
+};
+
+function advancedPromptInputForScope(scope = '') {
+  if (scope === 'vision_user_prompt_template') return advancedEls.visionUserPromptInput;
+  return advancedEls.textUserPromptInput;
+}
+
+function insertTextIntoTextarea(textarea, text) {
+  if (!textarea || !text) return;
+  const start = Number.isInteger(textarea.selectionStart) ? textarea.selectionStart : textarea.value.length;
+  const end = Number.isInteger(textarea.selectionEnd) ? textarea.selectionEnd : textarea.value.length;
+  textarea.focus();
+  if (typeof textarea.setRangeText === 'function') {
+    textarea.setRangeText(text, start, end, 'end');
+  } else {
+    textarea.value = `${textarea.value.slice(0, start)}${text}${textarea.value.slice(end)}`;
+    const nextPosition = start + text.length;
+    textarea.setSelectionRange(nextPosition, nextPosition);
+  }
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function renderAdvancedTemplateVariables(rewrite = {}) {
+  if (!advancedEls.templateVariables) return;
+  const variables = Array.isArray(rewrite.template_variables) ? rewrite.template_variables : [];
+  if (!variables.length) {
+    advancedEls.templateVariables.innerHTML = '<div class="muted">暂无可用模板变量</div>';
+    return;
+  }
+
+  const groups = variables.reduce((acc, variable) => {
+    const scope = variable.scope || 'text_user_prompt_template';
+    if (!acc.has(scope)) acc.set(scope, []);
+    acc.get(scope).push(variable);
+    return acc;
+  }, new Map());
+
+  advancedEls.templateVariables.innerHTML = Array.from(groups.entries()).map(([scope, items]) => `
+    <div class="template-variable-group">
+      <div class="template-variable-group-title">${escapeHtml(TEMPLATE_VARIABLE_SCOPE_LABELS[scope] || 'Prompt 模板')}</div>
+      <div class="template-variable-list">
+        ${items.map((item) => `
+          <button class="template-variable-btn" type="button" data-template-variable-token="${escapeHtml(item.token || '')}" data-template-variable-scope="${escapeHtml(scope)}" title="${escapeHtml(item.description || '')}">
+            ${escapeHtml(item.token || '')}
+          </button>
+        `).join('')}
+      </div>
+      <div class="template-variable-description">${escapeHtml(items.map((item) => `${item.token || ''}：${item.description || ''}`).join('；'))}</div>
+    </div>
+  `).join('');
+}
+
 function setAdvancedStatus(config = state.config || {}, message = '') {
   if (!advancedEls.status) return;
   const rewrite = config.rewrite || {};
@@ -1853,7 +1909,7 @@ function setAdvancedStatus(config = state.config || {}, message = '') {
   const preview = rewrite.api_key_preview ? ` · ${rewrite.api_key_preview}` : '';
   const apiText = rewrite.api_key_present ? `DashScope API Key 已配置${source}${preview}` : 'DashScope API Key 未配置';
   const promptText = rewrite.text_user_prompt_template && rewrite.safety_rules
-    ? 'Prompt 模板与安全准则已载入'
+    ? 'Prompt 模板、中文变量与安全准则已载入'
     : 'Prompt 模板待载入';
   advancedEls.status.textContent = message || `${apiText} · ${promptText}`;
   advancedEls.status.className = `status-panel ${rewrite.api_key_present ? 'good' : 'muted'}`;
@@ -1905,6 +1961,7 @@ function applyAdvancedConfig(config) {
   if (advancedEls.textUserPromptInput) advancedEls.textUserPromptInput.value = rewrite.text_user_prompt_template || '';
   if (advancedEls.visionSystemPromptInput) advancedEls.visionSystemPromptInput.value = rewrite.vision_system_prompt || '';
   if (advancedEls.visionUserPromptInput) advancedEls.visionUserPromptInput.value = rewrite.vision_user_prompt_template || '';
+  renderAdvancedTemplateVariables(rewrite);
   applyAdvancedProfileConfig(rewrite.creator_profile || {});
   applyStyleProfileConfig(config.style_profile || {});
   setAdvancedStatus(config);
@@ -2004,6 +2061,16 @@ function bindAdvancedSettingsEvents() {
   if (settingsEls.applyStyleProfileDraftBtn) {
     settingsEls.applyStyleProfileDraftBtn.addEventListener('click', () => {
       applyStyleProfileDraft().catch((error) => toast(error.message));
+    });
+  }
+  if (advancedEls.templateVariables) {
+    advancedEls.templateVariables.addEventListener('click', (event) => {
+      const target = event.target?.closest ? event.target : event.target?.parentElement;
+      const button = target?.closest?.('[data-template-variable-token]');
+      if (!button) return;
+      const token = button.dataset.templateVariableToken || '';
+      const scope = button.dataset.templateVariableScope || 'text_user_prompt_template';
+      insertTextIntoTextarea(advancedPromptInputForScope(scope), token);
     });
   }
   if (advancedEls.generateImagesInput && advancedEls.generateImagePromptsInput) {

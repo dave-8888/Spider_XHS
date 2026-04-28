@@ -1575,6 +1575,61 @@ body[data-page="advanced-settings"] .surface.advanced-section {
   line-height: 1.55;
 }
 
+.advanced-template-variables {
+  padding: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+  background: var(--panel-bg);
+}
+
+.template-variable-groups,
+.template-variable-group {
+  display: grid;
+  gap: 10px;
+}
+
+.template-variable-group-title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.template-variable-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.template-variable-btn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgba(191, 47, 72, 0.24);
+  border-radius: 8px;
+  background: rgba(191, 47, 72, 0.08);
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+
+.template-variable-btn:hover,
+.template-variable-btn:focus-visible {
+  border-color: rgba(191, 47, 72, 0.45);
+  background: rgba(191, 47, 72, 0.14);
+  transform: translateY(-1px);
+}
+
+.template-variable-description {
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .priority-card {
   position: relative;
 }
