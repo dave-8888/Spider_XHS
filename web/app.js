@@ -134,31 +134,12 @@ const settingsEls = {
   rewriteGenerateImagesInput: document.querySelector('#rewriteGenerateImagesInput'),
   rewriteApiStatus: document.querySelector('#rewriteApiStatus'),
   memoryEnabledInput: document.querySelector('#memoryEnabledInput'),
-  memoryHermesHomeInput: document.querySelector('#memoryHermesHomeInput'),
-  memorySessionSearchInput: document.querySelector('#memorySessionSearchInput'),
-  memoryWriteCollectInput: document.querySelector('#memoryWriteCollectInput'),
-  memoryWriteRewriteInput: document.querySelector('#memoryWriteRewriteInput'),
-  memoryWriteEditInput: document.querySelector('#memoryWriteEditInput'),
-  memoryTopKInput: document.querySelector('#memoryTopKInput'),
   memoryStatus: document.querySelector('#memoryStatus'),
-  memoryAdvancedSummary: document.querySelector('#memoryAdvancedSummary'),
-  memorySyncProfileBtn: document.querySelector('#memorySyncProfileBtn'),
-  memoryRefreshBtn: document.querySelector('#memoryRefreshBtn'),
-  memoryTargetInput: document.querySelector('#memoryTargetInput'),
-  memoryList: document.querySelector('#memoryList'),
-  memorySearchInput: document.querySelector('#memorySearchInput'),
-  memorySearchBtn: document.querySelector('#memorySearchBtn'),
-  memorySearchResults: document.querySelector('#memorySearchResults'),
-  memoryAddTargetInput: document.querySelector('#memoryAddTargetInput'),
-  memoryAddContentInput: document.querySelector('#memoryAddContentInput'),
-  memoryAddBtn: document.querySelector('#memoryAddBtn'),
-  memoryReplaceTargetInput: document.querySelector('#memoryReplaceTargetInput'),
-  memoryReplaceOldInput: document.querySelector('#memoryReplaceOldInput'),
-  memoryReplaceContentInput: document.querySelector('#memoryReplaceContentInput'),
-  memoryReplaceBtn: document.querySelector('#memoryReplaceBtn'),
-  memoryRemoveTargetInput: document.querySelector('#memoryRemoveTargetInput'),
-  memoryRemoveOldInput: document.querySelector('#memoryRemoveOldInput'),
-  memoryRemoveBtn: document.querySelector('#memoryRemoveBtn'),
+  memoryProjectSummary: document.querySelector('#memoryProjectSummary'),
+  memoryProjectMeta: document.querySelector('#memoryProjectMeta'),
+  memoryProjectList: document.querySelector('#memoryProjectList'),
+  memoryProjectAddInput: document.querySelector('#memoryProjectAddInput'),
+  memoryProjectAddBtn: document.querySelector('#memoryProjectAddBtn'),
   saveConfigBtn: document.querySelector('#saveConfigBtn'),
   checkLoginBtn: document.querySelector('#checkLoginBtn'),
   openLoginBrowserBtn: document.querySelector('#openLoginBrowserBtn'),
@@ -172,6 +153,9 @@ const desktopBridge = window.spiderDesktop && typeof window.spiderDesktop.isDesk
 const state = {
   config: null,
   choices: {},
+  memoryProjectData: null,
+  memoryProjectEntries: [],
+  memoryProjectEditingIndex: -1,
   currentOutputRoot: 'datas/markdown_datas',
   currentRewriteRoot: 'datas/ai_rewrites',
   currentFileRoot: 'crawl',
@@ -1113,193 +1097,209 @@ function applyRewriteSummary(config) {
 function applyMemoryConfig(config) {
   const memory = config.memory || {};
   if (settingsEls.memoryEnabledInput) settingsEls.memoryEnabledInput.checked = Boolean(memory.enabled);
-  if (settingsEls.memoryHermesHomeInput) settingsEls.memoryHermesHomeInput.value = memory.hermes_home || '';
-  if (settingsEls.memorySessionSearchInput) settingsEls.memorySessionSearchInput.checked = memory.session_search_enabled !== false;
-  if (settingsEls.memoryWriteCollectInput) settingsEls.memoryWriteCollectInput.checked = memory.write_after_collect !== false;
-  if (settingsEls.memoryWriteRewriteInput) settingsEls.memoryWriteRewriteInput.checked = memory.write_after_rewrite !== false;
-  if (settingsEls.memoryWriteEditInput) settingsEls.memoryWriteEditInput.checked = memory.write_after_edit !== false;
-  if (settingsEls.memoryTopKInput) settingsEls.memoryTopKInput.value = memory.top_k || 8;
-  updateMemoryAdvancedSummary();
   updateMemoryStatusPanel(config);
-}
-
-function updateMemoryAdvancedSummary() {
-  if (!settingsEls.memoryAdvancedSummary) return;
-  const customHome = (settingsEls.memoryHermesHomeInput?.value || '').trim();
-  settingsEls.memoryAdvancedSummary.textContent = customHome ? '自定义存储位置' : '使用默认存储位置';
 }
 
 function updateMemoryStatusPanel(config = state.config || {}) {
   if (!settingsEls.memoryStatus) return;
   const memory = config.memory || {};
   const message = memory.enabled
-    ? '记忆已开启 · 可自动写入创作画像、项目记忆和历史摘要'
+    ? '记忆已开启 · 后台会自动记录创作画像、采集摘要、仿写摘要和改稿偏好'
     : '记忆未开启 · 开启后才会写入记忆文件和会话库';
   settingsEls.memoryStatus.textContent = message;
   settingsEls.memoryStatus.className = `status-panel ${memory.enabled ? 'good' : 'muted'}`;
 }
 
+function normalizeMemoryStatusMessage(message) {
+  const memoryBrand = ['Her', 'mes'].join('');
+  return String(message || '记忆状态未知')
+    .replace(new RegExp(`${memoryBrand}\\s*Vendor`, 'g'), '记忆组件')
+    .replace(new RegExp(`${memoryBrand}\\s*`, 'g'), '');
+}
+
 function readMemoryDraft() {
+  const current = state.config?.memory || {};
   return {
     enabled: Boolean(settingsEls.memoryEnabledInput?.checked),
-    hermes_home: (settingsEls.memoryHermesHomeInput?.value || '').trim(),
-    session_search_enabled: settingsEls.memorySessionSearchInput?.checked !== false,
-    write_after_collect: settingsEls.memoryWriteCollectInput?.checked !== false,
-    write_after_rewrite: settingsEls.memoryWriteRewriteInput?.checked !== false,
-    write_after_edit: settingsEls.memoryWriteEditInput?.checked !== false,
-    top_k: toNumber(settingsEls.memoryTopKInput?.value, 8),
+    hermes_home: typeof current.hermes_home === 'string' ? current.hermes_home : '',
+    session_search_enabled: current.session_search_enabled !== false,
+    write_after_collect: current.write_after_collect !== false,
+    write_after_rewrite: current.write_after_rewrite !== false,
+    write_after_edit: current.write_after_edit !== false,
+    top_k: toNumber(current.top_k, 8),
   };
-}
-
-function renderMemoryEntries(data) {
-  if (!settingsEls.memoryList) return;
-  if (data?.disabled) {
-    settingsEls.memoryList.innerHTML = '<div class="empty-state">记忆功能未开启</div>';
-    return;
-  }
-  const entries = data?.memory?.entries || [];
-  if (!entries.length) {
-    settingsEls.memoryList.innerHTML = '<div class="empty-state">暂无记忆</div>';
-    return;
-  }
-  settingsEls.memoryList.innerHTML = entries.map((entry) => `
-    <article class="memory-entry">
-      <div class="memory-entry-head">
-        <strong>${escapeHtml(String(entry.index + 1).padStart(2, '0'))}</strong>
-        <span>${escapeHtml(String(entry.chars || 0))} 字</span>
-      </div>
-      <p>${escapeHtml(entry.content || '')}</p>
-    </article>
-  `).join('');
-}
-
-function renderMemorySearchResults(data) {
-  if (!settingsEls.memorySearchResults) return;
-  if (data?.disabled) {
-    settingsEls.memorySearchResults.innerHTML = '<div class="empty-state">记忆功能未开启</div>';
-    return;
-  }
-  const results = data?.memory?.results || [];
-  if (!results.length) {
-    settingsEls.memorySearchResults.innerHTML = '<div class="empty-state">没有匹配结果</div>';
-    return;
-  }
-  settingsEls.memorySearchResults.innerHTML = results.map((item) => `
-    <article class="memory-entry">
-      <div class="memory-entry-head">
-        <strong>${escapeHtml(item.type || 'memory')}</strong>
-        <span>${escapeHtml(item.target || '')}${item.created_at ? ` · ${escapeHtml(item.created_at)}` : ''}</span>
-      </div>
-      <p>${escapeHtml(item.content || '')}</p>
-    </article>
-  `).join('');
 }
 
 async function refreshMemoryStatus() {
   if (!settingsEls.memoryStatus) return;
   const data = await api('/api/memory/status');
   const memory = data.memory || {};
-  const counts = memory.memory_counts || {};
-  const countText = memory.enabled
-    ? ` · MEMORY ${counts.memory || 0} 条 / USER ${counts.user || 0} 条`
-    : '';
-  const synced = memory.last_synced_at ? ` · 最近同步：${memory.last_synced_at}` : '';
-  settingsEls.memoryStatus.textContent = `${memory.message || 'Hermes 状态未知'}${countText}${synced}`;
+  const synced = memory.enabled && memory.last_synced_at ? ` · 最近同步：${memory.last_synced_at}` : '';
+  settingsEls.memoryStatus.textContent = `${normalizeMemoryStatusMessage(memory.message)}${synced}`;
   settingsEls.memoryStatus.className = `status-panel ${memory.enabled && memory.available ? 'good' : (memory.enabled ? 'bad' : 'muted')}`;
 }
 
-async function loadMemoryList() {
-  const target = settingsEls.memoryTargetInput?.value || 'memory';
-  const data = await api(`/api/memory/list?target=${encodeURIComponent(target)}`);
-  renderMemoryEntries(data);
-  await refreshMemoryStatus();
+function setMemoryProjectControlsDisabled(disabled) {
+  if (settingsEls.memoryProjectAddInput) settingsEls.memoryProjectAddInput.disabled = disabled;
+  if (settingsEls.memoryProjectAddBtn) settingsEls.memoryProjectAddBtn.disabled = disabled;
 }
 
-async function searchMemory() {
-  const query = (settingsEls.memorySearchInput?.value || '').trim();
-  const data = await api(`/api/memory/search?q=${encodeURIComponent(query)}`);
-  renderMemorySearchResults(data);
+function renderMemoryProjectEntries(data) {
+  if (!settingsEls.memoryProjectList) return;
+  state.memoryProjectData = data || null;
+  const disabled = Boolean(data?.disabled);
+  const memory = data?.memory || {};
+  const entries = Array.isArray(memory.entries) ? memory.entries : [];
+  state.memoryProjectEntries = entries;
+  setMemoryProjectControlsDisabled(disabled);
+
+  if (settingsEls.memoryProjectSummary) {
+    settingsEls.memoryProjectSummary.textContent = disabled ? '未开启' : `${entries.length} 条`;
+  }
+
+  if (settingsEls.memoryProjectMeta) {
+    settingsEls.memoryProjectMeta.textContent = disabled
+      ? '保存并开启全局记忆后可维护 MEMORY.md'
+      : `MEMORY.md · 已用 ${memory.used_chars || 0} / ${memory.limit_chars || 0} 字`;
+  }
+
+  if (disabled) {
+    settingsEls.memoryProjectList.innerHTML = '<div class="empty-state">记忆功能未开启</div>';
+    return;
+  }
+
+  if (!entries.length) {
+    settingsEls.memoryProjectList.innerHTML = '<div class="empty-state">暂无项目记忆</div>';
+    return;
+  }
+
+  settingsEls.memoryProjectList.innerHTML = entries.map((entry) => {
+    const index = Number(entry.index || 0);
+    const editing = state.memoryProjectEditingIndex === index;
+    const content = entry.content || '';
+    const body = editing
+      ? `<textarea class="memory-project-edit-input" data-memory-edit-input="${escapeHtml(index)}" rows="5">${escapeHtml(content)}</textarea>`
+      : `<p>${escapeHtml(content)}</p>`;
+    const actions = editing
+      ? `
+        <button class="btn btn-secondary" data-memory-save-index="${escapeHtml(index)}" type="button">保存</button>
+        <button class="btn btn-ghost" data-memory-cancel-edit type="button">取消</button>
+      `
+      : `
+        <button class="btn btn-ghost" data-memory-edit-index="${escapeHtml(index)}" type="button">编辑</button>
+        <button class="btn btn-ghost" data-memory-delete-index="${escapeHtml(index)}" type="button">删除</button>
+      `;
+    return `
+      <article class="memory-project-entry">
+        <div class="memory-project-entry-head">
+          <strong>${escapeHtml(String(index + 1).padStart(2, '0'))}</strong>
+          <span>${escapeHtml(entry.chars || content.length)} 字</span>
+        </div>
+        ${body}
+        <div class="memory-project-entry-actions">${actions}</div>
+      </article>
+    `;
+  }).join('');
 }
 
-async function addMemoryEntry() {
-  const content = (settingsEls.memoryAddContentInput?.value || '').trim();
+function renderMemoryProjectLoadError(error) {
+  if (settingsEls.memoryProjectSummary) settingsEls.memoryProjectSummary.textContent = '读取失败';
+  if (settingsEls.memoryProjectMeta) settingsEls.memoryProjectMeta.textContent = error?.message || '读取 MEMORY.md 失败';
+  if (settingsEls.memoryProjectList) {
+    settingsEls.memoryProjectList.innerHTML = '<div class="empty-state">读取项目记忆失败</div>';
+  }
+  setMemoryProjectControlsDisabled(true);
+}
+
+async function loadMemoryProjectEntries() {
+  if (!settingsEls.memoryProjectList) return;
+  try {
+    const data = await api('/api/memory/list?target=memory');
+    renderMemoryProjectEntries(data);
+  } catch (error) {
+    renderMemoryProjectLoadError(error);
+    throw error;
+  }
+}
+
+async function refreshMemoryPanels() {
+  await Promise.all([
+    refreshMemoryStatus(),
+    loadMemoryProjectEntries(),
+  ]);
+}
+
+async function addMemoryProjectEntry() {
+  const content = (settingsEls.memoryProjectAddInput?.value || '').trim();
   if (!content) {
-    toast('请输入要新增的记忆');
+    toast('请输入要新增的项目记忆');
     return;
   }
   const data = await api('/api/memory/add', {
     method: 'POST',
-    body: JSON.stringify({
-      target: settingsEls.memoryAddTargetInput?.value || 'memory',
-      content,
-    }),
+    body: JSON.stringify({ target: 'memory', content }),
   });
   if (data.disabled) {
     toast('记忆功能未开启');
-    await refreshMemoryStatus();
+    await loadMemoryProjectEntries().catch(() => {});
     return;
   }
-  if (settingsEls.memoryAddContentInput) settingsEls.memoryAddContentInput.value = '';
-  await loadMemoryList();
-  toast('记忆已新增');
+  if (settingsEls.memoryProjectAddInput) settingsEls.memoryProjectAddInput.value = '';
+  state.memoryProjectEditingIndex = -1;
+  await refreshMemoryPanels();
+  toast(data.memory?.duplicate ? '这条项目记忆已存在' : '项目记忆已新增');
 }
 
-async function replaceMemoryEntry() {
-  const oldText = (settingsEls.memoryReplaceOldInput?.value || '').trim();
-  const content = (settingsEls.memoryReplaceContentInput?.value || '').trim();
-  if (!oldText || !content) {
-    toast('请输入原片段和新记忆');
+async function saveMemoryProjectEdit(index) {
+  const entry = state.memoryProjectEntries[index];
+  const textarea = settingsEls.memoryProjectList?.querySelector(`[data-memory-edit-input="${index}"]`);
+  const content = (textarea?.value || '').trim();
+  if (!entry) {
+    toast('项目记忆已变化，请刷新后重试');
+    return;
+  }
+  if (!content) {
+    toast('项目记忆不能为空');
+    return;
+  }
+  if (content === entry.content) {
+    state.memoryProjectEditingIndex = -1;
+    renderMemoryProjectEntries(state.memoryProjectData);
     return;
   }
   const data = await api('/api/memory/replace', {
     method: 'POST',
-    body: JSON.stringify({
-      target: settingsEls.memoryReplaceTargetInput?.value || 'memory',
-      old_text: oldText,
-      content,
-    }),
+    body: JSON.stringify({ target: 'memory', old_text: entry.content, content }),
   });
   if (data.disabled) {
     toast('记忆功能未开启');
-    await refreshMemoryStatus();
+    await loadMemoryProjectEntries().catch(() => {});
     return;
   }
-  await loadMemoryList();
-  toast('记忆已替换');
+  state.memoryProjectEditingIndex = -1;
+  await refreshMemoryPanels();
+  toast('项目记忆已更新');
 }
 
-async function removeMemoryEntry() {
-  const oldText = (settingsEls.memoryRemoveOldInput?.value || '').trim();
-  if (!oldText) {
-    toast('请输入要删除的记忆片段');
+async function deleteMemoryProjectEntry(index) {
+  const entry = state.memoryProjectEntries[index];
+  if (!entry) {
+    toast('项目记忆已变化，请刷新后重试');
     return;
   }
+  if (!window.confirm('删除这条项目记忆？')) return;
   const data = await api('/api/memory/remove', {
     method: 'POST',
-    body: JSON.stringify({
-      target: settingsEls.memoryRemoveTargetInput?.value || 'memory',
-      old_text: oldText,
-    }),
+    body: JSON.stringify({ target: 'memory', old_text: entry.content }),
   });
   if (data.disabled) {
     toast('记忆功能未开启');
-    await refreshMemoryStatus();
+    await loadMemoryProjectEntries().catch(() => {});
     return;
   }
-  if (settingsEls.memoryRemoveOldInput) settingsEls.memoryRemoveOldInput.value = '';
-  await loadMemoryList();
-  toast('记忆已删除');
-}
-
-async function syncMemoryProfile() {
-  const data = await api('/api/memory/sync-profile', { method: 'POST', body: JSON.stringify({}) });
-  if (data.disabled) {
-    toast('记忆功能未开启');
-    await refreshMemoryStatus();
-    return;
-  }
-  await loadMemoryList();
-  toast('创作画像已同步到 Hermes');
+  state.memoryProjectEditingIndex = -1;
+  await refreshMemoryPanels();
+  toast('项目记忆已删除');
 }
 
 function updateRewriteRequirementSummary() {
@@ -1514,15 +1514,15 @@ async function saveSettings() {
   const rewrite = data.config?.rewrite || {};
   if (submittedApiKey && rewrite.api_key_present) {
     toast(`设置已保存，DashScope API Key 已更新${rewrite.api_key_preview ? `：${rewrite.api_key_preview}` : ''}`);
-    refreshMemoryStatus().catch(() => {});
+    refreshMemoryPanels().catch(() => {});
     return;
   }
   if (rewrite.api_key_present) {
     toast(`设置已保存，已保留 DashScope API Key${rewrite.api_key_preview ? `：${rewrite.api_key_preview}` : ''}`);
-    refreshMemoryStatus().catch(() => {});
+    refreshMemoryPanels().catch(() => {});
     return;
   }
-  refreshMemoryStatus().catch(() => {});
+  refreshMemoryPanels().catch(() => {});
   toast('设置已保存，尚未配置 DashScope API Key');
 }
 
@@ -5715,50 +5715,35 @@ function bindSettingsEvents() {
   settingsEls.rewriteProfileInputs.forEach((input) => {
     input.addEventListener('input', updateRewriteProfileSummary);
   });
-  if (settingsEls.memoryRefreshBtn) {
-    settingsEls.memoryRefreshBtn.addEventListener('click', () => {
-      loadMemoryList().catch((error) => toast(error.message));
+  if (settingsEls.memoryProjectAddBtn) {
+    settingsEls.memoryProjectAddBtn.addEventListener('click', () => {
+      addMemoryProjectEntry().catch((error) => toast(error.message));
     });
   }
-  if (settingsEls.memoryHermesHomeInput) {
-    settingsEls.memoryHermesHomeInput.addEventListener('input', updateMemoryAdvancedSummary);
-  }
-  if (settingsEls.memoryTargetInput) {
-    settingsEls.memoryTargetInput.addEventListener('change', () => {
-      loadMemoryList().catch((error) => toast(error.message));
-    });
-  }
-  if (settingsEls.memorySearchBtn) {
-    settingsEls.memorySearchBtn.addEventListener('click', () => {
-      searchMemory().catch((error) => toast(error.message));
-    });
-  }
-  if (settingsEls.memorySearchInput) {
-    settingsEls.memorySearchInput.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        searchMemory().catch((error) => toast(error.message));
+  if (settingsEls.memoryProjectList) {
+    settingsEls.memoryProjectList.addEventListener('click', (event) => {
+      if (!(event.target instanceof Element)) return;
+      const editButton = event.target.closest('[data-memory-edit-index]');
+      const saveButton = event.target.closest('[data-memory-save-index]');
+      const deleteButton = event.target.closest('[data-memory-delete-index]');
+      const cancelButton = event.target.closest('[data-memory-cancel-edit]');
+      if (editButton) {
+        state.memoryProjectEditingIndex = toNumber(editButton.dataset.memoryEditIndex, -1);
+        renderMemoryProjectEntries(state.memoryProjectData);
+        return;
       }
-    });
-  }
-  if (settingsEls.memoryAddBtn) {
-    settingsEls.memoryAddBtn.addEventListener('click', () => {
-      addMemoryEntry().catch((error) => toast(error.message));
-    });
-  }
-  if (settingsEls.memoryReplaceBtn) {
-    settingsEls.memoryReplaceBtn.addEventListener('click', () => {
-      replaceMemoryEntry().catch((error) => toast(error.message));
-    });
-  }
-  if (settingsEls.memoryRemoveBtn) {
-    settingsEls.memoryRemoveBtn.addEventListener('click', () => {
-      removeMemoryEntry().catch((error) => toast(error.message));
-    });
-  }
-  if (settingsEls.memorySyncProfileBtn) {
-    settingsEls.memorySyncProfileBtn.addEventListener('click', () => {
-      syncMemoryProfile().catch((error) => toast(error.message));
+      if (saveButton) {
+        saveMemoryProjectEdit(toNumber(saveButton.dataset.memorySaveIndex, -1)).catch((error) => toast(error.message));
+        return;
+      }
+      if (deleteButton) {
+        deleteMemoryProjectEntry(toNumber(deleteButton.dataset.memoryDeleteIndex, -1)).catch((error) => toast(error.message));
+        return;
+      }
+      if (cancelButton) {
+        state.memoryProjectEditingIndex = -1;
+        renderMemoryProjectEntries(state.memoryProjectData);
+      }
     });
   }
   if (settingsEls.checkLoginBtn) {
@@ -5806,7 +5791,7 @@ async function bootRewrite() {
 async function bootSettings() {
   bindSettingsEvents();
   await loadSettingsConfig();
-  await loadMemoryList().catch(() => refreshMemoryStatus().catch(() => {}));
+  await refreshMemoryPanels().catch(() => {});
   await syncBrowserLoginStatus();
 }
 

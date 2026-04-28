@@ -481,15 +481,15 @@
       <div class="section-title">
         <span class="section-index">08</span>
         <div>
-          <h2>Hermes 记忆中心</h2>
-          <p class="muted">管理长期创作画像、项目记忆和历史会话检索。</p>
+          <h2>记忆中心</h2>
+          <p class="muted">开启后自动记录创作画像、采集摘要、仿写摘要和改稿偏好，用于后续创作召回。</p>
         </div>
       </div>
 
       <div class="row spread switch-row">
         <div>
           <strong>启用全局记忆</strong>
-          <p class="muted">默认关闭。开启后才会写入 Hermes 记忆文件和会话库。</p>
+          <p class="muted">默认关闭。开启后后台会按默认策略写入记忆文件和会话库。</p>
         </div>
         <label class="switch">
           <input id="memoryEnabledInput" type="checkbox">
@@ -497,131 +497,23 @@
         </label>
       </div>
 
-      <div id="memoryStatus" class="status-panel muted">正在读取 Hermes 状态...</div>
+      <div id="memoryStatus" class="status-panel muted">正在读取记忆状态...</div>
 
-      <div class="field-grid field-grid-2">
-        <label class="field">
-          <span>召回条数</span>
-          <input id="memoryTopKInput" type="number" min="1" max="20" value="8">
-        </label>
-        <div class="row spread switch-row">
-          <div>
-            <strong>会话检索</strong>
-            <p class="muted">从历史采集、仿写和改稿摘要中召回上下文。</p>
-          </div>
-          <label class="switch">
-            <input id="memorySessionSearchInput" type="checkbox" checked>
-            <span></span>
-          </label>
-        </div>
-        <div class="row spread switch-row">
-          <div>
-            <strong>采集后同步</strong>
-            <p class="muted">保存关键词和高表现样本摘要。</p>
-          </div>
-          <label class="switch">
-            <input id="memoryWriteCollectInput" type="checkbox" checked>
-            <span></span>
-          </label>
-        </div>
-        <div class="row spread switch-row">
-          <div>
-            <strong>仿写后同步</strong>
-            <p class="muted">保存参考样本、策略和输出摘要。</p>
-          </div>
-          <label class="switch">
-            <input id="memoryWriteRewriteInput" type="checkbox" checked>
-            <span></span>
-          </label>
-        </div>
-        <div class="row spread switch-row">
-          <div>
-            <strong>改稿后同步</strong>
-            <p class="muted">从 Markdown 编辑中提取偏好，不保存整篇原文。</p>
-          </div>
-          <label class="switch">
-            <input id="memoryWriteEditInput" type="checkbox" checked>
-            <span></span>
-          </label>
-        </div>
-      </div>
-
-      <details class="field full-width collapsible-field memory-advanced-panel">
+      <details class="field full-width collapsible-field memory-maintenance-panel" open>
         <summary>
-          <span>高级设置</span>
-          <strong id="memoryAdvancedSummary">存储位置</strong>
+          <span>项目记忆维护</span>
+          <strong id="memoryProjectSummary">MEMORY.md</strong>
         </summary>
-        <label class="field memory-home-field">
-          <span>Hermes Home</span>
-          <input id="memoryHermesHomeInput" type="text" placeholder="留空使用默认 datas/hermes">
-        </label>
+        <div class="memory-maintenance-body">
+          <div id="memoryProjectMeta" class="memory-maintenance-meta muted">正在读取 MEMORY.md...</div>
+          <div id="memoryProjectList" class="memory-project-list" aria-live="polite"></div>
+          <label class="field memory-project-add-field">
+            <span>新增项目记忆</span>
+            <textarea id="memoryProjectAddInput" rows="4" placeholder="输入要长期保存的项目事实、风格偏好或创作经验"></textarea>
+          </label>
+          <button id="memoryProjectAddBtn" class="btn btn-secondary" type="button">新增</button>
+        </div>
       </details>
-
-      <div class="memory-actions">
-        <button id="memoryRefreshBtn" class="btn btn-secondary btn-icon-text" type="button">
-          <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 8a7 7 0 0 0-12.2-2.4L5 7.5"/><path d="M5 4v3.5h3.5"/><path d="M5 16a7 7 0 0 0 12.2 2.4L19 16.5"/><path d="M19 20v-3.5h-3.5"/></svg>
-          刷新记忆
-        </button>
-        <button id="memorySyncProfileBtn" class="btn btn-ghost btn-icon-text" type="button">
-          <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5 9.2 17 19 7"/></svg>
-          同步创作画像
-        </button>
-      </div>
-
-      <div class="memory-grid">
-        <div class="memory-panel">
-          <div class="memory-panel-head">
-            <strong>记忆文件</strong>
-            <select id="memoryTargetInput">
-              <option value="memory">MEMORY</option>
-              <option value="user">USER</option>
-            </select>
-          </div>
-          <div id="memoryList" class="memory-list" aria-live="polite"></div>
-        </div>
-
-        <div class="memory-panel">
-          <div class="memory-panel-head">
-            <strong>搜索记忆</strong>
-          </div>
-          <div class="memory-search-row">
-            <input id="memorySearchInput" type="text" placeholder="输入主题、关键词或风格偏好">
-            <button id="memorySearchBtn" class="btn btn-secondary" type="button">搜索</button>
-          </div>
-          <div id="memorySearchResults" class="memory-list memory-search-results" aria-live="polite"></div>
-        </div>
-      </div>
-
-      <div class="memory-manage-grid">
-        <div class="field">
-          <span>新增记忆</span>
-          <select id="memoryAddTargetInput">
-            <option value="memory">MEMORY</option>
-            <option value="user">USER</option>
-          </select>
-          <textarea id="memoryAddContentInput" rows="4" placeholder="输入要长期保存的项目事实、风格偏好或创作经验"></textarea>
-          <button id="memoryAddBtn" class="btn btn-secondary" type="button">新增</button>
-        </div>
-        <div class="field">
-          <span>替换记忆</span>
-          <select id="memoryReplaceTargetInput">
-            <option value="memory">MEMORY</option>
-            <option value="user">USER</option>
-          </select>
-          <input id="memoryReplaceOldInput" type="text" placeholder="旧记忆中的唯一片段">
-          <textarea id="memoryReplaceContentInput" rows="4" placeholder="新的完整记忆"></textarea>
-          <button id="memoryReplaceBtn" class="btn btn-secondary" type="button">替换</button>
-        </div>
-        <div class="field">
-          <span>删除记忆</span>
-          <select id="memoryRemoveTargetInput">
-            <option value="memory">MEMORY</option>
-            <option value="user">USER</option>
-          </select>
-          <input id="memoryRemoveOldInput" type="text" placeholder="要删除的唯一片段">
-          <button id="memoryRemoveBtn" class="btn btn-ghost" type="button">删除</button>
-        </div>
-      </div>
     </section>
   </main>
 
