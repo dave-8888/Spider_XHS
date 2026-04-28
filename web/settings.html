@@ -75,28 +75,57 @@
 
   <main class="page-shell">
     <section class="surface hero settings-hero reveal">
-      <div class="hero-copy">
-        <p class="eyebrow eyebrow-muted">Strategy Center</p>
-        <h1>策略配置中心</h1>
-        <p class="hero-lead">统一管理关键词矩阵、采集口径、账号凭证与自动化节奏，确保任务输出稳定一致。</p>
-        <div class="settings-summary-grid" aria-label="设置模块">
-          <span><strong>01</strong> 采集策略</span>
-          <span><strong>02</strong> 内容筛选</span>
-          <span><strong>03</strong> 账号凭证</span>
-          <span><strong>04</strong> 大模型配置</span>
-          <span><strong>05</strong> 调度治理</span>
+      <div class="settings-hero-main">
+        <div class="hero-copy">
+          <p class="eyebrow eyebrow-muted">Strategy Center</p>
+          <h1>策略配置中心</h1>
+          <p class="hero-lead">统一管理采集、筛选、AI 创作与自动化节奏，确保任务输出稳定一致。</p>
+          <div class="settings-summary-grid" aria-label="设置模块">
+            <span><strong>01</strong> 采集配置</span>
+            <span><strong>02</strong> 内容筛选</span>
+            <span><strong>03</strong> 请求节奏</span>
+            <span><strong>04</strong> AI 创作</span>
+            <span><strong>05</strong> 自动化记忆</span>
+          </div>
+        </div>
+        <div class="settings-title-actions">
+          <a class="btn btn-secondary btn-icon-text" href="/">
+            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m11 6-6 6 6 6"/><path d="M5 12h14"/></svg>
+            返回采集台
+          </a>
+          <button id="saveConfigBtn" class="btn btn-primary btn-icon-text" type="button">
+            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5 9.2 17 19 7"/></svg>
+            保存设置
+          </button>
         </div>
       </div>
-      <div class="hero-actions">
-        <a class="btn btn-secondary btn-icon-text" href="/">
-          <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m11 6-6 6 6 6"/><path d="M5 12h14"/></svg>
-          返回采集台
-        </a>
-        <button id="saveConfigBtn" class="btn btn-primary btn-icon-text" type="button">
-          <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5 9.2 17 19 7"/></svg>
-          保存设置
-        </button>
-      </div>
+
+      <aside class="settings-account-card" aria-label="账号凭证">
+        <div class="settings-account-head">
+          <span class="section-index">登录</span>
+          <div>
+            <h2>账号凭证</h2>
+            <p class="muted">采集依赖小红书登录 Cookie。</p>
+          </div>
+        </div>
+
+        <div id="cookieStatus" class="status-panel muted">正在读取配置...</div>
+
+        <div class="button-pair settings-account-actions">
+          <button id="openLoginBrowserBtn" class="btn btn-primary btn-icon-text" type="button">
+            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12.5a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>
+            <span class="btn-label">打开浏览器登录</span>
+          </button>
+          <button id="openExternalLoginBrowserBtn" class="btn btn-ghost btn-icon-text is-hidden" type="button">
+            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h8v8"/><path d="m8 16 8-8"/><path d="M5 5h5"/><path d="M5 5v14h14v-5"/></svg>
+            使用外部浏览器
+          </button>
+          <button id="checkLoginBtn" class="btn btn-secondary btn-icon-text" type="button">
+            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5 9.2 17 19 7"/></svg>
+            检查登录
+          </button>
+        </div>
+      </aside>
     </section>
 
     <section class="grid two-columns">
@@ -207,36 +236,9 @@
     </section>
 
     <section class="grid two-columns">
-      <article class="surface surface-dark reveal">
-        <div class="section-title">
-          <span class="section-index">04</span>
-          <div>
-            <h2>账号凭证</h2>
-            <p class="muted">采集依赖登录 Cookie。</p>
-          </div>
-        </div>
-
-        <div id="cookieStatus" class="status-panel muted">正在读取配置...</div>
-
-        <div class="button-pair">
-          <button id="openLoginBrowserBtn" class="btn btn-primary btn-icon-text" type="button">
-            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12.5a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>
-            <span class="btn-label">打开浏览器登录</span>
-          </button>
-          <button id="openExternalLoginBrowserBtn" class="btn btn-ghost btn-icon-text is-hidden" type="button">
-            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h8v8"/><path d="m8 16 8-8"/><path d="M5 5h5"/><path d="M5 5v14h14v-5"/></svg>
-            使用外部浏览器
-          </button>
-          <button id="checkLoginBtn" class="btn btn-secondary btn-icon-text" type="button">
-            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5 9.2 17 19 7"/></svg>
-            检查登录
-          </button>
-        </div>
-      </article>
-
       <article class="surface reveal">
         <div class="section-title">
-          <span class="section-index">05</span>
+          <span class="section-index">04</span>
           <div>
             <h2>请求节奏</h2>
             <p class="muted">控制搜索和详情请求间隔。</p>
@@ -268,55 +270,55 @@
 
         <p class="muted">最大值小于最小值时，会按最小值处理。</p>
       </article>
-    </section>
 
-    <section class="surface reveal">
-      <div class="section-title">
-        <span class="section-index">06</span>
-        <div>
-          <h2>自动化调度</h2>
-          <p class="muted">服务运行时按配置触发，不会并发重叠。</p>
+      <article class="surface reveal">
+        <div class="section-title">
+          <span class="section-index">05</span>
+          <div>
+            <h2>自动化调度</h2>
+            <p class="muted">服务运行时按配置触发，不会并发重叠。</p>
+          </div>
         </div>
-      </div>
 
-      <div class="row spread switch-row">
-        <div>
-          <strong>启用自动采集</strong>
-          <p class="muted">关闭后保留设置值，但不会自动触发。</p>
+        <div class="row spread switch-row">
+          <div>
+            <strong>启用自动采集</strong>
+            <p class="muted">关闭后保留设置值，但不会自动触发。</p>
+          </div>
+          <label class="switch">
+            <input id="scheduleEnabledInput" type="checkbox">
+            <span></span>
+          </label>
         </div>
-        <label class="switch">
-          <input id="scheduleEnabledInput" type="checkbox">
-          <span></span>
-        </label>
-      </div>
 
-      <div class="field-grid field-grid-2">
-        <label class="field">
-          <span>执行周期</span>
-          <select id="cycleInput">
-            <option value="daily">每天</option>
-            <option value="weekly">每周</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>每天执行次数</span>
-          <input id="dailyRunsInput" type="number" min="1" max="24" value="1">
-        </label>
-        <label class="field full-width">
-          <span>执行时间（HH:MM，逗号分隔）</span>
-          <input id="runTimesInput" type="text" value="09:00" placeholder="09:00, 21:00">
-        </label>
-      </div>
+        <div class="field-grid field-grid-2">
+          <label class="field">
+            <span>执行周期</span>
+            <select id="cycleInput">
+              <option value="daily">每天</option>
+              <option value="weekly">每周</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>每天执行次数</span>
+            <input id="dailyRunsInput" type="number" min="1" max="24" value="1">
+          </label>
+          <label class="field full-width">
+            <span>执行时间（HH:MM，逗号分隔）</span>
+            <input id="runTimesInput" type="text" value="09:00" placeholder="09:00, 21:00">
+          </label>
+        </div>
 
-      <div id="weekdaySection" class="choice-section">
-        <h3>每周执行日</h3>
-        <div id="weekdayChoices" class="choice-grid compact"></div>
-      </div>
+        <div id="weekdaySection" class="choice-section">
+          <h3>每周执行日</h3>
+          <div id="weekdayChoices" class="choice-grid compact"></div>
+        </div>
+      </article>
     </section>
 
     <section id="modelConfig" class="surface reveal model-config-section">
       <div class="section-title">
-        <span class="section-index">07</span>
+        <span class="section-index">06</span>
         <div>
           <h2>大模型配置</h2>
           <p class="muted">阿里百炼 API Key、文本模型、图片识别模型、图片模型与仿写生成。</p>
@@ -479,7 +481,7 @@
 
     <section id="memoryConfig" class="surface reveal memory-center-section">
       <div class="section-title">
-        <span class="section-index">08</span>
+        <span class="section-index">07</span>
         <div>
           <h2>记忆中心</h2>
           <p class="muted">开启后自动记录创作画像、采集摘要、仿写摘要和改稿偏好，用于后续创作召回。</p>
@@ -505,17 +507,44 @@
           <strong id="memoryProjectSummary">MEMORY.md</strong>
         </summary>
         <div class="memory-maintenance-body">
-          <div id="memoryProjectMeta" class="memory-maintenance-meta muted">正在读取 MEMORY.md...</div>
+          <div class="memory-maintenance-toolbar">
+            <div id="memoryProjectMeta" class="memory-maintenance-meta muted">正在读取 MEMORY.md...</div>
+            <button id="memoryProjectAddBtn" class="btn btn-secondary btn-icon-text" type="button">
+              <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+              新增项目记忆
+            </button>
+          </div>
           <div id="memoryProjectList" class="memory-project-list" aria-live="polite"></div>
-          <label class="field memory-project-add-field">
-            <span>新增项目记忆</span>
-            <textarea id="memoryProjectAddInput" rows="4" placeholder="输入要长期保存的项目事实、风格偏好或创作经验"></textarea>
-          </label>
-          <button id="memoryProjectAddBtn" class="btn btn-secondary" type="button">新增</button>
         </div>
       </details>
     </section>
   </main>
+
+  <div id="memoryProjectModal" class="memory-project-modal" aria-hidden="true" hidden>
+    <div class="memory-project-modal-backdrop" data-memory-project-modal-close></div>
+    <section class="memory-project-modal-panel" role="dialog" aria-modal="true" aria-labelledby="memoryProjectModalTitle">
+      <div class="memory-project-modal-head">
+        <div>
+          <p id="memoryProjectModalKicker" class="eyebrow eyebrow-muted">MEMORY.md</p>
+          <h2 id="memoryProjectModalTitle">新增项目记忆</h2>
+        </div>
+        <button id="memoryProjectModalCloseBtn" class="btn btn-ghost memory-project-modal-close" type="button" title="关闭" aria-label="关闭项目记忆弹窗">
+          <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <label class="field memory-project-modal-field">
+        <span>记忆内容</span>
+        <textarea id="memoryProjectModalInput" rows="9" placeholder="输入要长期保存的项目事实、风格偏好或创作经验"></textarea>
+      </label>
+      <div class="memory-project-modal-foot">
+        <span id="memoryProjectModalMeta" class="muted">0 字</span>
+        <div class="button-pair memory-project-modal-actions">
+          <button id="memoryProjectModalCancelBtn" class="btn btn-ghost" type="button">取消</button>
+          <button id="memoryProjectModalSubmitBtn" class="btn btn-primary" type="button">保存</button>
+        </div>
+      </div>
+    </section>
+  </div>
 
   <div id="toast" class="toast" aria-live="polite"></div>
   <script src="/ui/app.js"></script>

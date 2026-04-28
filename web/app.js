@@ -138,8 +138,15 @@ const settingsEls = {
   memoryProjectSummary: document.querySelector('#memoryProjectSummary'),
   memoryProjectMeta: document.querySelector('#memoryProjectMeta'),
   memoryProjectList: document.querySelector('#memoryProjectList'),
-  memoryProjectAddInput: document.querySelector('#memoryProjectAddInput'),
   memoryProjectAddBtn: document.querySelector('#memoryProjectAddBtn'),
+  memoryProjectModal: document.querySelector('#memoryProjectModal'),
+  memoryProjectModalTitle: document.querySelector('#memoryProjectModalTitle'),
+  memoryProjectModalKicker: document.querySelector('#memoryProjectModalKicker'),
+  memoryProjectModalInput: document.querySelector('#memoryProjectModalInput'),
+  memoryProjectModalMeta: document.querySelector('#memoryProjectModalMeta'),
+  memoryProjectModalCloseBtn: document.querySelector('#memoryProjectModalCloseBtn'),
+  memoryProjectModalCancelBtn: document.querySelector('#memoryProjectModalCancelBtn'),
+  memoryProjectModalSubmitBtn: document.querySelector('#memoryProjectModalSubmitBtn'),
   saveConfigBtn: document.querySelector('#saveConfigBtn'),
   checkLoginBtn: document.querySelector('#checkLoginBtn'),
   openLoginBrowserBtn: document.querySelector('#openLoginBrowserBtn'),
@@ -155,7 +162,10 @@ const state = {
   choices: {},
   memoryProjectData: null,
   memoryProjectEntries: [],
-  memoryProjectEditingIndex: -1,
+  memoryProjectModalMode: 'add',
+  memoryProjectModalIndex: -1,
+  memoryProjectModalSaving: false,
+  memoryProjectModalPreviousFocus: null,
   currentOutputRoot: 'datas/markdown_datas',
   currentRewriteRoot: 'datas/ai_rewrites',
   currentFileRoot: 'crawl',
@@ -1140,8 +1150,95 @@ async function refreshMemoryStatus() {
 }
 
 function setMemoryProjectControlsDisabled(disabled) {
-  if (settingsEls.memoryProjectAddInput) settingsEls.memoryProjectAddInput.disabled = disabled;
   if (settingsEls.memoryProjectAddBtn) settingsEls.memoryProjectAddBtn.disabled = disabled;
+}
+
+function getMemoryProjectEntry(index) {
+  const normalizedIndex = toNumber(index, -1);
+  return state.memoryProjectEntries.find((entry) => Number(entry.index ?? -1) === normalizedIndex) || null;
+}
+
+function updateMemoryProjectModalMeta() {
+  if (!settingsEls.memoryProjectModalMeta) return;
+  const content = (settingsEls.memoryProjectModalInput?.value || '').trim();
+  settingsEls.memoryProjectModalMeta.textContent = `${content.length} 字`;
+}
+
+function setMemoryProjectModalSaving(saving) {
+  state.memoryProjectModalSaving = Boolean(saving);
+  const disabled = state.memoryProjectModalSaving;
+  [
+    settingsEls.memoryProjectModalInput,
+    settingsEls.memoryProjectModalCloseBtn,
+    settingsEls.memoryProjectModalCancelBtn,
+  ].forEach((element) => {
+    if (element) element.disabled = disabled;
+  });
+  if (settingsEls.memoryProjectModalSubmitBtn) {
+    settingsEls.memoryProjectModalSubmitBtn.disabled = disabled;
+    settingsEls.memoryProjectModalSubmitBtn.textContent = disabled
+      ? '保存中...'
+      : (state.memoryProjectModalMode === 'edit' ? '保存修改' : '新增');
+  }
+}
+
+function openMemoryProjectModal(mode = 'add', index = -1) {
+  if (!settingsEls.memoryProjectModal || !settingsEls.memoryProjectModalInput) return;
+  if (state.memoryProjectData?.disabled) {
+    toast('记忆功能未开启');
+    return;
+  }
+
+  const isEdit = mode === 'edit';
+  const entry = isEdit ? getMemoryProjectEntry(index) : null;
+  if (isEdit && !entry) {
+    toast('项目记忆已变化，请刷新后重试');
+    return;
+  }
+
+  state.memoryProjectModalMode = isEdit ? 'edit' : 'add';
+  state.memoryProjectModalIndex = isEdit ? Number(entry.index) : -1;
+  state.memoryProjectModalPreviousFocus = document.activeElement instanceof Element
+    ? document.activeElement
+    : null;
+
+  if (settingsEls.memoryProjectModalTitle) {
+    settingsEls.memoryProjectModalTitle.textContent = isEdit ? '修改项目记忆' : '新增项目记忆';
+  }
+  if (settingsEls.memoryProjectModalKicker) {
+    settingsEls.memoryProjectModalKicker.textContent = isEdit
+      ? `MEMORY.md · ${String(Number(entry.index) + 1).padStart(2, '0')}`
+      : 'MEMORY.md';
+  }
+  settingsEls.memoryProjectModalInput.value = isEdit ? entry.content || '' : '';
+  updateMemoryProjectModalMeta();
+  setMemoryProjectModalSaving(false);
+
+  settingsEls.memoryProjectModal.hidden = false;
+  settingsEls.memoryProjectModal.setAttribute('aria-hidden', 'false');
+  document.body.classList.add('has-memory-project-modal');
+
+  window.requestAnimationFrame(() => {
+    settingsEls.memoryProjectModalInput?.focus();
+    const end = settingsEls.memoryProjectModalInput?.value.length || 0;
+    settingsEls.memoryProjectModalInput?.setSelectionRange(end, end);
+  });
+}
+
+function closeMemoryProjectModal({ restoreFocus = true } = {}) {
+  if (!settingsEls.memoryProjectModal || state.memoryProjectModalSaving) return;
+  settingsEls.memoryProjectModal.hidden = true;
+  settingsEls.memoryProjectModal.setAttribute('aria-hidden', 'true');
+  document.body.classList.remove('has-memory-project-modal');
+  if (settingsEls.memoryProjectModalInput) settingsEls.memoryProjectModalInput.value = '';
+  updateMemoryProjectModalMeta();
+  state.memoryProjectModalMode = 'add';
+  state.memoryProjectModalIndex = -1;
+  const previousFocus = state.memoryProjectModalPreviousFocus;
+  state.memoryProjectModalPreviousFocus = null;
+  if (restoreFocus && previousFocus && typeof previousFocus.focus === 'function') {
+    previousFocus.focus();
+  }
 }
 
 function renderMemoryProjectEntries(data) {
@@ -1152,6 +1249,9 @@ function renderMemoryProjectEntries(data) {
   const entries = Array.isArray(memory.entries) ? memory.entries : [];
   state.memoryProjectEntries = entries;
   setMemoryProjectControlsDisabled(disabled);
+  if (disabled && settingsEls.memoryProjectModal && !settingsEls.memoryProjectModal.hidden) {
+    closeMemoryProjectModal({ restoreFocus: false });
+  }
 
   if (settingsEls.memoryProjectSummary) {
     settingsEls.memoryProjectSummary.textContent = disabled ? '未开启' : `${entries.length} 条`;
@@ -1175,28 +1275,18 @@ function renderMemoryProjectEntries(data) {
 
   settingsEls.memoryProjectList.innerHTML = entries.map((entry) => {
     const index = Number(entry.index || 0);
-    const editing = state.memoryProjectEditingIndex === index;
     const content = entry.content || '';
-    const body = editing
-      ? `<textarea class="memory-project-edit-input" data-memory-edit-input="${escapeHtml(index)}" rows="5">${escapeHtml(content)}</textarea>`
-      : `<p>${escapeHtml(content)}</p>`;
-    const actions = editing
-      ? `
-        <button class="btn btn-secondary" data-memory-save-index="${escapeHtml(index)}" type="button">保存</button>
-        <button class="btn btn-ghost" data-memory-cancel-edit type="button">取消</button>
-      `
-      : `
-        <button class="btn btn-ghost" data-memory-edit-index="${escapeHtml(index)}" type="button">编辑</button>
-        <button class="btn btn-ghost" data-memory-delete-index="${escapeHtml(index)}" type="button">删除</button>
-      `;
     return `
       <article class="memory-project-entry">
         <div class="memory-project-entry-head">
           <strong>${escapeHtml(String(index + 1).padStart(2, '0'))}</strong>
           <span>${escapeHtml(entry.chars || content.length)} 字</span>
         </div>
-        ${body}
-        <div class="memory-project-entry-actions">${actions}</div>
+        <p>${escapeHtml(content)}</p>
+        <div class="memory-project-entry-actions">
+          <button class="btn btn-ghost" data-memory-edit-index="${escapeHtml(index)}" type="button">编辑</button>
+          <button class="btn btn-ghost" data-memory-delete-index="${escapeHtml(index)}" type="button">删除</button>
+        </div>
       </article>
     `;
   }).join('');
@@ -1229,60 +1319,76 @@ async function refreshMemoryPanels() {
   ]);
 }
 
-async function addMemoryProjectEntry() {
-  const content = (settingsEls.memoryProjectAddInput?.value || '').trim();
-  if (!content) {
+async function addMemoryProjectEntry(content) {
+  const entryContent = String(content || '').trim();
+  if (!entryContent) {
     toast('请输入要新增的项目记忆');
-    return;
+    return false;
   }
   const data = await api('/api/memory/add', {
     method: 'POST',
-    body: JSON.stringify({ target: 'memory', content }),
+    body: JSON.stringify({ target: 'memory', content: entryContent }),
   });
   if (data.disabled) {
     toast('记忆功能未开启');
     await loadMemoryProjectEntries().catch(() => {});
-    return;
+    return false;
   }
-  if (settingsEls.memoryProjectAddInput) settingsEls.memoryProjectAddInput.value = '';
-  state.memoryProjectEditingIndex = -1;
   await refreshMemoryPanels();
   toast(data.memory?.duplicate ? '这条项目记忆已存在' : '项目记忆已新增');
+  return true;
 }
 
-async function saveMemoryProjectEdit(index) {
-  const entry = state.memoryProjectEntries[index];
-  const textarea = settingsEls.memoryProjectList?.querySelector(`[data-memory-edit-input="${index}"]`);
-  const content = (textarea?.value || '').trim();
+async function saveMemoryProjectEdit(index, content) {
+  const entry = getMemoryProjectEntry(index);
+  const entryContent = String(content || '').trim();
   if (!entry) {
     toast('项目记忆已变化，请刷新后重试');
-    return;
+    return false;
   }
-  if (!content) {
+  if (!entryContent) {
     toast('项目记忆不能为空');
-    return;
+    return false;
   }
-  if (content === entry.content) {
-    state.memoryProjectEditingIndex = -1;
-    renderMemoryProjectEntries(state.memoryProjectData);
-    return;
+  if (entryContent === entry.content) {
+    return true;
   }
   const data = await api('/api/memory/replace', {
     method: 'POST',
-    body: JSON.stringify({ target: 'memory', old_text: entry.content, content }),
+    body: JSON.stringify({ target: 'memory', old_text: entry.content, content: entryContent }),
   });
   if (data.disabled) {
     toast('记忆功能未开启');
     await loadMemoryProjectEntries().catch(() => {});
-    return;
+    return false;
   }
-  state.memoryProjectEditingIndex = -1;
   await refreshMemoryPanels();
   toast('项目记忆已更新');
+  return true;
+}
+
+async function submitMemoryProjectModal() {
+  if (state.memoryProjectModalSaving) return;
+  const content = (settingsEls.memoryProjectModalInput?.value || '').trim();
+  if (!content) {
+    toast(state.memoryProjectModalMode === 'edit' ? '项目记忆不能为空' : '请输入要新增的项目记忆');
+    return;
+  }
+
+  setMemoryProjectModalSaving(true);
+  let saved = false;
+  try {
+    saved = state.memoryProjectModalMode === 'edit'
+      ? await saveMemoryProjectEdit(state.memoryProjectModalIndex, content)
+      : await addMemoryProjectEntry(content);
+  } finally {
+    setMemoryProjectModalSaving(false);
+  }
+  if (saved) closeMemoryProjectModal({ restoreFocus: true });
 }
 
 async function deleteMemoryProjectEntry(index) {
-  const entry = state.memoryProjectEntries[index];
+  const entry = getMemoryProjectEntry(index);
   if (!entry) {
     toast('项目记忆已变化，请刷新后重试');
     return;
@@ -1297,7 +1403,6 @@ async function deleteMemoryProjectEntry(index) {
     await loadMemoryProjectEntries().catch(() => {});
     return;
   }
-  state.memoryProjectEditingIndex = -1;
   await refreshMemoryPanels();
   toast('项目记忆已删除');
 }
@@ -5717,32 +5822,56 @@ function bindSettingsEvents() {
   });
   if (settingsEls.memoryProjectAddBtn) {
     settingsEls.memoryProjectAddBtn.addEventListener('click', () => {
-      addMemoryProjectEntry().catch((error) => toast(error.message));
+      openMemoryProjectModal('add');
+    });
+  }
+  if (settingsEls.memoryProjectModalInput) {
+    settingsEls.memoryProjectModalInput.addEventListener('input', updateMemoryProjectModalMeta);
+  }
+  if (settingsEls.memoryProjectModalSubmitBtn) {
+    settingsEls.memoryProjectModalSubmitBtn.addEventListener('click', () => {
+      submitMemoryProjectModal().catch((error) => toast(error.message));
+    });
+  }
+  if (settingsEls.memoryProjectModalCancelBtn) {
+    settingsEls.memoryProjectModalCancelBtn.addEventListener('click', () => {
+      closeMemoryProjectModal({ restoreFocus: true });
+    });
+  }
+  if (settingsEls.memoryProjectModalCloseBtn) {
+    settingsEls.memoryProjectModalCloseBtn.addEventListener('click', () => {
+      closeMemoryProjectModal({ restoreFocus: true });
+    });
+  }
+  if (settingsEls.memoryProjectModal) {
+    settingsEls.memoryProjectModal.addEventListener('click', (event) => {
+      if (!(event.target instanceof Element)) return;
+      if (event.target.closest('[data-memory-project-modal-close]')) {
+        closeMemoryProjectModal({ restoreFocus: true });
+      }
+    });
+    document.addEventListener('keydown', (event) => {
+      if (settingsEls.memoryProjectModal.hidden) return;
+      if (event.key === 'Escape') {
+        closeMemoryProjectModal({ restoreFocus: true });
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+        submitMemoryProjectModal().catch((error) => toast(error.message));
+      }
     });
   }
   if (settingsEls.memoryProjectList) {
     settingsEls.memoryProjectList.addEventListener('click', (event) => {
       if (!(event.target instanceof Element)) return;
       const editButton = event.target.closest('[data-memory-edit-index]');
-      const saveButton = event.target.closest('[data-memory-save-index]');
       const deleteButton = event.target.closest('[data-memory-delete-index]');
-      const cancelButton = event.target.closest('[data-memory-cancel-edit]');
       if (editButton) {
-        state.memoryProjectEditingIndex = toNumber(editButton.dataset.memoryEditIndex, -1);
-        renderMemoryProjectEntries(state.memoryProjectData);
-        return;
-      }
-      if (saveButton) {
-        saveMemoryProjectEdit(toNumber(saveButton.dataset.memorySaveIndex, -1)).catch((error) => toast(error.message));
+        openMemoryProjectModal('edit', toNumber(editButton.dataset.memoryEditIndex, -1));
         return;
       }
       if (deleteButton) {
         deleteMemoryProjectEntry(toNumber(deleteButton.dataset.memoryDeleteIndex, -1)).catch((error) => toast(error.message));
-        return;
-      }
-      if (cancelButton) {
-        state.memoryProjectEditingIndex = -1;
-        renderMemoryProjectEntries(state.memoryProjectData);
       }
     });
   }

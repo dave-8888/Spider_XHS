@@ -1390,6 +1390,80 @@ select:focus {
   font-size: 12px;
 }
 
+.settings-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(330px, 420px);
+  align-items: stretch;
+  gap: 22px;
+  padding: 24px;
+}
+
+.settings-hero-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 22px;
+}
+
+.settings-title-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.settings-account-card {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, var(--accent-soft), transparent 48%),
+    var(--panel-muted-bg);
+}
+
+.settings-account-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.settings-account-card .section-index {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.settings-account-card h2 {
+  font-size: 1.08rem;
+}
+
+.settings-account-card .muted {
+  margin-bottom: 0;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.settings-account-card .status-panel {
+  min-height: 42px;
+  margin-bottom: 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.settings-account-actions {
+  justify-content: flex-start;
+}
+
+.settings-account-actions .btn {
+  flex: 1 1 118px;
+}
+
 .priority-card {
   position: relative;
 }
@@ -1437,7 +1511,7 @@ select:focus {
 
 .settings-filter-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px 16px;
 }
 
@@ -1562,6 +1636,18 @@ select:focus {
   font-size: 13px;
 }
 
+.memory-maintenance-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.memory-maintenance-toolbar .btn {
+  flex: 0 0 auto;
+}
+
 .memory-project-list {
   display: grid;
   align-content: start;
@@ -1626,13 +1712,78 @@ select:focus {
   padding: 0 12px;
 }
 
-.memory-project-edit-input {
-  min-height: 132px;
-  font-size: 13px;
+.memory-project-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 58;
+  display: grid;
+  place-items: center;
+  padding: 18px;
 }
 
-.memory-project-add-field {
+.memory-project-modal[hidden] {
+  display: none;
+}
+
+.memory-project-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(6, 10, 18, 0.58);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.memory-project-modal-panel {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 14px;
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(100vh - 36px);
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.memory-project-modal-head,
+.memory-project-modal-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.memory-project-modal-head h2 {
   margin: 0;
+  font-size: 1.25rem;
+}
+
+.memory-project-modal-close {
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+}
+
+.memory-project-modal-field {
+  margin: 0;
+}
+
+.memory-project-modal-field textarea {
+  min-height: 220px;
+  resize: vertical;
+}
+
+.memory-project-modal-foot {
+  align-items: center;
+}
+
+.memory-project-modal-actions {
+  justify-content: flex-end;
 }
 
 .switch {
@@ -3825,6 +3976,10 @@ body.has-markdown-image-lightbox {
   overflow: hidden;
 }
 
+body.has-memory-project-modal {
+  overflow: hidden;
+}
+
 .markdown-image-lightbox {
   position: fixed;
   inset: 0;
@@ -4150,6 +4305,10 @@ body.has-markdown-image-lightbox {
     flex-direction: column;
   }
 
+  .settings-hero {
+    grid-template-columns: 1fr;
+  }
+
   .hero-actions,
   .button-pair,
   .directory-actions {
@@ -4258,6 +4417,10 @@ body.has-markdown-image-lightbox {
     padding: 18px;
   }
 
+  .settings-title-actions {
+    width: 100%;
+  }
+
   .command-hero {
     padding: 18px;
   }
@@ -4335,6 +4498,7 @@ body.has-markdown-image-lightbox {
   }
 
   .hero-actions .btn,
+  .settings-title-actions .btn,
   .button-pair .btn,
   .directory-actions .btn {
     width: 100%;
