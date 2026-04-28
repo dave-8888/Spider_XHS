@@ -24,10 +24,12 @@ from collector_service import (
     ConfigStore,
     DATA_ROOT,
     JobManager,
+    REWRITE_PREVIEW_TOPIC_SOURCE,
     RewriteService,
     SimpleScheduler,
     create_output_directory,
     delete_output_entries,
+    detect_rewrite_requirement_conflicts,
     list_recent_markdown_files,
     list_output_files,
     read_output_text_file,
@@ -52,6 +54,12 @@ VDITOR_VENDOR_PREFIX = "/vendor/vditor/"
 config_store = ConfigStore()
 job_manager = JobManager(config_store)
 scheduler = SimpleScheduler(config_store, job_manager)
+
+
+class RewriteRequirementConflictError(Exception):
+    def __init__(self, message: str, conflicts: List[Dict[str, str]]) -> None:
+        super().__init__(message)
+        self.conflicts = conflicts
 
 
 def find_browser_executable() -> str:
@@ -608,15 +616,28 @@ def run_manual_rewrite(payload: Dict[str, Any]) -> Dict[str, Any]:
     relative_path = str(payload.get("path") or "").strip()
     if not relative_path:
         raise ValueError("请选择要仿写的笔记")
+    root = normalize_file_root(payload.get("root"))
     config = config_store.load()
     rewrite_config = dict(config.get("rewrite", {}) if isinstance(config.get("rewrite"), dict) else {})
     topic = str(payload.get("topic") or rewrite_config.get("topic") or "创业沙龙").strip()
+    topic_source = str(payload.get("topic_source") or "").strip()
+    if topic_source == REWRITE_PREVIEW_TOPIC_SOURCE and not bool(payload.get("confirmed_conflicts")):
+        conflicts = detect_rewrite_requirement_conflicts(topic, rewrite_config)
+        if conflicts:
+            raise RewriteRequirementConflictError("本次仿写要求可能和旧创作画像或默认要求冲突", conflicts)
     if topic:
         rewrite_config["topic"] = topic
+    if topic_source == REWRITE_PREVIEW_TOPIC_SOURCE:
+        rewrite_config["_topic_source"] = topic_source
     if "generate_images" in payload:
         rewrite_config["generate_images"] = bool(payload.get("generate_images"))
     rewrite_config["_memory"] = config.get("memory", {})
-    service = RewriteService(resolve_output_root(config), resolve_rewrite_output_root(config), rewrite_config)
+    service = RewriteService(
+        resolve_file_output_root(config, root),
+        resolve_rewrite_output_root(config),
+        rewrite_config,
+        allow_plain_markdown_sources=root == "rewrite",
+    )
     return service.rewrite_note(relative_path, topic=topic)
 
 
@@ -629,6 +650,13 @@ def run_manual_rewrite_job(payload: Dict[str, Any]) -> Dict[str, Any]:
     config = config_store.load()
     rewrite_config = config.get("rewrite", {}) if isinstance(config.get("rewrite"), dict) else {}
     topic = str(payload.get("topic") or rewrite_config.get("topic") or "创业沙龙").strip() or "创业沙龙"
+    topic_source = str(payload.get("topic_source") or "").strip()
+    if topic_source == REWRITE_PREVIEW_TOPIC_SOURCE:
+        if not bool(payload.get("confirmed_conflicts")):
+            conflicts = detect_rewrite_requirement_conflicts(topic, rewrite_config)
+            if conflicts:
+                raise RewriteRequirementConflictError("本次仿写要求可能和旧创作画像或默认要求冲突", conflicts)
+        config.setdefault("rewrite", {})["_topic_source"] = topic_source
     return job_manager.start_rewrite(raw_targets, topic=topic, config=config)
 
 
@@ -924,6 +952,16 @@ class AppHandler(BaseHTTPRequestHandler):
                 })
             else:
                 error_response(self, "接口不存在", status=404)
+        except RewriteRequirementConflictError as exc:
+            json_response(
+                self,
+                {
+                    "success": False,
+                    "message": str(exc),
+                    "conflicts": exc.conflicts,
+                },
+                status=409,
+            )
         except json.JSONDecodeError:
             error_response(self, "请求体不是合法 JSON", status=400)
         except ValueError as exc:

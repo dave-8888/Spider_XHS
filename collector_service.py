@@ -758,6 +758,10 @@ def rewrite_requirements_label(value: Any, max_len: int = 48) -> str:
     return label[:max_len].strip() or DEFAULT_REWRITE_REQUIREMENTS
 
 
+def normalize_rewrite_target_root(value: Any = "") -> str:
+    return "rewrite" if str(value or "").strip().lower() == "rewrite" else "crawl"
+
+
 REWRITE_CONFLICT_FIELD_PATTERNS: Dict[str, Tuple[str, ...]] = {
     "主题": (
         r"(?:^|\n)\s*#{0,6}\s*(?:主题|活动主题|选题)\s*[:：]\s*([^\n；;。]+)",
@@ -1785,6 +1789,7 @@ class RewriteService:
         self.cancel_event = cancel_event
         self.allow_plain_markdown_sources = allow_plain_markdown_sources
         self.topic = normalize_rewrite_requirements(self.config.get("topic"))
+        self.topic_source = str(self.config.get("_topic_source") or "").strip()
         self.text_model = str(self.config.get("text_model") or "qwen-plus").strip() or "qwen-plus"
         self.vision_model = (
             str(self.config.get("vision_model") or DEFAULT_REWRITE_VISION_MODEL).strip()
@@ -1841,6 +1846,7 @@ class RewriteService:
             if isinstance(self.config.get("creator_profile"), dict)
             else {}
         )
+        self._last_text_model_prompts: Dict[str, str] = {}
 
     def _configured_prompt(
         self,
@@ -1851,11 +1857,31 @@ class RewriteService:
         text = str(self.config.get(key) or fallback).replace("\r\n", "\n").replace("\r", "\n").strip()
         return text[:max_len].strip() or fallback
 
+    def _rewrite_requirements_for_prompt(self) -> str:
+        if self.topic_source != REWRITE_PREVIEW_TOPIC_SOURCE:
+            return self.topic
+        priority_note = (
+            "【本次弹窗要求优先级】本次仿写要求优先于创作画像中的主题、活动事实、"
+            "转化目标和历史文案样本；如果两者冲突，必须按本次要求执行。"
+            "创作画像只用于参考语气、句式、人设、写作习惯和合规边界，"
+            "不得把创作画像里的旧地点、旧时间、旧活动、旧报名方式或旧主题当成本次事实。"
+        )
+        return f"{self.topic}\n\n{priority_note}"
+
     def _text_system_prompt_with_safety_rules(self) -> str:
         safety_rules = str(self.safety_rules or "").strip()
         if not safety_rules:
             return self.text_system_prompt
         return f"{self.text_system_prompt}\n\n【安全准则】\n{safety_rules}"
+
+    def _markdown_code_block(self, text: str, info: str = "text") -> List[str]:
+        body = str(text or "").strip()
+        if not body:
+            return ["未记录。"]
+        fence = "```"
+        while fence in body:
+            fence += "`"
+        return [f"{fence}{info}", body, fence]
 
     def _render_text_prompt_template(self, template: str, values: Dict[str, str]) -> str:
         scope = "text_user_prompt_template"
@@ -2656,7 +2682,7 @@ class RewriteService:
         article_count = 1 if mode == "single" else min(10, len(request_notes))
         prompt = {
             "topic": self.topic_label(),
-            "rewrite_requirements": self.topic,
+            "rewrite_requirements": self._rewrite_requirements_for_prompt(),
             "mode": mode,
             "article_count": article_count,
             "target_note_id": target_note.get("note_id") if target_note else "",
@@ -2680,6 +2706,11 @@ class RewriteService:
             self.text_user_prompt_template,
             self._text_prompt_template_values(prompt),
         )
+        system_prompt = self._text_system_prompt_with_safety_rules()
+        self._last_text_model_prompts = {
+            "system_prompt": system_prompt,
+            "user_prompt": user_prompt,
+        }
         response = requests.post(
             self._text_endpoint(),
             headers={
@@ -2691,7 +2722,7 @@ class RewriteService:
                 "messages": [
                     {
                         "role": "system",
-                        "content": self._text_system_prompt_with_safety_rules(),
+                        "content": system_prompt,
                     },
                     {"role": "user", "content": user_prompt},
                 ],
@@ -2947,6 +2978,20 @@ class RewriteService:
                 lines.append(f"  - 点赞数：{liked}")
             if note_url:
                 lines.append(f"  - 原始链接：{note_url}")
+        text_prompts = self._last_text_model_prompts if isinstance(self._last_text_model_prompts, dict) else {}
+        lines.extend([
+            "",
+            "## 文案模型提示词",
+            "",
+            "### 系统提示词",
+            "",
+            *self._markdown_code_block(str(text_prompts.get("system_prompt") or "")),
+            "",
+            "### 用户提示词",
+            "",
+            *self._markdown_code_block(str(text_prompts.get("user_prompt") or "")),
+            "",
+        ])
         lines.extend([
             "",
             "## 输出文件",
@@ -3832,10 +3877,12 @@ class JobManager:
         topic_label = rewrite_requirements_label(topic_text)
         config_snapshot.setdefault("rewrite", {})["topic"] = topic_text
         target_names = [target.get("name") or Path(target.get("path", "")).name for target in normalized_targets]
+        target_roots = sorted({normalize_rewrite_target_root(target.get("root")) for target in normalized_targets})
         summary = summarize_config(config_snapshot)
         summary.update({
             "target_count": len(normalized_targets),
             "target_names": target_names[:5],
+            "target_roots": target_roots,
             "rewrite_topic": topic_label,
         })
 
@@ -4147,12 +4194,21 @@ class JobManager:
         rewrite_config = dict(config.get("rewrite", {}) if isinstance(config.get("rewrite"), dict) else {})
         rewrite_config["topic"] = topic
         rewrite_config["_memory"] = config.get("memory", {})
-        service = RewriteService(
-            resolve_output_root(config),
-            resolve_rewrite_output_root(config),
-            rewrite_config,
-            cancel_event=cancel_event,
-        )
+        rewrite_root = resolve_rewrite_output_root(config)
+        rewrite_services: Dict[str, RewriteService] = {}
+
+        def service_for_target(root: Any) -> RewriteService:
+            normalized_root = normalize_rewrite_target_root(root)
+            if normalized_root not in rewrite_services:
+                source_root = rewrite_root if normalized_root == "rewrite" else resolve_output_root(config)
+                rewrite_services[normalized_root] = RewriteService(
+                    source_root,
+                    rewrite_root,
+                    rewrite_config,
+                    cancel_event=cancel_event,
+                    allow_plain_markdown_sources=normalized_root == "rewrite",
+                )
+            return rewrite_services[normalized_root]
 
         try:
             check_cancel_requested(cancel_event)
@@ -4168,13 +4224,15 @@ class JobManager:
                 check_cancel_requested(cancel_event)
                 target_path = target["path"]
                 target_name = target.get("name") or Path(target_path).name
-                item = {"path": target_path, "name": target_name}
+                target_root = normalize_rewrite_target_root(target.get("root"))
+                action_label = "二次仿写" if target_root == "rewrite" else "仿写"
+                item = {"path": target_path, "name": target_name, "source_root": target_root}
 
                 with self.lock:
                     job = self._find_job_unlocked(job_id)
                     if job:
-                        self._append_job_log_unlocked(job, f"开始仿写 {index}/{total}：{target_name}", "rewrite")
-                        self._set_rewrite_item_progress_unlocked(job, index, total, "开始仿写", "rewriting")
+                        self._append_job_log_unlocked(job, f"开始{action_label} {index}/{total}：{target_name}", "rewrite")
+                        self._set_rewrite_item_progress_unlocked(job, index, total, f"开始{action_label}", "rewriting")
                         self._persist_unlocked()
 
                 def progress(message: str, item_index: int = index) -> None:
@@ -4188,7 +4246,7 @@ class JobManager:
                         self._persist_unlocked()
 
                 try:
-                    rewrite_result = service.rewrite_note(target_path, topic=topic, progress=progress)
+                    rewrite_result = service_for_target(target_root).rewrite_note(target_path, topic=topic, progress=progress)
                     check_cancel_requested(cancel_event)
                     item.update({
                         "root": rewrite_result.get("root") or "rewrite",
@@ -4206,7 +4264,7 @@ class JobManager:
                         job = self._find_job_unlocked(job_id)
                         if job:
                             job["result"] = deepcopy(result)
-                            self._append_job_log_unlocked(job, f"单篇仿写完成 {index}/{total}：{target_name}", "rewrite")
+                            self._append_job_log_unlocked(job, f"单篇{action_label}完成 {index}/{total}：{target_name}", "rewrite")
                             self._set_job_progress_unlocked(
                                 job,
                                 round((index / total) * 100),
@@ -4227,7 +4285,7 @@ class JobManager:
                         job = self._find_job_unlocked(job_id)
                         if job:
                             job["result"] = deepcopy(result)
-                            self._append_job_log_unlocked(job, f"单篇仿写失败 {index}/{total}：{target_name}，{exc}", "rewrite")
+                            self._append_job_log_unlocked(job, f"单篇{action_label}失败 {index}/{total}：{target_name}，{exc}", "rewrite")
                             self._set_job_progress_unlocked(
                                 job,
                                 round((index / total) * 100),
@@ -4376,17 +4434,21 @@ class JobManager:
             if isinstance(item, str):
                 raw_path = item
                 raw_name = ""
+                raw_root = "crawl"
             elif isinstance(item, dict):
                 raw_path = item.get("path") or ""
                 raw_name = item.get("name") or ""
+                raw_root = item.get("root") or item.get("source_root") or "crawl"
             else:
                 continue
             path = str(raw_path).strip()
-            if not path or path in seen:
+            root = normalize_rewrite_target_root(raw_root)
+            key = (root, path)
+            if not path or key in seen:
                 continue
-            seen.add(path)
+            seen.add(key)
             name = str(raw_name).strip()[:120] or Path(path).name
-            normalized.append({"path": path, "name": name})
+            normalized.append({"path": path, "name": name, "root": root})
         if not normalized:
             raise ValueError("请选择要仿写的笔记")
         return normalized
@@ -4811,10 +4873,13 @@ def list_output_files(
         if child.is_dir() and not has_visible_output_content(child, hide_rewrite_auxiliary):
             continue
         stat = child.stat()
-        rewriteable = bool(resolve_note_reference_path(child)) and (
-            child.is_dir()
-            or (child.is_file() and child.suffix.lower() in [".md", ".markdown"])
-        )
+        if hide_rewrite_auxiliary:
+            rewriteable = child.is_file() and is_recent_rewrite_markdown_file(child)
+        else:
+            rewriteable = bool(resolve_note_reference_path(child)) and (
+                child.is_dir()
+                or (child.is_file() and child.suffix.lower() in [".md", ".markdown"])
+            )
         sortable_entries.append({
             "is_file": child.is_file(),
             "modified_ts": stat.st_mtime,
@@ -4896,7 +4961,11 @@ def summarize_recent_markdown_file(path: Path, output_root: Path, kind: str) -> 
         "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
         "modified_ts": stat.st_mtime,
         "previewable": True,
-        "rewriteable": kind == "crawled" and bool(resolve_note_reference_path(path)),
+        "rewriteable": (
+            bool(resolve_note_reference_path(path))
+            if kind == "crawled"
+            else is_recent_rewrite_markdown_file(path)
+        ),
     }
 
 

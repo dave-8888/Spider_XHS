@@ -906,7 +906,10 @@ async function api(url, options = {}) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.success === false) {
-    throw new Error(data.message || `请求失败：${response.status}`);
+    const error = new Error(data.message || `请求失败：${response.status}`);
+    error.status = response.status;
+    error.data = data;
+    throw error;
   }
   return data;
 }
@@ -921,7 +924,7 @@ function fileRootLabel(root = state.currentFileRoot) {
 
 function fileRootDescription(root = state.currentFileRoot) {
   return normalizeFileRoot(root) === 'rewrite'
-    ? 'AI 仿写文案、分析报告与生成素材。'
+    ? 'AI 仿写文案、分析报告、生成素材与二次仿写。'
     : '采集结果、素材与 Markdown 预览。';
 }
 
@@ -2417,6 +2420,31 @@ function truncateText(value, maxLength = 84) {
   const text = String(value || '').trim();
   if (text.length <= maxLength) return text;
   return `${text.slice(0, maxLength - 1)}…`;
+}
+
+function rewriteConflictError(error) {
+  const conflicts = Array.isArray(error?.data?.conflicts) ? error.data.conflicts : [];
+  return error?.status === 409 && conflicts.length ? conflicts : [];
+}
+
+function formatRewriteConflictMessage(conflicts = []) {
+  const lines = conflicts.slice(0, 6).map((conflict, index) => {
+    const field = conflict.field || '冲突信息';
+    const reason = conflict.reason || '已有配置可能影响本次仿写';
+    const current = truncateText(conflict.current || '未明确填写', 72);
+    const existing = truncateText(conflict.existing || '旧配置', 72);
+    const source = conflict.source || '已有配置';
+    return `${index + 1}. ${field}：${reason}\n当前：${current}\n已有：${existing}\n来源：${source}`;
+  });
+  const extra = conflicts.length > lines.length ? `\n\n还有 ${conflicts.length - lines.length} 条类似提醒。` : '';
+  return [
+    '本次弹窗仿写要求可能和旧创作画像或默认要求冲突。',
+    '',
+    ...lines,
+    extra,
+    '',
+    '继续后会让本次弹窗要求优先，旧画像只保留语气、人设和写作习惯。是否继续？',
+  ].filter((line) => line !== '').join('\n');
 }
 
 const JOB_LOG_GROUPS = {
@@ -4344,29 +4372,35 @@ function previewRewriteDefaultTopic() {
   return (state.config?.rewrite?.topic || '创业沙龙').trim() || '创业沙龙';
 }
 
-function recentCrawledMarkdownEntry(path = '') {
+function recentMarkdownEntry(path = '', root = 'crawl') {
   const normalizedPath = normalizeFilePath(path);
   if (!normalizedPath) return null;
-  return (state.recentMarkdown.crawled || [])
-    .find((item) => normalizeFileRoot(item.root) === 'crawl' && normalizeFilePath(item.path || '') === normalizedPath) || null;
+  const normalizedRoot = normalizeFileRoot(root);
+  const items = normalizedRoot === 'rewrite' ? state.recentMarkdown.rewritten : state.recentMarkdown.crawled;
+  return (items || [])
+    .find((item) => normalizeFileRoot(item.root) === normalizedRoot && normalizeFilePath(item.path || '') === normalizedPath) || null;
 }
 
 function currentPreviewRewriteTarget() {
   const path = normalizeFilePath(state.currentPreviewPath);
   if (!path) return null;
-  if (state.currentPreviewRoot !== 'crawl') return null;
+  const root = normalizeFileRoot(state.currentPreviewRoot);
 
-  const entry = state.currentFileEntries.get(path);
+  const entry = normalizeFileRoot(state.currentPreviewRoot) === normalizeFileRoot(state.currentFileRoot)
+    ? state.currentFileEntries.get(path)
+    : null;
   if (entry?.rewriteable) {
     return {
+      root,
       path,
       name: entry.name || fileBaseName(path),
     };
   }
 
-  const recentEntry = recentCrawledMarkdownEntry(path);
+  const recentEntry = recentMarkdownEntry(path, root);
   if (recentEntry?.rewriteable) {
     return {
+      root,
       path,
       name: recentEntry.name || fileBaseName(path),
     };
@@ -4404,7 +4438,9 @@ function updatePreviewRewriteState() {
     homeEls.previewRewriteBtn.disabled = disabled;
     homeEls.previewRewriteBtn.classList.toggle('is-active', state.previewRewriteOpen);
     homeEls.previewRewriteBtn.setAttribute('aria-expanded', state.previewRewriteOpen ? 'true' : 'false');
-    homeEls.previewRewriteBtn.title = target ? '仿写当前预览' : '当前预览不可仿写';
+    homeEls.previewRewriteBtn.title = target
+      ? (target.root === 'rewrite' ? '二次仿写当前预览' : '仿写当前预览')
+      : '当前预览不可仿写';
   }
   if (homeEls.previewRewriteName) {
     homeEls.previewRewriteName.textContent = target?.name || '当前预览';
@@ -4414,7 +4450,9 @@ function updatePreviewRewriteState() {
   }
   if (homeEls.submitPreviewRewriteBtn) {
     homeEls.submitPreviewRewriteBtn.disabled = disabled;
-    homeEls.submitPreviewRewriteBtn.textContent = state.rewriteBusy ? '启动中...' : '开始仿写';
+    homeEls.submitPreviewRewriteBtn.textContent = state.rewriteBusy
+      ? '启动中...'
+      : (target?.root === 'rewrite' ? '开始二次仿写' : '开始仿写');
   }
   if (homeEls.cancelPreviewRewriteBtn) {
     homeEls.cancelPreviewRewriteBtn.disabled = busy;
@@ -4470,7 +4508,8 @@ async function submitPreviewRewrite() {
     }
   }
 
-  await rewriteEntries([target], { topic });
+  const started = await rewriteEntries([target], { topic, topicSource: 'preview_popup' });
+  if (started === false) return;
   closePreviewRewritePopover({ restoreFocus: true });
 }
 
@@ -4658,8 +4697,9 @@ function renderRecentMarkdownList(type, items = []) {
       item.modified ? compactTime(item.modified) : '',
       sizeText(Number(item.size) || 0),
     ].filter(Boolean);
+    const rewriteLabel = root === 'rewrite' ? '二次仿写' : '仿写';
     const rewriteButton = item.rewriteable ? `
-      <button class="btn btn-ghost md-quick-action md-quick-rewrite" data-action="rewrite" data-path="${escapeHtml(path)}" data-name="${escapeHtml(name)}" type="button" title="仿写" aria-label="仿写 ${escapeHtml(name)}">
+      <button class="btn btn-ghost md-quick-action md-quick-rewrite" data-action="rewrite" data-root="${escapeHtml(root)}" data-path="${escapeHtml(path)}" data-name="${escapeHtml(name)}" type="button" title="${rewriteLabel}" aria-label="${rewriteLabel} ${escapeHtml(name)}">
         ${iconSvg('rewrite')}
       </button>
     ` : '';
@@ -4699,7 +4739,7 @@ function renderRecentMarkdownList(type, items = []) {
           return;
         }
         if (action === 'rewrite') {
-          await rewriteEntry(path, button.dataset.name || fileBaseName(path));
+          await rewriteEntry(path, button.dataset.name || fileBaseName(path), { root });
         }
       } catch (error) {
         toast(error.message);
@@ -5085,11 +5125,12 @@ function selectAllVisibleFiles() {
 }
 
 function selectedRewriteableEntries() {
-  if (state.currentFileRoot !== 'crawl') return [];
+  const root = normalizeFileRoot(state.currentFileRoot);
   return Array.from(state.selectedFilePaths)
     .map((path) => state.currentFileEntries.get(path))
     .filter((entry) => entry?.path && entry.rewriteable)
     .map((entry) => ({
+      root,
       path: entry.path,
       name: entry.name || fileBaseName(entry.path),
     }));
@@ -5357,7 +5398,11 @@ async function commitInlineRename(path, name = '', currentName = '') {
 }
 
 async function rewriteEntry(path, name = '', options = {}) {
-  await rewriteEntries([{ path, name: name || fileBaseName(path) }], options);
+  await rewriteEntries([{
+    root: normalizeFileRoot(options.root || state.currentFileRoot),
+    path,
+    name: name || fileBaseName(path),
+  }], options);
 }
 
 async function rewriteSelectedEntries() {
@@ -5369,40 +5414,71 @@ async function rewriteSelectedEntries() {
   await rewriteEntries(entries, { confirmBulk: true });
 }
 
-async function rewriteEntries(entries, { confirmBulk = false, topic: topicOverride = '' } = {}) {
+async function rewriteEntries(
+  entries,
+  {
+    confirmBulk = false,
+    topic: topicOverride = '',
+    topicSource = '',
+    confirmedConflicts = false,
+  } = {},
+) {
   const targets = (entries || [])
     .map((entry) => ({
+      root: normalizeFileRoot(entry.root || state.currentFileRoot),
       path: normalizeFilePath(entry.path || ''),
       name: String(entry.name || '').trim(),
     }))
     .filter((entry) => entry.path);
-  if (!targets.length || state.rewriteBusy) return;
-  if (confirmBulk && targets.length > 1 && !window.confirm(`确定对已选 ${targets.length} 篇笔记执行 AI 仿写吗？`)) {
-    return;
+  if (!targets.length || state.rewriteBusy) return false;
+  const rewriteActionLabel = targets.every((target) => target.root === 'rewrite') ? '二次仿写' : 'AI 仿写';
+  if (confirmBulk && targets.length > 1 && !window.confirm(`确定对已选 ${targets.length} 篇笔记执行${rewriteActionLabel}吗？`)) {
+    return false;
   }
 
   const topic = (topicOverride || state.config?.rewrite?.topic || '创业沙龙').trim() || '创业沙龙';
+  let conflictsConfirmed = Boolean(confirmedConflicts);
   state.rewriteBusy = true;
   updateFileToolbarState();
   updatePreviewRewriteState();
   if (state.currentFiles) renderFiles(state.currentFiles);
 
   try {
-    toast(targets.length > 1 ? `正在创建 AI 仿写任务：${targets.length} 篇` : `正在创建 AI 仿写任务：${targets[0].name || fileBaseName(targets[0].path)}`);
-    const data = await api('/api/rewrite-job', {
-      method: 'POST',
-      body: JSON.stringify({ targets, topic }),
-    });
-    const jobId = data.job?.id || '';
-    if (homeEls.jobList) {
-      await loadJobs();
+    while (true) {
+      toast(targets.length > 1 ? `正在创建${rewriteActionLabel}任务：${targets.length} 篇` : `正在创建${rewriteActionLabel}任务：${targets[0].name || fileBaseName(targets[0].path)}`);
+      try {
+        const payload = { targets, topic };
+        if (topicSource) payload.topic_source = topicSource;
+        if (conflictsConfirmed) payload.confirmed_conflicts = true;
+        const data = await api('/api/rewrite-job', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        const jobId = data.job?.id || '';
+        if (homeEls.jobList) {
+          await loadJobs();
+        }
+        if (jobId && homeEls.jobList) {
+          await waitForJobCard(jobId);
+          highlightJobCard(jobId);
+          scrollToJobCard(jobId);
+        }
+        toast(jobId ? `${rewriteActionLabel}任务已启动：${jobId}` : `${rewriteActionLabel}任务已启动`);
+        return true;
+      } catch (error) {
+        const conflicts = rewriteConflictError(error);
+        if (topicSource === 'preview_popup' && conflicts.length && !conflictsConfirmed) {
+          if (!window.confirm(formatRewriteConflictMessage(conflicts))) {
+            toast(`已取消本次${rewriteActionLabel}`);
+            return false;
+          }
+          conflictsConfirmed = true;
+          toast('已确认冲突，正在重新创建任务');
+          continue;
+        }
+        throw error;
+      }
     }
-    if (jobId && homeEls.jobList) {
-      await waitForJobCard(jobId);
-      highlightJobCard(jobId);
-      scrollToJobCard(jobId);
-    }
-    toast(jobId ? `AI 仿写任务已启动：${jobId}` : 'AI 仿写任务已启动');
   } finally {
     state.rewriteBusy = false;
     updateFileToolbarState();
@@ -5507,11 +5583,12 @@ function renderFileActionMenu(entry, previewMode, detailOpen, disabledAttr = '')
     },
   ];
 
-  if (entry.rewriteable && state.currentFileRoot === 'crawl') {
+  if (entry.rewriteable) {
+    const rewriteLabel = state.currentFileRoot === 'rewrite' ? '二次仿写' : '仿写';
     actions.push({
       action: 'rewrite',
       icon: 'rewrite',
-      label: '仿写',
+      label: rewriteLabel,
       className: 'file-rewrite-btn',
       attrs: `data-name="${escapeHtml(entry.name)}"`,
     });
