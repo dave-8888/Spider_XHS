@@ -38,6 +38,7 @@ from collector_service import (
     safe_output_path,
     save_output_markdown_file,
 )
+from hermes_runtime import HermesRuntime
 from runtime_paths import DATA_ROOT, RESOURCE_ROOT, WEB_ROOT, is_desktop_mode
 
 HOST = "127.0.0.1"
@@ -612,6 +613,7 @@ def run_manual_rewrite(payload: Dict[str, Any]) -> Dict[str, Any]:
         rewrite_config["topic"] = topic
     if "generate_images" in payload:
         rewrite_config["generate_images"] = bool(payload.get("generate_images"))
+    rewrite_config["_memory"] = config.get("memory", {})
     service = RewriteService(resolve_output_root(config), resolve_rewrite_output_root(config), rewrite_config)
     return service.rewrite_note(relative_path, topic=topic)
 
@@ -626,6 +628,20 @@ def run_manual_rewrite_job(payload: Dict[str, Any]) -> Dict[str, Any]:
     rewrite_config = config.get("rewrite", {}) if isinstance(config.get("rewrite"), dict) else {}
     topic = str(payload.get("topic") or rewrite_config.get("topic") or "创业沙龙").strip() or "创业沙龙"
     return job_manager.start_rewrite(raw_targets, topic=topic, config=config)
+
+
+def sync_profile_memory(config: Dict[str, Any]) -> None:
+    try:
+        rewrite = config.get("rewrite", {}) if isinstance(config.get("rewrite"), dict) else {}
+        profile = rewrite.get("creator_profile") if isinstance(rewrite.get("creator_profile"), dict) else {}
+        if profile:
+            HermesRuntime(config).sync_profile(profile)
+    except Exception as exc:
+        logger.warning(f"Hermes 创作画像同步失败：{exc}")
+
+
+def memory_runtime() -> HermesRuntime:
+    return HermesRuntime(config_store.load())
 
 
 class AppHandler(BaseHTTPRequestHandler):
@@ -659,6 +675,23 @@ class AppHandler(BaseHTTPRequestHandler):
                 json_response(self, {"success": True, "config": config_store.public()})
             elif path == "/api/jobs":
                 json_response(self, {"success": True, "jobs": job_manager.list_jobs()})
+            elif path == "/api/memory/status":
+                runtime = memory_runtime()
+                json_response(self, {"success": True, "memory": runtime.status(), "disabled": not runtime.enabled})
+            elif path == "/api/memory/list":
+                runtime = memory_runtime()
+                if not runtime.enabled:
+                    json_response(self, {"success": True, "disabled": True, "memory": runtime.status()})
+                else:
+                    target = query.get("target", ["memory"])[0]
+                    json_response(self, {"success": True, "memory": runtime.list_memory(target)})
+            elif path == "/api/memory/search":
+                runtime = memory_runtime()
+                if not runtime.enabled:
+                    json_response(self, {"success": True, "disabled": True, "memory": runtime.status(), "results": []})
+                else:
+                    q = query.get("q", [""])[0]
+                    json_response(self, {"success": True, "memory": runtime.search(q)})
             elif path == "/api/files":
                 rel = query.get("path", [""])[0]
                 root = normalize_file_root(query.get("root", ["crawl"])[0])
@@ -716,7 +749,8 @@ class AppHandler(BaseHTTPRequestHandler):
         try:
             payload = read_body(self)
             if path == "/api/config":
-                config_store.save(payload)
+                saved_config = config_store.save(payload)
+                sync_profile_memory(saved_config)
                 json_response(self, {"success": True, "config": config_store.public()})
             elif path == "/api/schedule":
                 config_store.save({"schedule": payload})
@@ -735,16 +769,60 @@ class AppHandler(BaseHTTPRequestHandler):
             elif path == "/api/file/save":
                 root = normalize_file_root(payload.get("root"))
                 config = config_store.load()
+                relative_path = str(payload.get("path") or "")
+                output_root = resolve_file_output_root(config, root)
+                old_content = ""
+                try:
+                    old_target = safe_output_path(output_root, relative_path)
+                    if old_target.exists() and old_target.is_file():
+                        old_content = old_target.read_text(encoding="utf-8")
+                except Exception:
+                    old_content = ""
                 file_info = save_output_markdown_file(
-                    resolve_file_output_root(config, root),
-                    str(payload.get("path") or ""),
+                    output_root,
+                    relative_path,
                     payload.get("content"),
                 )
                 file_info["root"] = root
+                try:
+                    HermesRuntime(config).sync_edit_feedback(
+                        f"{root}:{file_info.get('path') or relative_path}",
+                        old_content,
+                        payload.get("content"),
+                    )
+                except Exception as exc:
+                    logger.warning(f"Hermes 改稿记忆同步失败：{exc}")
                 json_response(self, {
                     "success": True,
                     "file": file_info,
                 })
+            elif path == "/api/memory/add":
+                runtime = memory_runtime()
+                if not runtime.enabled:
+                    json_response(self, {"success": True, "disabled": True, "memory": runtime.status()})
+                else:
+                    json_response(self, {"success": True, "memory": runtime.add(payload.get("target", "memory"), payload.get("content"))})
+            elif path == "/api/memory/replace":
+                runtime = memory_runtime()
+                if not runtime.enabled:
+                    json_response(self, {"success": True, "disabled": True, "memory": runtime.status()})
+                else:
+                    json_response(self, {"success": True, "memory": runtime.replace(payload.get("target", "memory"), payload.get("old_text"), payload.get("content"))})
+            elif path == "/api/memory/remove":
+                runtime = memory_runtime()
+                if not runtime.enabled:
+                    json_response(self, {"success": True, "disabled": True, "memory": runtime.status()})
+                else:
+                    json_response(self, {"success": True, "memory": runtime.remove(payload.get("target", "memory"), payload.get("old_text"))})
+            elif path == "/api/memory/sync-profile":
+                config = config_store.load()
+                runtime = HermesRuntime(config)
+                if not runtime.enabled:
+                    json_response(self, {"success": True, "disabled": True, "memory": runtime.status()})
+                else:
+                    rewrite = config.get("rewrite", {}) if isinstance(config.get("rewrite"), dict) else {}
+                    profile = rewrite.get("creator_profile") if isinstance(rewrite.get("creator_profile"), dict) else {}
+                    json_response(self, {"success": True, "memory": runtime.sync_profile(profile), "status": runtime.status()})
             elif path == "/api/jobs/delete":
                 json_response(self, {
                     "success": True,

@@ -49,6 +49,10 @@
         "to": "resources_bundle/config"
       },
       {
+        "from": "vendor",
+        "to": "resources_bundle/vendor"
+      },
+      {
         "from": "build/backend",
         "to": "backend"
       },

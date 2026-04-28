@@ -76,7 +76,10 @@ const homeEls = {
   markdownImageLightbox: document.querySelector('#markdownImageLightbox'),
   markdownImageLightboxImg: document.querySelector('#markdownImageLightboxImg'),
   markdownImageLightboxTitle: document.querySelector('#markdownImageLightboxTitle'),
+  markdownImageLightboxCounter: document.querySelector('#markdownImageLightboxCounter'),
   markdownImageLightboxStatus: document.querySelector('#markdownImageLightboxStatus'),
+  prevMarkdownImageLightboxBtn: document.querySelector('#prevMarkdownImageLightboxBtn'),
+  nextMarkdownImageLightboxBtn: document.querySelector('#nextMarkdownImageLightboxBtn'),
   closeMarkdownImageLightboxBtn: document.querySelector('#closeMarkdownImageLightboxBtn'),
   fileSelectionWrap: document.querySelector('#fileSelectionWrap'),
   fileSelectionSummary: document.querySelector('#fileSelectionSummary'),
@@ -123,10 +126,39 @@ const settingsEls = {
   rewriteProfileSamplesInput: document.querySelector('#rewriteProfileSamplesInput'),
   rewriteProfileInputs: Array.from(document.querySelectorAll('[data-rewrite-profile-input]')),
   rewriteTextModelInput: document.querySelector('#rewriteTextModelInput'),
+  rewriteVisionModelInput: document.querySelector('#rewriteVisionModelInput'),
+  rewriteAnalyzeImagesInput: document.querySelector('#rewriteAnalyzeImagesInput'),
+  rewriteVisionImageLimitInput: document.querySelector('#rewriteVisionImageLimitInput'),
   rewriteImageModelInput: document.querySelector('#rewriteImageModelInput'),
   rewriteRegionInput: document.querySelector('#rewriteRegionInput'),
   rewriteGenerateImagesInput: document.querySelector('#rewriteGenerateImagesInput'),
   rewriteApiStatus: document.querySelector('#rewriteApiStatus'),
+  memoryEnabledInput: document.querySelector('#memoryEnabledInput'),
+  memoryHermesHomeInput: document.querySelector('#memoryHermesHomeInput'),
+  memorySessionSearchInput: document.querySelector('#memorySessionSearchInput'),
+  memoryWriteCollectInput: document.querySelector('#memoryWriteCollectInput'),
+  memoryWriteRewriteInput: document.querySelector('#memoryWriteRewriteInput'),
+  memoryWriteEditInput: document.querySelector('#memoryWriteEditInput'),
+  memoryTopKInput: document.querySelector('#memoryTopKInput'),
+  memoryStatus: document.querySelector('#memoryStatus'),
+  memoryAdvancedSummary: document.querySelector('#memoryAdvancedSummary'),
+  memorySyncProfileBtn: document.querySelector('#memorySyncProfileBtn'),
+  memoryRefreshBtn: document.querySelector('#memoryRefreshBtn'),
+  memoryTargetInput: document.querySelector('#memoryTargetInput'),
+  memoryList: document.querySelector('#memoryList'),
+  memorySearchInput: document.querySelector('#memorySearchInput'),
+  memorySearchBtn: document.querySelector('#memorySearchBtn'),
+  memorySearchResults: document.querySelector('#memorySearchResults'),
+  memoryAddTargetInput: document.querySelector('#memoryAddTargetInput'),
+  memoryAddContentInput: document.querySelector('#memoryAddContentInput'),
+  memoryAddBtn: document.querySelector('#memoryAddBtn'),
+  memoryReplaceTargetInput: document.querySelector('#memoryReplaceTargetInput'),
+  memoryReplaceOldInput: document.querySelector('#memoryReplaceOldInput'),
+  memoryReplaceContentInput: document.querySelector('#memoryReplaceContentInput'),
+  memoryReplaceBtn: document.querySelector('#memoryReplaceBtn'),
+  memoryRemoveTargetInput: document.querySelector('#memoryRemoveTargetInput'),
+  memoryRemoveOldInput: document.querySelector('#memoryRemoveOldInput'),
+  memoryRemoveBtn: document.querySelector('#memoryRemoveBtn'),
   saveConfigBtn: document.querySelector('#saveConfigBtn'),
   checkLoginBtn: document.querySelector('#checkLoginBtn'),
   openLoginBrowserBtn: document.querySelector('#openLoginBrowserBtn'),
@@ -174,6 +206,8 @@ const state = {
   previewRewriteOpen: false,
   previewRewritePath: '',
   markdownImageLightboxPreviousFocus: null,
+  markdownImageLightboxItems: [],
+  markdownImageLightboxIndex: -1,
   jobPoller: null,
   loginPoller: null,
   homeFilters: {
@@ -1067,12 +1101,205 @@ function applyRewriteSummary(config) {
   const source = rewrite.api_key_source ? ` · 来源：${rewrite.api_key_source}` : '';
   const preview = rewrite.api_key_preview ? ` · ${rewrite.api_key_preview}` : '';
   const textModel = rewrite.text_model || 'qwen-plus';
+  const visionModel = rewrite.analyze_images === false ? '不识别图片' : (rewrite.vision_model || 'qwen3-vl-plus');
   const imageModel = rewrite.image_model || 'wan2.6-image';
   const message = rewrite.api_key_present
-    ? `模型配置可用${source}${preview} · ${textModel} / ${imageModel} · 默认要求：${truncateText(requirement, 36)}`
+    ? `模型配置可用${source}${preview} · ${textModel} / ${visionModel} / ${imageModel} · 默认要求：${truncateText(requirement, 36)}`
     : '未配置 DashScope API Key，仿写接口会等待模型密钥';
   settingsEls.rewriteApiStatus.textContent = message;
   settingsEls.rewriteApiStatus.className = `status-panel ${rewrite.api_key_present ? 'good' : 'muted'}`;
+}
+
+function applyMemoryConfig(config) {
+  const memory = config.memory || {};
+  if (settingsEls.memoryEnabledInput) settingsEls.memoryEnabledInput.checked = Boolean(memory.enabled);
+  if (settingsEls.memoryHermesHomeInput) settingsEls.memoryHermesHomeInput.value = memory.hermes_home || '';
+  if (settingsEls.memorySessionSearchInput) settingsEls.memorySessionSearchInput.checked = memory.session_search_enabled !== false;
+  if (settingsEls.memoryWriteCollectInput) settingsEls.memoryWriteCollectInput.checked = memory.write_after_collect !== false;
+  if (settingsEls.memoryWriteRewriteInput) settingsEls.memoryWriteRewriteInput.checked = memory.write_after_rewrite !== false;
+  if (settingsEls.memoryWriteEditInput) settingsEls.memoryWriteEditInput.checked = memory.write_after_edit !== false;
+  if (settingsEls.memoryTopKInput) settingsEls.memoryTopKInput.value = memory.top_k || 8;
+  updateMemoryAdvancedSummary();
+  updateMemoryStatusPanel(config);
+}
+
+function updateMemoryAdvancedSummary() {
+  if (!settingsEls.memoryAdvancedSummary) return;
+  const customHome = (settingsEls.memoryHermesHomeInput?.value || '').trim();
+  settingsEls.memoryAdvancedSummary.textContent = customHome ? '自定义存储位置' : '使用默认存储位置';
+}
+
+function updateMemoryStatusPanel(config = state.config || {}) {
+  if (!settingsEls.memoryStatus) return;
+  const memory = config.memory || {};
+  const message = memory.enabled
+    ? '记忆已开启 · 可自动写入创作画像、项目记忆和历史摘要'
+    : '记忆未开启 · 开启后才会写入记忆文件和会话库';
+  settingsEls.memoryStatus.textContent = message;
+  settingsEls.memoryStatus.className = `status-panel ${memory.enabled ? 'good' : 'muted'}`;
+}
+
+function readMemoryDraft() {
+  return {
+    enabled: Boolean(settingsEls.memoryEnabledInput?.checked),
+    hermes_home: (settingsEls.memoryHermesHomeInput?.value || '').trim(),
+    session_search_enabled: settingsEls.memorySessionSearchInput?.checked !== false,
+    write_after_collect: settingsEls.memoryWriteCollectInput?.checked !== false,
+    write_after_rewrite: settingsEls.memoryWriteRewriteInput?.checked !== false,
+    write_after_edit: settingsEls.memoryWriteEditInput?.checked !== false,
+    top_k: toNumber(settingsEls.memoryTopKInput?.value, 8),
+  };
+}
+
+function renderMemoryEntries(data) {
+  if (!settingsEls.memoryList) return;
+  if (data?.disabled) {
+    settingsEls.memoryList.innerHTML = '<div class="empty-state">记忆功能未开启</div>';
+    return;
+  }
+  const entries = data?.memory?.entries || [];
+  if (!entries.length) {
+    settingsEls.memoryList.innerHTML = '<div class="empty-state">暂无记忆</div>';
+    return;
+  }
+  settingsEls.memoryList.innerHTML = entries.map((entry) => `
+    <article class="memory-entry">
+      <div class="memory-entry-head">
+        <strong>${escapeHtml(String(entry.index + 1).padStart(2, '0'))}</strong>
+        <span>${escapeHtml(String(entry.chars || 0))} 字</span>
+      </div>
+      <p>${escapeHtml(entry.content || '')}</p>
+    </article>
+  `).join('');
+}
+
+function renderMemorySearchResults(data) {
+  if (!settingsEls.memorySearchResults) return;
+  if (data?.disabled) {
+    settingsEls.memorySearchResults.innerHTML = '<div class="empty-state">记忆功能未开启</div>';
+    return;
+  }
+  const results = data?.memory?.results || [];
+  if (!results.length) {
+    settingsEls.memorySearchResults.innerHTML = '<div class="empty-state">没有匹配结果</div>';
+    return;
+  }
+  settingsEls.memorySearchResults.innerHTML = results.map((item) => `
+    <article class="memory-entry">
+      <div class="memory-entry-head">
+        <strong>${escapeHtml(item.type || 'memory')}</strong>
+        <span>${escapeHtml(item.target || '')}${item.created_at ? ` · ${escapeHtml(item.created_at)}` : ''}</span>
+      </div>
+      <p>${escapeHtml(item.content || '')}</p>
+    </article>
+  `).join('');
+}
+
+async function refreshMemoryStatus() {
+  if (!settingsEls.memoryStatus) return;
+  const data = await api('/api/memory/status');
+  const memory = data.memory || {};
+  const counts = memory.memory_counts || {};
+  const countText = memory.enabled
+    ? ` · MEMORY ${counts.memory || 0} 条 / USER ${counts.user || 0} 条`
+    : '';
+  const synced = memory.last_synced_at ? ` · 最近同步：${memory.last_synced_at}` : '';
+  settingsEls.memoryStatus.textContent = `${memory.message || 'Hermes 状态未知'}${countText}${synced}`;
+  settingsEls.memoryStatus.className = `status-panel ${memory.enabled && memory.available ? 'good' : (memory.enabled ? 'bad' : 'muted')}`;
+}
+
+async function loadMemoryList() {
+  const target = settingsEls.memoryTargetInput?.value || 'memory';
+  const data = await api(`/api/memory/list?target=${encodeURIComponent(target)}`);
+  renderMemoryEntries(data);
+  await refreshMemoryStatus();
+}
+
+async function searchMemory() {
+  const query = (settingsEls.memorySearchInput?.value || '').trim();
+  const data = await api(`/api/memory/search?q=${encodeURIComponent(query)}`);
+  renderMemorySearchResults(data);
+}
+
+async function addMemoryEntry() {
+  const content = (settingsEls.memoryAddContentInput?.value || '').trim();
+  if (!content) {
+    toast('请输入要新增的记忆');
+    return;
+  }
+  const data = await api('/api/memory/add', {
+    method: 'POST',
+    body: JSON.stringify({
+      target: settingsEls.memoryAddTargetInput?.value || 'memory',
+      content,
+    }),
+  });
+  if (data.disabled) {
+    toast('记忆功能未开启');
+    await refreshMemoryStatus();
+    return;
+  }
+  if (settingsEls.memoryAddContentInput) settingsEls.memoryAddContentInput.value = '';
+  await loadMemoryList();
+  toast('记忆已新增');
+}
+
+async function replaceMemoryEntry() {
+  const oldText = (settingsEls.memoryReplaceOldInput?.value || '').trim();
+  const content = (settingsEls.memoryReplaceContentInput?.value || '').trim();
+  if (!oldText || !content) {
+    toast('请输入原片段和新记忆');
+    return;
+  }
+  const data = await api('/api/memory/replace', {
+    method: 'POST',
+    body: JSON.stringify({
+      target: settingsEls.memoryReplaceTargetInput?.value || 'memory',
+      old_text: oldText,
+      content,
+    }),
+  });
+  if (data.disabled) {
+    toast('记忆功能未开启');
+    await refreshMemoryStatus();
+    return;
+  }
+  await loadMemoryList();
+  toast('记忆已替换');
+}
+
+async function removeMemoryEntry() {
+  const oldText = (settingsEls.memoryRemoveOldInput?.value || '').trim();
+  if (!oldText) {
+    toast('请输入要删除的记忆片段');
+    return;
+  }
+  const data = await api('/api/memory/remove', {
+    method: 'POST',
+    body: JSON.stringify({
+      target: settingsEls.memoryRemoveTargetInput?.value || 'memory',
+      old_text: oldText,
+    }),
+  });
+  if (data.disabled) {
+    toast('记忆功能未开启');
+    await refreshMemoryStatus();
+    return;
+  }
+  if (settingsEls.memoryRemoveOldInput) settingsEls.memoryRemoveOldInput.value = '';
+  await loadMemoryList();
+  toast('记忆已删除');
+}
+
+async function syncMemoryProfile() {
+  const data = await api('/api/memory/sync-profile', { method: 'POST', body: JSON.stringify({}) });
+  if (data.disabled) {
+    toast('记忆功能未开启');
+    await refreshMemoryStatus();
+    return;
+  }
+  await loadMemoryList();
+  toast('创作画像已同步到 Hermes');
 }
 
 function updateRewriteRequirementSummary() {
@@ -1163,6 +1390,7 @@ function applySettingsConfig(config) {
   applyHomeConfig(config);
   applyLoginSummary(config);
   applyRewriteSummary(config);
+  applyMemoryConfig(config);
   settingsEls.requestMultiplierInput.value = collect.request_multiplier ?? 3;
   settingsEls.searchDelayMinInput.value = collect.search_delay_min_sec ?? 2;
   settingsEls.searchDelayMaxInput.value = collect.search_delay_max_sec ?? 4;
@@ -1179,6 +1407,9 @@ function applySettingsConfig(config) {
   updateRewriteRequirementSummary();
   applyRewriteProfileConfig(rewrite.creator_profile || {});
   if (settingsEls.rewriteTextModelInput) settingsEls.rewriteTextModelInput.value = rewrite.text_model || 'qwen-plus';
+  if (settingsEls.rewriteVisionModelInput) settingsEls.rewriteVisionModelInput.value = rewrite.vision_model || 'qwen3-vl-plus';
+  if (settingsEls.rewriteAnalyzeImagesInput) settingsEls.rewriteAnalyzeImagesInput.checked = rewrite.analyze_images !== false;
+  if (settingsEls.rewriteVisionImageLimitInput) settingsEls.rewriteVisionImageLimitInput.value = rewrite.vision_image_limit || 4;
   if (settingsEls.rewriteImageModelInput) settingsEls.rewriteImageModelInput.value = rewrite.image_model || 'wan2.6-image';
   if (settingsEls.rewriteRegionInput) settingsEls.rewriteRegionInput.value = rewrite.region || 'cn-beijing';
   if (settingsEls.rewriteGenerateImagesInput) settingsEls.rewriteGenerateImagesInput.checked = Boolean(rewrite.generate_images);
@@ -1257,12 +1488,16 @@ function readSettingsDraft() {
       api_key: rewriteApiKeyChanged ? rewriteApiKeyValue : '',
       topic: (settingsEls.rewriteTopicSettingsInput?.value || '创业沙龙').trim() || '创业沙龙',
       text_model: (settingsEls.rewriteTextModelInput?.value || 'qwen-plus').trim() || 'qwen-plus',
+      vision_model: (settingsEls.rewriteVisionModelInput?.value || 'qwen3-vl-plus').trim() || 'qwen3-vl-plus',
       image_model: (settingsEls.rewriteImageModelInput?.value || 'wan2.6-image').trim() || 'wan2.6-image',
       region: settingsEls.rewriteRegionInput?.value || 'cn-beijing',
+      analyze_images: settingsEls.rewriteAnalyzeImagesInput?.checked !== false,
+      vision_image_limit: toNumber(settingsEls.rewriteVisionImageLimitInput?.value, 4),
       generate_image_prompts: true,
       generate_images: Boolean(settingsEls.rewriteGenerateImagesInput?.checked),
       creator_profile: readRewriteProfileDraft(),
     },
+    memory: readMemoryDraft(),
   };
 }
 
@@ -1279,12 +1514,15 @@ async function saveSettings() {
   const rewrite = data.config?.rewrite || {};
   if (submittedApiKey && rewrite.api_key_present) {
     toast(`设置已保存，DashScope API Key 已更新${rewrite.api_key_preview ? `：${rewrite.api_key_preview}` : ''}`);
+    refreshMemoryStatus().catch(() => {});
     return;
   }
   if (rewrite.api_key_present) {
     toast(`设置已保存，已保留 DashScope API Key${rewrite.api_key_preview ? `：${rewrite.api_key_preview}` : ''}`);
+    refreshMemoryStatus().catch(() => {});
     return;
   }
+  refreshMemoryStatus().catch(() => {});
   toast('设置已保存，尚未配置 DashScope API Key');
 }
 
@@ -1591,7 +1829,7 @@ function normalizeJobLogEntry(item, fallbackType = '') {
 }
 
 function looksLikeRewriteLog(message) {
-  return /仿写|文本模型|配图|DashScope|DASHSCOPE|阿里百炼|图片任务|图片生成/.test(String(message || ''));
+  return /仿写|文本模型|图片识别|视觉理解|配图|DashScope|DASHSCOPE|阿里百炼|图片任务|图片生成/.test(String(message || ''));
 }
 
 function jobLogGroups(job) {
@@ -2846,6 +3084,94 @@ function setMarkdownImageLightboxStatus(message = '', tone = '') {
   homeEls.markdownImageLightboxStatus.className = `markdown-image-lightbox-status ${tone}`.trim();
 }
 
+function markdownPreviewImageItem(imageElement) {
+  if (!imageElement) return null;
+  const src = imageElement.currentSrc || imageElement.getAttribute('src') || '';
+  if (!src) return null;
+  return {
+    src,
+    alt: imageElement.getAttribute('alt') || '',
+    element: imageElement,
+  };
+}
+
+function collectMarkdownPreviewImageItems(activeElement = null) {
+  const images = homeEls.filePreview
+    ? Array.from(homeEls.filePreview.querySelectorAll('.markdown-preview-image'))
+    : [];
+  const items = images.map(markdownPreviewImageItem).filter(Boolean);
+  const activeItem = markdownPreviewImageItem(activeElement);
+  if (activeItem && !items.some((item) => item.element === activeElement)) {
+    items.push(activeItem);
+  }
+  return items;
+}
+
+function updateMarkdownImageLightboxNavState() {
+  const count = state.markdownImageLightboxItems.length;
+  const index = state.markdownImageLightboxIndex;
+  const hasPrevious = count > 1 && index > 0;
+  const hasNext = count > 1 && index >= 0 && index < count - 1;
+
+  if (homeEls.markdownImageLightboxCounter) {
+    homeEls.markdownImageLightboxCounter.textContent = count > 1 && index >= 0 ? `${index + 1} / ${count}` : '';
+  }
+  if (homeEls.prevMarkdownImageLightboxBtn) {
+    homeEls.prevMarkdownImageLightboxBtn.hidden = count <= 1;
+    homeEls.prevMarkdownImageLightboxBtn.disabled = !hasPrevious;
+  }
+  if (homeEls.nextMarkdownImageLightboxBtn) {
+    homeEls.nextMarkdownImageLightboxBtn.hidden = count <= 1;
+    homeEls.nextMarkdownImageLightboxBtn.disabled = !hasNext;
+  }
+}
+
+function showMarkdownImageLightboxIndex(index) {
+  const lightbox = homeEls.markdownImageLightbox;
+  const image = homeEls.markdownImageLightboxImg;
+  if (!lightbox || !image || !state.markdownImageLightboxItems.length) return;
+
+  const nextIndex = clampNumber(Number(index) || 0, 0, state.markdownImageLightboxItems.length - 1);
+  const item = state.markdownImageLightboxItems[nextIndex];
+  if (!item?.src) return;
+
+  state.markdownImageLightboxIndex = nextIndex;
+  const title = item.alt.trim() || markdownImageTitleFromSrc(item.src);
+  if (homeEls.markdownImageLightboxTitle) {
+    homeEls.markdownImageLightboxTitle.textContent = title;
+  }
+
+  const markLoaded = () => {
+    if (image.getAttribute('src') !== item.src) return;
+    lightbox.classList.remove('is-loading', 'is-error');
+    setMarkdownImageLightboxStatus('');
+  };
+  const markError = () => {
+    if (image.getAttribute('src') !== item.src) return;
+    lightbox.classList.remove('is-loading');
+    lightbox.classList.add('is-error');
+    setMarkdownImageLightboxStatus('图片加载失败', 'is-error');
+  };
+
+  image.onload = markLoaded;
+  image.onerror = markError;
+  image.alt = title;
+  image.removeAttribute('src');
+  lightbox.classList.add('is-loading');
+  lightbox.classList.remove('is-error');
+  setMarkdownImageLightboxStatus('图片加载中...');
+  updateMarkdownImageLightboxNavState();
+  image.src = item.src;
+
+  if (image.complete) {
+    if (image.naturalWidth > 0) {
+      markLoaded();
+    } else {
+      markError();
+    }
+  }
+}
+
 function closeMarkdownImageLightbox({ restoreFocus = true } = {}) {
   const lightbox = homeEls.markdownImageLightbox;
   const image = homeEls.markdownImageLightboxImg;
@@ -2861,6 +3187,9 @@ function closeMarkdownImageLightbox({ restoreFocus = true } = {}) {
     image.alt = '';
   }
   setMarkdownImageLightboxStatus('');
+  state.markdownImageLightboxItems = [];
+  state.markdownImageLightboxIndex = -1;
+  updateMarkdownImageLightboxNavState();
 
   const previousFocus = state.markdownImageLightboxPreviousFocus;
   state.markdownImageLightboxPreviousFocus = null;
@@ -2874,37 +3203,37 @@ function openMarkdownImageLightbox(imageElement) {
   const image = homeEls.markdownImageLightboxImg;
   if (!lightbox || !imageElement || !image) return;
 
-  const src = imageElement.currentSrc || imageElement.getAttribute('src') || '';
-  if (!src) return;
-  const alt = imageElement.getAttribute('alt') || '';
-  const title = alt.trim() || markdownImageTitleFromSrc(src);
-  state.markdownImageLightboxPreviousFocus = document.activeElement;
-
-  if (homeEls.markdownImageLightboxTitle) {
-    homeEls.markdownImageLightboxTitle.textContent = title;
+  const items = collectMarkdownPreviewImageItems(imageElement);
+  let index = items.findIndex((item) => item.element === imageElement);
+  if (index < 0) {
+    const activeItem = markdownPreviewImageItem(imageElement);
+    if (!activeItem) return;
+    items.push(activeItem);
+    index = items.length - 1;
   }
+  if (!items.length || index < 0) return;
 
-  image.onload = () => {
-    lightbox.classList.remove('is-loading', 'is-error');
-    setMarkdownImageLightboxStatus('');
-  };
-  image.onerror = () => {
-    lightbox.classList.remove('is-loading');
-    lightbox.classList.add('is-error');
-    setMarkdownImageLightboxStatus('图片加载失败', 'is-error');
-  };
-  image.alt = title;
-  image.src = src;
+  state.markdownImageLightboxItems = items;
+  state.markdownImageLightboxIndex = index;
+  state.markdownImageLightboxPreviousFocus = document.activeElement;
 
   lightbox.hidden = false;
   lightbox.setAttribute('aria-hidden', 'false');
-  lightbox.classList.add('is-open', 'is-loading');
-  lightbox.classList.remove('is-error');
+  lightbox.classList.add('is-open');
   document.body.classList.add('has-markdown-image-lightbox');
-  setMarkdownImageLightboxStatus('图片加载中...');
+  showMarkdownImageLightboxIndex(index);
   window.requestAnimationFrame(() => {
     homeEls.closeMarkdownImageLightboxBtn?.focus();
   });
+}
+
+function navigateMarkdownImageLightbox(direction = 'next') {
+  const count = state.markdownImageLightboxItems.length;
+  if (count <= 1) return;
+  const step = direction === 'prev' ? -1 : 1;
+  const nextIndex = state.markdownImageLightboxIndex + step;
+  if (nextIndex < 0 || nextIndex >= count) return;
+  showMarkdownImageLightboxIndex(nextIndex);
 }
 
 function defaultPreviewState(overrides = {}) {
@@ -3770,6 +4099,60 @@ function renderFileEmptyState(files = {}, disabledAttr = '') {
   `;
 }
 
+function previewImageNavItems(path = state.currentPreviewPath, root = state.currentPreviewRoot) {
+  const normalizedPath = normalizeFilePath(path);
+  const normalizedRoot = normalizeFileRoot(root);
+  if (!normalizedPath || normalizedRoot !== state.currentFileRoot) return [];
+
+  const directoryPath = pathFromParts(fileDirectoryParts(normalizedPath));
+  const files = state.fileTreeCache.get(directoryPath);
+  const entries = Array.isArray(files?.entries) ? files.entries : [];
+  return entries
+    .filter((entry) => entry?.type !== 'directory' && isImagePreviewPath(entry.path || entry.name))
+    .map((entry) => ({
+      path: normalizeFilePath(entry.path || ''),
+      name: entry.name || fileBaseName(entry.path),
+    }))
+    .filter((entry) => entry.path);
+}
+
+function previewImageNavInfo(path = state.currentPreviewPath, root = state.currentPreviewRoot) {
+  const normalizedPath = normalizeFilePath(path);
+  const items = previewImageNavItems(normalizedPath, root);
+  const index = items.findIndex((item) => item.path === normalizedPath);
+  return {
+    items,
+    index,
+    previous: index > 0 ? items[index - 1] : null,
+    next: index >= 0 && index < items.length - 1 ? items[index + 1] : null,
+  };
+}
+
+function imagePreviewSubMeta(path = state.currentPreviewPath, root = state.currentPreviewRoot) {
+  const nav = previewImageNavInfo(path, root);
+  return nav.items.length > 1 && nav.index >= 0
+    ? `图片预览 · ${nav.index + 1}/${nav.items.length}`
+    : '图片预览';
+}
+
+function renderImagePreviewMedia(url = '', meta = '', path = state.currentPreviewPath, root = state.currentPreviewRoot) {
+  const nav = previewImageNavInfo(path, root);
+  const navButtons = nav.items.length > 1 ? `
+    <button class="btn btn-ghost file-preview-media-nav is-prev" data-preview-image-nav="prev" type="button" title="上一张" aria-label="上一张图片" ${nav.previous ? '' : 'disabled'}>
+      ${iconSvg('back')}
+    </button>
+    <button class="btn btn-ghost file-preview-media-nav is-next" data-preview-image-nav="next" type="button" title="下一张" aria-label="下一张图片" ${nav.next ? '' : 'disabled'}>
+      ${iconSvg('chevron')}
+    </button>
+  ` : '';
+  return `
+    <div class="file-preview-media-stage">
+      ${navButtons}
+      <img class="file-preview-media" src="${escapeHtml(url)}" alt="${escapeHtml(meta)}" loading="lazy">
+    </div>
+  `;
+}
+
 function setPreviewState({
   root = state.currentFileRoot,
   path = '',
@@ -3840,7 +4223,7 @@ function setPreviewState({
   if (mode === 'markdown') {
     renderMarkdownPreviewContent();
   } else if (mode === 'image') {
-    homeEls.filePreview.innerHTML = `<img class="file-preview-media" src="${escapeHtml(url)}" alt="${escapeHtml(meta)}" loading="lazy">`;
+    homeEls.filePreview.innerHTML = renderImagePreviewMedia(url, meta, path, root);
   } else if (mode === 'video') {
     homeEls.filePreview.innerHTML = `<video class="file-preview-media" src="${escapeHtml(url)}" controls preload="metadata"></video>`;
   } else {
@@ -4935,17 +5318,27 @@ async function ensurePreviewEditorSavedBeforePreviewChange() {
 
 function previewMediaFile(path, name = '', mode = 'image', root = state.currentFileRoot) {
   const normalizedRoot = normalizeFileRoot(root);
-  const url = fileDownloadUrl(path, normalizedRoot);
+  const normalizedPath = normalizeFilePath(path);
+  const url = fileDownloadUrl(normalizedPath, normalizedRoot);
   setPreviewState({
     root: normalizedRoot,
-    path,
+    path: normalizedPath,
     url,
-    meta: name || fileBaseName(path) || '文件预览',
-    subMeta: mode === 'video' ? '视频预览' : '图片预览',
+    meta: name || fileBaseName(normalizedPath) || '文件预览',
+    subMeta: mode === 'video' ? '视频预览' : imagePreviewSubMeta(normalizedPath, normalizedRoot),
     content: '',
     mode,
     open: true,
   });
+}
+
+function navigatePreviewImage(direction = 'next') {
+  if (state.currentPreviewMode !== 'image') return;
+  const nav = previewImageNavInfo(state.currentPreviewPath, state.currentPreviewRoot);
+  const target = direction === 'prev' ? nav.previous : nav.next;
+  if (!target) return;
+  previewMediaFile(target.path, target.name || fileBaseName(target.path), 'image', state.currentPreviewRoot);
+  homeEls.filePreview?.focus({ preventScroll: true });
 }
 
 async function previewFile(path, root = state.currentFileRoot) {
@@ -5194,11 +5587,22 @@ function bindHomeEvents() {
   if (homeEls.filePreview) {
     homeEls.filePreview.addEventListener('click', (event) => {
       if (!(event.target instanceof Element)) return;
+      const previewNavButton = event.target.closest('[data-preview-image-nav]');
+      if (previewNavButton && homeEls.filePreview.contains(previewNavButton)) {
+        event.preventDefault();
+        navigatePreviewImage(previewNavButton.dataset.previewImageNav || 'next');
+        return;
+      }
       const image = event.target.closest('.markdown-preview-image');
       if (!image || !homeEls.filePreview.contains(image)) return;
       openMarkdownImageLightbox(image);
     });
     homeEls.filePreview.addEventListener('keydown', (event) => {
+      if (state.currentPreviewMode === 'image' && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+        event.preventDefault();
+        navigatePreviewImage(event.key === 'ArrowLeft' ? 'prev' : 'next');
+        return;
+      }
       if (event.key !== 'Enter' && event.key !== ' ') return;
       if (!(event.target instanceof Element)) return;
       const image = event.target.closest('.markdown-preview-image');
@@ -5220,12 +5624,29 @@ function bindHomeEvents() {
       closeMarkdownImageLightbox();
     });
   }
+  if (homeEls.prevMarkdownImageLightboxBtn) {
+    homeEls.prevMarkdownImageLightboxBtn.addEventListener('click', () => {
+      navigateMarkdownImageLightbox('prev');
+    });
+  }
+  if (homeEls.nextMarkdownImageLightboxBtn) {
+    homeEls.nextMarkdownImageLightboxBtn.addEventListener('click', () => {
+      navigateMarkdownImageLightbox('next');
+    });
+  }
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
-      if (homeEls.markdownImageLightbox && !homeEls.markdownImageLightbox.hidden) {
+    if (homeEls.markdownImageLightbox && !homeEls.markdownImageLightbox.hidden) {
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault();
+        navigateMarkdownImageLightbox(event.key === 'ArrowLeft' ? 'prev' : 'next');
+        return;
+      }
+      if (event.key === 'Escape') {
         closeMarkdownImageLightbox();
         return;
       }
+    }
+    if (event.key === 'Escape') {
       if (state.renamePath) {
         cancelInlineRename();
         return;
@@ -5294,6 +5715,52 @@ function bindSettingsEvents() {
   settingsEls.rewriteProfileInputs.forEach((input) => {
     input.addEventListener('input', updateRewriteProfileSummary);
   });
+  if (settingsEls.memoryRefreshBtn) {
+    settingsEls.memoryRefreshBtn.addEventListener('click', () => {
+      loadMemoryList().catch((error) => toast(error.message));
+    });
+  }
+  if (settingsEls.memoryHermesHomeInput) {
+    settingsEls.memoryHermesHomeInput.addEventListener('input', updateMemoryAdvancedSummary);
+  }
+  if (settingsEls.memoryTargetInput) {
+    settingsEls.memoryTargetInput.addEventListener('change', () => {
+      loadMemoryList().catch((error) => toast(error.message));
+    });
+  }
+  if (settingsEls.memorySearchBtn) {
+    settingsEls.memorySearchBtn.addEventListener('click', () => {
+      searchMemory().catch((error) => toast(error.message));
+    });
+  }
+  if (settingsEls.memorySearchInput) {
+    settingsEls.memorySearchInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        searchMemory().catch((error) => toast(error.message));
+      }
+    });
+  }
+  if (settingsEls.memoryAddBtn) {
+    settingsEls.memoryAddBtn.addEventListener('click', () => {
+      addMemoryEntry().catch((error) => toast(error.message));
+    });
+  }
+  if (settingsEls.memoryReplaceBtn) {
+    settingsEls.memoryReplaceBtn.addEventListener('click', () => {
+      replaceMemoryEntry().catch((error) => toast(error.message));
+    });
+  }
+  if (settingsEls.memoryRemoveBtn) {
+    settingsEls.memoryRemoveBtn.addEventListener('click', () => {
+      removeMemoryEntry().catch((error) => toast(error.message));
+    });
+  }
+  if (settingsEls.memorySyncProfileBtn) {
+    settingsEls.memorySyncProfileBtn.addEventListener('click', () => {
+      syncMemoryProfile().catch((error) => toast(error.message));
+    });
+  }
   if (settingsEls.checkLoginBtn) {
     settingsEls.checkLoginBtn.addEventListener('click', () => {
       checkLogin().catch((error) => toast(error.message));
@@ -5339,6 +5806,7 @@ async function bootRewrite() {
 async function bootSettings() {
   bindSettingsEvents();
   await loadSettingsConfig();
+  await loadMemoryList().catch(() => refreshMemoryStatus().catch(() => {}));
   await syncBrowserLoginStatus();
 }
 

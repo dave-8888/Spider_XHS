@@ -29,13 +29,25 @@
   "ui": {
     "job_page_size": 10
   },
+  "memory": {
+    "enabled": false,
+    "hermes_home": "",
+    "session_search_enabled": true,
+    "write_after_collect": true,
+    "write_after_rewrite": true,
+    "write_after_edit": true,
+    "top_k": 8
+  },
   "rewrite": {
     "enabled": false,
     "topic": "创业沙龙",
     "api_key": "",
     "text_model": "qwen-plus",
+    "vision_model": "qwen3-vl-plus",
     "image_model": "wan2.6-image",
     "region": "cn-beijing",
+    "analyze_images": true,
+    "vision_image_limit": 4,
     "generate_image_prompts": true,
     "generate_images": false,
     "creator_profile": {

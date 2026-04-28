@@ -26,6 +26,17 @@ def detect_python_arch(python_bin: str) -> str:
     return result.stdout.strip()
 
 
+def detect_python_version(python_bin: str) -> tuple[int, int]:
+    result = subprocess.run(
+        [python_bin, "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    major, minor = result.stdout.strip().split(".", 1)
+    return int(major), int(minor)
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         print("Usage: python scripts/build_backend.py <arm64|x64>")
@@ -37,6 +48,14 @@ def main() -> int:
         return 1
 
     python_bin = target_python_for_arch(arch)
+    python_version = detect_python_version(python_bin)
+    if python_version < (3, 11):
+        print(
+            f"Python 3.11+ is required because Spider_XHS embeds Hermes Agent; "
+            f"got {python_version[0]}.{python_version[1]}.",
+            file=sys.stderr,
+        )
+        return 1
     detected_arch = detect_python_arch(python_bin)
     if detected_arch != arch:
         print(
@@ -77,6 +96,10 @@ def main() -> int:
         "execjs._runtimes",
         "--hidden-import",
         "urllib3",
+        "--add-data",
+        f"{PROJECT_ROOT / 'vendor' / 'hermes-agent'}:vendor/hermes-agent",
+        "--add-data",
+        f"{PROJECT_ROOT / 'vendor' / 'HERMES_AGENT_SOURCE.md'}:vendor",
         str(PROJECT_ROOT / "web_app.py"),
     ]
 
@@ -87,4 +110,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
