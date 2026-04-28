@@ -430,6 +430,41 @@
               <span>历史文案样本</span>
               <textarea id="rewriteProfileSamplesInput" data-rewrite-profile-input rows="7" placeholder="粘贴 3-10 段你自己的代表性文案，模型只学习语气、节奏和句式，不照抄原文。"></textarea>
             </label>
+            <div class="field full-width style-profile-tool">
+              <span>自动总结我的风格</span>
+              <div class="field-grid field-grid-2 compact-form">
+                <label class="field">
+                  <span>小红书主页</span>
+                  <input id="styleProfileUserUrlInput" type="url" placeholder="留空则使用当前登录账号">
+                </label>
+                <label class="field">
+                  <span>高赞样本数</span>
+                  <input id="styleProfileSampleLimitInput" type="number" min="5" max="100" step="1" value="30">
+                </label>
+              </div>
+              <div class="row spread switch-row compact-switch-row">
+                <div>
+                  <strong>识别图文图片文字</strong>
+                  <p class="muted">开启后会读取图片里的标题、长文案和封面钩子。</p>
+                </div>
+                <label class="switch">
+                  <input id="styleProfileImageOcrInput" type="checkbox">
+                  <span></span>
+                </label>
+              </div>
+              <div class="button-pair style-profile-actions">
+                <button id="generateStyleProfileBtn" class="btn btn-secondary btn-icon-text" type="button">
+                  <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5 14.5 9l2.5 2.5L6.5 22H4z"/><path d="m13 6.5 2.5-2.5L20 8.5 17.5 11"/><path d="M6 4.5v3M4.5 6h3M19 16.5v3M17.5 18h3"/></svg>
+                  生成画像草稿
+                </button>
+                <button id="applyStyleProfileDraftBtn" class="btn btn-primary btn-icon-text" type="button" disabled>
+                  <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+                  应用草稿
+                </button>
+              </div>
+              <div id="styleProfileStatus" class="status-panel muted">尚未生成画像草稿</div>
+              <div id="styleProfileDraftPreview" class="style-profile-draft-preview" hidden></div>
+            </div>
           </div>
         </details>
         <div class="row spread switch-row full-width">

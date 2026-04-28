@@ -32,6 +32,7 @@ ROOT_DIR = PROJECT_ROOT
 RELATIVE_STORAGE_ROOT = DATA_ROOT if is_desktop_mode() else ROOT_DIR
 DEFAULT_MARKDOWN_ROOT = DATA_ROOT / "markdown_datas"
 DEFAULT_REWRITE_ROOT = DATA_ROOT / "ai_rewrites"
+DEFAULT_STYLE_PROFILE_ROOT = DATA_ROOT / "style_profiles"
 CONFIG_PATH = DATA_ROOT / "collector_config.json"
 JOB_HISTORY_PATH = DATA_ROOT / "collector_jobs.json"
 SCHEDULER_STATE_PATH = DATA_ROOT / "scheduler_state.json"
@@ -46,7 +47,7 @@ REWRITE_AUXILIARY_OUTPUT_FILES = {"仿写日志.md", "图片提示词.md", "图�
 REWRITE_RECENT_EXCLUDED_FILES = REWRITE_AUXILIARY_OUTPUT_FILES | {"爆款分析报告.md"}
 REWRITE_OUTPUT_DIR_PREFIX = "ai仿写+"
 LEGACY_REWRITE_OUTPUT_DIR_PREFIXES = ("AI仿写_",)
-JOB_LOG_TYPES = {"crawl", "rewrite"}
+JOB_LOG_TYPES = ("crawl", "rewrite", "style_profile")
 REWRITE_LOG_MARKERS = (
     "仿写",
     "文本模型",
@@ -69,6 +70,11 @@ MAX_REWRITE_VISION_TEXT_LENGTH = 3600
 MAX_REWRITE_VISION_FIELD_LENGTH = 1200
 MAX_REWRITE_VISION_IMAGES = 6
 MAX_REWRITE_VISION_IMAGE_BYTES = 10 * 1024 * 1024
+STYLE_PROFILE_SAMPLE_SELECTIONS = {"top_liked"}
+DEFAULT_STYLE_PROFILE_SAMPLE_LIMIT = 30
+MIN_STYLE_PROFILE_SAMPLE_LIMIT = 5
+MAX_STYLE_PROFILE_SAMPLE_LIMIT = 100
+MAX_STYLE_PROFILE_NOTE_TEXT_LENGTH = 1800
 NOTE_ASSET_DIR_NAMES = {"assert", "assets", "asset", "media", "images", "imgs", "videos"}
 JOB_PAGE_SIZE_OPTIONS = {10, 20, 50, 100}
 
@@ -114,7 +120,7 @@ WEEKDAY_LABELS = {
 
 
 def ensure_data_dirs() -> None:
-    for path in [DATA_ROOT, DEFAULT_MARKDOWN_ROOT, DEFAULT_REWRITE_ROOT]:
+    for path in [DATA_ROOT, DEFAULT_MARKDOWN_ROOT, DEFAULT_REWRITE_ROOT, DEFAULT_STYLE_PROFILE_ROOT]:
         path.mkdir(parents=True, exist_ok=True)
 
 
@@ -671,6 +677,12 @@ class ConfigStore:
                 "output_dir": "",
                 "rewrite_output_dir": "",
             },
+            "style_profile": {
+                "user_url": "",
+                "sample_selection": "top_liked",
+                "sample_limit": DEFAULT_STYLE_PROFILE_SAMPLE_LIMIT,
+                "include_image_ocr": False,
+            },
             "ui": {
                 "job_page_size": 10,
             },
@@ -757,6 +769,7 @@ class ConfigStore:
             "data_root": str(DATA_ROOT),
             "markdown_root": str(DEFAULT_MARKDOWN_ROOT),
             "rewrite_default_root": str(DEFAULT_REWRITE_ROOT),
+            "style_profile_root": str(DEFAULT_STYLE_PROFILE_ROOT),
             "output_root": str(resolve_output_root(config)),
             "rewrite_root": str(resolve_rewrite_output_root(config)),
             "hermes_default_home": str(DEFAULT_HERMES_HOME),
@@ -834,6 +847,20 @@ class ConfigStore:
         storage["output_dir"] = str(storage.get("output_dir") or "").strip().strip("'").strip('"')
         storage["rewrite_output_dir"] = str(storage.get("rewrite_output_dir") or "").strip().strip("'").strip('"')
         storage.pop("show_note_metadata", None)
+
+        style_profile = sanitized.setdefault("style_profile", {})
+        style_profile["user_url"] = str(style_profile.get("user_url") or "").strip().strip("'").strip('"')[:500]
+        sample_selection = str(style_profile.get("sample_selection") or "top_liked").strip()
+        style_profile["sample_selection"] = (
+            sample_selection if sample_selection in STYLE_PROFILE_SAMPLE_SELECTIONS else "top_liked"
+        )
+        style_profile["sample_limit"] = to_int(
+            style_profile.get("sample_limit"),
+            DEFAULT_STYLE_PROFILE_SAMPLE_LIMIT,
+            MIN_STYLE_PROFILE_SAMPLE_LIMIT,
+            MAX_STYLE_PROFILE_SAMPLE_LIMIT,
+        )
+        style_profile["include_image_ocr"] = bool(style_profile.get("include_image_ocr"))
 
         ui = sanitized.setdefault("ui", {})
         job_page_size = to_int(ui.get("job_page_size"), 10)
@@ -2176,6 +2203,664 @@ class RewriteService:
             progress(message)
 
 
+class StyleProfileService:
+    def __init__(self, config: Dict[str, Any], output_root: Path = DEFAULT_STYLE_PROFILE_ROOT) -> None:
+        self.config = config or {}
+        rewrite = self.config.get("rewrite", {}) if isinstance(self.config.get("rewrite"), dict) else {}
+        collect = self.config.get("collect", {}) if isinstance(self.config.get("collect"), dict) else {}
+        self.style_config = (
+            self.config.get("style_profile", {})
+            if isinstance(self.config.get("style_profile"), dict)
+            else {}
+        )
+        self.xhs_apis = XHS_Apis()
+        self.output_root = output_root.resolve()
+        self.cookies = str(self.config.get("login", {}).get("cookies") or load_env() or "").strip()
+        self.api_key = str(rewrite.get("api_key") or os.getenv("DASHSCOPE_API_KEY", "")).strip()
+        self.text_model = str(rewrite.get("text_model") or "qwen-plus").strip() or "qwen-plus"
+        self.vision_model = (
+            str(rewrite.get("vision_model") or DEFAULT_REWRITE_VISION_MODEL).strip()
+            or DEFAULT_REWRITE_VISION_MODEL
+        )
+        self.region = str(rewrite.get("region") or "cn-beijing").strip() or "cn-beijing"
+        self.search_delay_min, self.search_delay_max = normalize_delay_range(
+            collect.get("search_delay_min_sec"),
+            collect.get("search_delay_max_sec"),
+            2.0,
+            4.0,
+        )
+        self.detail_delay_min, self.detail_delay_max = normalize_delay_range(
+            collect.get("detail_delay_min_sec"),
+            collect.get("detail_delay_max_sec"),
+            1.0,
+            3.0,
+        )
+        self.vision_image_limit = to_int(
+            rewrite.get("vision_image_limit"),
+            4,
+            1,
+            MAX_REWRITE_VISION_IMAGES,
+        )
+        self.creator_profile = (
+            rewrite.get("creator_profile")
+            if isinstance(rewrite.get("creator_profile"), dict)
+            else {}
+        )
+
+    def generate(
+        self,
+        user_url: str = "",
+        sample_limit: Optional[int] = None,
+        include_image_ocr: Optional[bool] = None,
+        progress: Optional[Callable[[str], None]] = None,
+    ) -> Dict[str, Any]:
+        if not self.cookies:
+            raise ValueError("缺少登录 Cookie，请先在页面中配置 Cookie")
+        if not self.api_key:
+            raise RuntimeError("缺少 DASHSCOPE_API_KEY，无法调用阿里百炼模型总结写作风格")
+
+        limit = to_int(
+            sample_limit if sample_limit is not None else self.style_config.get("sample_limit"),
+            DEFAULT_STYLE_PROFILE_SAMPLE_LIMIT,
+            MIN_STYLE_PROFILE_SAMPLE_LIMIT,
+            MAX_STYLE_PROFILE_SAMPLE_LIMIT,
+        )
+        should_ocr = bool(
+            self.style_config.get("include_image_ocr")
+            if include_image_ocr is None
+            else include_image_ocr
+        )
+        target_user_url = self._resolve_user_url(user_url or self.style_config.get("user_url"))
+        output_dir = available_child_path(self.output_root, batch_name())
+        output_dir.mkdir(parents=True, exist_ok=True)
+        started_at = now_text()
+        stage_logs: List[Dict[str, str]] = []
+
+        def record(message: str) -> None:
+            stage_logs.append({"time": now_text(), "message": message})
+            self._progress(progress, message)
+
+        record("正在读取主页已发布笔记")
+        success, msg, simple_notes = self.xhs_apis.get_user_all_notes(
+            target_user_url,
+            self.cookies,
+            page_delay_callback=lambda page: self._sleep_between_requests(
+                self.search_delay_min,
+                self.search_delay_max,
+                record,
+                f"继续读取主页第 {page} 页",
+            ),
+        )
+        if not success:
+            raise RuntimeError(str(msg))
+        note_urls = self._note_urls_from_user_notes(simple_notes)
+        if not note_urls:
+            raise RuntimeError("没有找到可分析的公开发布笔记")
+
+        notes: List[Dict[str, Any]] = []
+        failed_count = 0
+        for index, note_url in enumerate(note_urls, start=1):
+            if index > 1:
+                self._sleep_between_requests(
+                    self.detail_delay_min,
+                    self.detail_delay_max,
+                    record,
+                    f"继续拉取文章详情 {index}/{len(note_urls)}",
+                )
+            record(f"正在拉取文章详情 {index}/{len(note_urls)}")
+            note = self._fetch_note_detail(note_url)
+            if note:
+                notes.append(note)
+            else:
+                failed_count += 1
+
+        if not notes:
+            raise RuntimeError("主页笔记详情拉取失败，无法生成写作风格画像")
+
+        notes.sort(key=lambda item: parse_count(item.get("liked_count")), reverse=True)
+        selected_notes = notes[:limit]
+        sample_warning = ""
+        if len(selected_notes) < 3:
+            sample_warning = "可用样本少于 3 篇，画像草稿仅供初步参考。"
+            record(sample_warning)
+        record(f"已选择高赞样本 {len(selected_notes)}/{len(notes)} 篇")
+
+        if should_ocr:
+            self._attach_image_ocr(selected_notes, record)
+        else:
+            record("已关闭图片文字识别，仅分析标题、正文、标签和互动数据")
+
+        record(f"正在请求文本模型总结写作风格：{self.text_model}")
+        payload = self._call_text_model(selected_notes, target_user_url, sample_warning)
+        result = self._normalize_result(
+            payload,
+            target_user_url,
+            selected_notes,
+            len(notes),
+            failed_count,
+            limit,
+            should_ocr,
+            sample_warning,
+            started_at,
+        )
+        result["output_dir"] = relative_to_root(output_dir, self.output_root)
+        result["result_path"] = relative_to_root(output_dir / "result.json", self.output_root)
+        result["report_path"] = relative_to_root(output_dir / "写作风格分析报告.md", self.output_root)
+        result["log_path"] = relative_to_root(output_dir / "画像生成日志.md", self.output_root)
+        result["finished_at"] = now_text()
+        record("正在写入写作风格画像结果")
+        self._write_result_files(output_dir, result, stage_logs)
+        record(f"写作风格画像完成：样本 {len(selected_notes)} 篇")
+        return result
+
+    def _resolve_user_url(self, value: Any) -> str:
+        raw = str(value or "").strip()
+        if raw:
+            return self._user_url_with_query(raw)
+        success, msg, res = self.xhs_apis.get_user_self_info2(self.cookies)
+        if not success:
+            raise RuntimeError(f"无法读取当前登录用户信息：{msg}")
+        user_id = self._extract_user_id(res)
+        if not user_id:
+            raise RuntimeError("当前登录信息中没有找到 user_id，请手动填写小红书主页链接")
+        return f"https://www.xiaohongshu.com/user/profile/{user_id}?xsec_source=pc_user"
+
+    def _user_url_with_query(self, user_url: str) -> str:
+        text = str(user_url or "").strip()
+        if not text:
+            return text
+        if "?" not in text:
+            return f"{text}?xsec_source=pc_user"
+        if text.endswith("?") or text.endswith("&"):
+            return f"{text}xsec_source=pc_user"
+        return text
+
+    def _extract_user_id(self, value: Any) -> str:
+        if isinstance(value, dict):
+            for key in ["user_id", "userId", "userid"]:
+                candidate = str(value.get(key) or "").strip()
+                if candidate:
+                    return candidate
+            for nested in value.values():
+                candidate = self._extract_user_id(nested)
+                if candidate:
+                    return candidate
+        if isinstance(value, list):
+            for nested in value:
+                candidate = self._extract_user_id(nested)
+                if candidate:
+                    return candidate
+        return ""
+
+    def _note_urls_from_user_notes(self, notes: Any) -> List[str]:
+        urls: List[str] = []
+        seen = set()
+        for note in notes or []:
+            if not isinstance(note, dict):
+                continue
+            raw_url = str(note.get("note_url") or note.get("url") or "").strip()
+            note_id = str(
+                note.get("note_id")
+                or note.get("id")
+                or note.get("noteId")
+                or note.get("note_card", {}).get("note_id")
+                or ""
+            ).strip()
+            xsec_token = str(
+                note.get("xsec_token")
+                or note.get("xsecToken")
+                or note.get("xsec_token_web")
+                or ""
+            ).strip()
+            xsec_source = str(note.get("xsec_source") or "pc_user").strip() or "pc_user"
+            url = raw_url
+            if note_id and xsec_token:
+                url = f"https://www.xiaohongshu.com/explore/{note_id}?xsec_token={xsec_token}&xsec_source={xsec_source}"
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            urls.append(url)
+        return urls
+
+    def _fetch_note_detail(self, note_url: str) -> Optional[Dict[str, Any]]:
+        try:
+            success, _msg, note_info = self.xhs_apis.get_note_info(note_url, self.cookies)
+            if not success or not note_info:
+                return None
+            item = note_info["data"]["items"][0]
+            item["url"] = note_url
+            return handle_note_info(item)
+        except Exception as exc:
+            logger.warning(f"写作画像笔记详情拉取失败 {note_url}: {exc}")
+            return None
+
+    def _attach_image_ocr(self, notes: List[Dict[str, Any]], record: Callable[[str], None]) -> None:
+        ready_count = 0
+        image_note_count = 0
+        for index, note in enumerate(notes, start=1):
+            image_urls = [
+                str(url or "").strip()
+                for url in note.get("image_list") or []
+                if str(url or "").strip().startswith("http")
+            ][:self.vision_image_limit]
+            if not image_urls:
+                continue
+            image_note_count += 1
+            title = str(note.get("title") or "无标题").strip()
+            title = title[:28] + "..." if len(title) > 28 else title
+            try:
+                record(f"正在识别样本图片文字 {index}/{len(notes)}：{title}")
+                note["image_analysis"] = self._call_vision_model(note, image_urls)
+                ready_count += 1
+            except Exception as exc:
+                note["image_analysis_error"] = str(exc)
+                record(f"图片文字识别失败 {index}/{len(notes)}：{exc}")
+        if image_note_count:
+            record(f"图片文字识别完成：{ready_count}/{image_note_count} 篇")
+        else:
+            record("样本中没有可识别图片，跳过图片文字识别")
+
+    def _call_vision_model(self, note: Dict[str, Any], image_urls: List[str]) -> Dict[str, Any]:
+        prompt = (
+            "请识别这些小红书图文图片里的文字和表达方式。重点读取图片上的标题、大字、长文案、"
+            "截图文字和封面钩子，同时总结版式给写作风格带来的影响。"
+            "输出必须是合法 JSON，不要使用 Markdown 代码块。JSON 字段："
+            "{\"visible_text\":\"逐张列出可读文字\","
+            "\"cover_hook\":\"封面或首图的核心钩子\","
+            "\"writing_on_image\":\"图片中文案的语气、句式、节奏和常用表达\","
+            "\"visual_style\":\"版式、信息层级、配色和真实感\","
+            "\"style_insights\":\"这些图片对账号写作风格画像的启发\"}。"
+            f"\n\n笔记标题：{note.get('title') or ''}\n笔记正文：{str(note.get('desc') or '')[:800]}"
+        )
+        content = [
+            {"type": "image_url", "image_url": {"url": url}}
+            for url in image_urls
+        ]
+        content.append({"type": "text", "text": prompt})
+        response = requests.post(
+            self._text_endpoint(),
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": self.vision_model,
+                "messages": [
+                    {"role": "system", "content": "你是小红书图片 OCR 和账号风格分析助手。"},
+                    {"role": "user", "content": content},
+                ],
+                "temperature": 0.2,
+            },
+            timeout=180,
+        )
+        response.raise_for_status()
+        data = response.json()
+        content_text = self._message_content_to_text(
+            data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        )
+        parsed = self._parse_model_json(content_text)
+        return {
+            "visible_text": self._compact_model_text(parsed.get("visible_text"), MAX_REWRITE_VISION_TEXT_LENGTH),
+            "cover_hook": self._compact_model_text(parsed.get("cover_hook"), MAX_REWRITE_VISION_FIELD_LENGTH),
+            "writing_on_image": self._compact_model_text(parsed.get("writing_on_image"), MAX_REWRITE_VISION_FIELD_LENGTH),
+            "visual_style": self._compact_model_text(parsed.get("visual_style"), MAX_REWRITE_VISION_FIELD_LENGTH),
+            "style_insights": self._compact_model_text(parsed.get("style_insights"), MAX_REWRITE_VISION_FIELD_LENGTH),
+        }
+
+    def _call_text_model(
+        self,
+        notes: List[Dict[str, Any]],
+        user_url: str,
+        sample_warning: str,
+    ) -> Dict[str, Any]:
+        request_notes = []
+        for note in notes:
+            item = {
+                "note_id": note.get("note_id"),
+                "title": note.get("title"),
+                "desc": str(note.get("desc") or "")[:MAX_STYLE_PROFILE_NOTE_TEXT_LENGTH],
+                "metrics": {
+                    "liked": note.get("liked_count"),
+                    "collected": note.get("collected_count"),
+                    "comment": note.get("comment_count"),
+                    "share": note.get("share_count"),
+                },
+                "tags": note.get("tags") or [],
+                "note_type": note.get("note_type"),
+                "upload_time": note.get("upload_time"),
+            }
+            image_analysis = note.get("image_analysis")
+            if isinstance(image_analysis, dict):
+                item["image_analysis"] = image_analysis
+            if note.get("image_analysis_error"):
+                item["image_analysis_error"] = str(note.get("image_analysis_error"))[:300]
+            request_notes.append(item)
+
+        existing_profile = self._creator_profile_payload()
+        prompt = {
+            "user_url": user_url,
+            "sample_count": len(request_notes),
+            "sample_warning": sample_warning,
+            "existing_creator_profile": existing_profile,
+            "notes": request_notes,
+        }
+        user_prompt = (
+            "请根据这些小红书文章总结账号主理人的写作风格，并生成可写回系统的创作画像草稿。"
+            "这些文章都是用户自己写过或发布过的内容，请学习表达习惯、结构偏好、选题方式和转化方式，"
+            "不要把参考文章改写成新文案。"
+            "如果图片识别结果存在，请把 visible_text 和 writing_on_image 当作正文样本的一部分。"
+            "existing_creator_profile 是当前已有画像；如果业务背景、转化目标、禁用边界无法从文章中可靠推断，"
+            "请优先保留 existing_creator_profile 中对应内容。"
+            "输出必须是合法 JSON，不要使用 Markdown 代码块。JSON 结构为："
+            "{\"style_summary\":\"总体写作风格总结\","
+            "\"opening_patterns\":[\"常见开头模式\"],"
+            "\"sentence_rhythm\":\"句式节奏和段落组织\","
+            "\"vocabulary_preferences\":[\"高频词汇或口头禅\"],"
+            "\"topic_patterns\":[\"常见选题模式\"],"
+            "\"conversion_patterns\":\"转化方式和行动引导习惯\","
+            "\"forbidden_rule_suggestions\":[\"建议加入的禁用表达或边界\"],"
+            "\"sample_warning\":\"样本不足或偏差提示，可为空\","
+            "\"profile_draft\":{\"enabled\":true,\"identity\":\"账号定位\","
+            "\"business_context\":\"业务背景\",\"target_audience\":\"目标人群\","
+            "\"conversion_goal\":\"转化目标\",\"writing_style\":\"我的文案风格\","
+            "\"content_persona\":\"项目人格\",\"forbidden_rules\":\"禁用表达与边界\","
+            "\"sample_texts\":\"3-10段代表性历史文案或压缩样本\"}}。"
+            f"\n\n输入数据：{json.dumps(prompt, ensure_ascii=False)}"
+        )
+        response = requests.post(
+            self._text_endpoint(),
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": self.text_model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "你是资深小红书账号诊断师，擅长从历史内容中提炼稳定写作风格和创作画像。",
+                    },
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": 0.35,
+                "response_format": {"type": "json_object"},
+            },
+            timeout=180,
+        )
+        response.raise_for_status()
+        data = response.json()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        return self._parse_model_json(self._message_content_to_text(content))
+
+    def _normalize_result(
+        self,
+        payload: Dict[str, Any],
+        user_url: str,
+        notes: List[Dict[str, Any]],
+        detail_count: int,
+        failed_count: int,
+        sample_limit: int,
+        include_image_ocr: bool,
+        sample_warning: str,
+        started_at: str,
+    ) -> Dict[str, Any]:
+        warning = str(payload.get("sample_warning") or sample_warning or "").strip()
+        result = {
+            "type": "style_profile",
+            "user_url": user_url,
+            "sample_selection": "top_liked",
+            "sample_limit": sample_limit,
+            "sample_count": len(notes),
+            "detail_count": detail_count,
+            "failed_count": failed_count,
+            "include_image_ocr": include_image_ocr,
+            "started_at": started_at,
+            "generated_at": now_text(),
+            "model": {
+                "text": self.text_model,
+                "vision": self.vision_model if include_image_ocr else "",
+                "region": self.region,
+            },
+            "sample_warning": warning,
+            "style_summary": self._compact_model_text(payload.get("style_summary"), 2200),
+            "opening_patterns": self._normalize_text_list(payload.get("opening_patterns"), 8, 240),
+            "sentence_rhythm": self._compact_model_text(payload.get("sentence_rhythm"), 1600),
+            "vocabulary_preferences": self._normalize_text_list(payload.get("vocabulary_preferences"), 16, 160),
+            "topic_patterns": self._normalize_text_list(payload.get("topic_patterns"), 12, 220),
+            "conversion_patterns": self._compact_model_text(payload.get("conversion_patterns"), 1200),
+            "forbidden_rule_suggestions": self._normalize_text_list(payload.get("forbidden_rule_suggestions"), 12, 220),
+            "profile_draft": self._normalize_profile_draft(payload.get("profile_draft"), notes),
+            "samples": self._result_samples(notes),
+        }
+        if not result["style_summary"]:
+            result["style_summary"] = self._fallback_style_summary(notes)
+        return result
+
+    def _normalize_profile_draft(self, value: Any, notes: List[Dict[str, Any]]) -> Dict[str, Any]:
+        draft = value if isinstance(value, dict) else {}
+        existing = self._creator_profile_payload()
+
+        def text_for(key: str, limit: int = MAX_REWRITE_PROFILE_TEXT_LENGTH, fallback: str = "") -> str:
+            text = self._compact_model_text(draft.get(key), limit)
+            if text:
+                return text
+            return self._compact_model_text(existing.get(key) or fallback, limit)
+
+        sample_texts = self._compact_model_text(draft.get("sample_texts"), MAX_REWRITE_PROFILE_SAMPLE_LENGTH)
+        if not sample_texts:
+            sample_texts = self._sample_texts_from_notes(notes)
+
+        return {
+            "enabled": True,
+            "identity": text_for("identity"),
+            "business_context": text_for("business_context"),
+            "target_audience": text_for("target_audience"),
+            "conversion_goal": text_for("conversion_goal"),
+            "writing_style": text_for("writing_style"),
+            "content_persona": text_for("content_persona", fallback=DEFAULT_CREATOR_PERSONA) or DEFAULT_CREATOR_PERSONA,
+            "forbidden_rules": text_for("forbidden_rules"),
+            "sample_texts": sample_texts[:MAX_REWRITE_PROFILE_SAMPLE_LENGTH].strip(),
+        }
+
+    def _creator_profile_payload(self) -> Dict[str, Any]:
+        profile = self.creator_profile if isinstance(self.creator_profile, dict) else {}
+        return {
+            "enabled": bool(profile.get("enabled", True)),
+            "identity": self._compact_model_text(profile.get("identity"), MAX_REWRITE_PROFILE_TEXT_LENGTH),
+            "business_context": self._compact_model_text(profile.get("business_context"), MAX_REWRITE_PROFILE_TEXT_LENGTH),
+            "target_audience": self._compact_model_text(profile.get("target_audience"), MAX_REWRITE_PROFILE_TEXT_LENGTH),
+            "conversion_goal": self._compact_model_text(profile.get("conversion_goal"), MAX_REWRITE_PROFILE_TEXT_LENGTH),
+            "writing_style": self._compact_model_text(profile.get("writing_style"), MAX_REWRITE_PROFILE_TEXT_LENGTH),
+            "content_persona": self._compact_model_text(profile.get("content_persona"), MAX_REWRITE_PROFILE_TEXT_LENGTH) or DEFAULT_CREATOR_PERSONA,
+            "forbidden_rules": self._compact_model_text(profile.get("forbidden_rules"), MAX_REWRITE_PROFILE_TEXT_LENGTH),
+            "sample_texts": self._compact_model_text(profile.get("sample_texts"), MAX_REWRITE_PROFILE_SAMPLE_LENGTH),
+        }
+
+    def _sample_texts_from_notes(self, notes: List[Dict[str, Any]]) -> str:
+        blocks = []
+        for note in notes[:8]:
+            body = str(note.get("desc") or "").strip()
+            analysis = note.get("image_analysis") if isinstance(note.get("image_analysis"), dict) else {}
+            image_text = str(analysis.get("visible_text") or "").strip()
+            if not body and image_text:
+                body = image_text
+            if not body:
+                continue
+            blocks.append(f"标题：{note.get('title') or '无标题'}\n正文：{body[:700].strip()}")
+        return "\n\n---\n\n".join(blocks)[:MAX_REWRITE_PROFILE_SAMPLE_LENGTH].strip()
+
+    def _result_samples(self, notes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        samples = []
+        for note in notes:
+            samples.append({
+                "note_id": note.get("note_id"),
+                "title": note.get("title"),
+                "liked_count": note.get("liked_count"),
+                "collected_count": note.get("collected_count"),
+                "comment_count": note.get("comment_count"),
+                "share_count": note.get("share_count"),
+                "upload_time": note.get("upload_time"),
+                "note_url": note.get("note_url"),
+                "tags": note.get("tags") or [],
+                "image_analysis": note.get("image_analysis") if isinstance(note.get("image_analysis"), dict) else None,
+                "image_analysis_error": note.get("image_analysis_error"),
+            })
+        return samples
+
+    def _fallback_style_summary(self, notes: List[Dict[str, Any]]) -> str:
+        titles = "、".join(str(note.get("title") or "") for note in notes[:5])
+        return f"本次样本主要来自高赞笔记：{titles}。模型未返回完整总结，请以画像草稿和样本清单为准。"
+
+    def _write_result_files(
+        self,
+        output_dir: Path,
+        result: Dict[str, Any],
+        stage_logs: List[Dict[str, str]],
+    ) -> None:
+        (output_dir / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        (output_dir / "写作风格分析报告.md").write_text(self._render_report(result), encoding="utf-8")
+        log_lines = ["# 写作风格画像生成日志", ""]
+        for item in stage_logs:
+            log_lines.append(f"- [{item.get('time') or ''}] {item.get('message') or ''}")
+        (output_dir / "画像生成日志.md").write_text("\n".join(log_lines), encoding="utf-8")
+
+    def _render_report(self, result: Dict[str, Any]) -> str:
+        profile = result.get("profile_draft") if isinstance(result.get("profile_draft"), dict) else {}
+        lines = [
+            "# 写作风格分析报告",
+            "",
+            "## 运行信息",
+            "",
+            f"- 主页：{result.get('user_url') or ''}",
+            f"- 样本选择：高赞 Top {result.get('sample_limit') or ''}",
+            f"- 实际样本：{result.get('sample_count') or 0} 篇",
+            f"- 图片文字识别：{'开启' if result.get('include_image_ocr') else '关闭'}",
+            f"- 文本模型：{result.get('model', {}).get('text') or ''}",
+            f"- 视觉模型：{result.get('model', {}).get('vision') or ''}",
+            "",
+        ]
+        if result.get("sample_warning"):
+            lines.extend(["## 样本提示", "", str(result.get("sample_warning")), ""])
+        sections = [
+            ("总体风格", result.get("style_summary")),
+            ("句式节奏", result.get("sentence_rhythm")),
+            ("转化方式", result.get("conversion_patterns")),
+        ]
+        for title, value in sections:
+            text = str(value or "").strip()
+            if text:
+                lines.extend([f"## {title}", "", text, ""])
+        for title, key in [
+            ("常见开头", "opening_patterns"),
+            ("词汇偏好", "vocabulary_preferences"),
+            ("选题模式", "topic_patterns"),
+            ("建议边界", "forbidden_rule_suggestions"),
+        ]:
+            items = result.get(key) or []
+            if items:
+                lines.extend([f"## {title}", "", *[f"- {item}" for item in items], ""])
+        lines.extend(["## 创作画像草稿", ""])
+        for label, key in [
+            ("账号定位", "identity"),
+            ("业务背景", "business_context"),
+            ("目标人群", "target_audience"),
+            ("转化目标", "conversion_goal"),
+            ("我的文案风格", "writing_style"),
+            ("项目人格", "content_persona"),
+            ("禁用表达与边界", "forbidden_rules"),
+        ]:
+            value = str(profile.get(key) or "").strip()
+            if value:
+                lines.extend([f"### {label}", "", value, ""])
+        samples = result.get("samples") or []
+        if samples:
+            lines.extend(["## 样本清单", ""])
+            for index, sample in enumerate(samples, start=1):
+                lines.append(f"- {index}. {sample.get('title') or '无标题'}（点赞 {sample.get('liked_count') or 0}）")
+            lines.append("")
+        return "\n".join(lines)
+
+    def _normalize_text_list(self, value: Any, max_items: int, max_len: int) -> List[str]:
+        if isinstance(value, list):
+            raw_items = value
+        elif isinstance(value, str):
+            raw_items = re.split(r"[\n；;]+", value)
+        else:
+            raw_items = []
+        items = []
+        for item in raw_items:
+            text = self._compact_model_text(item, max_len)
+            if text and text not in items:
+                items.append(text)
+            if len(items) >= max_items:
+                break
+        return items
+
+    def _message_content_to_text(self, content: Any) -> str:
+        if isinstance(content, list):
+            parts = []
+            for part in content:
+                if isinstance(part, dict):
+                    parts.append(str(part.get("text") or part.get("content") or ""))
+                else:
+                    parts.append(str(part or ""))
+            return "\n".join(part for part in parts if part.strip())
+        if isinstance(content, dict):
+            return str(content.get("text") or content.get("content") or "")
+        return str(content or "")
+
+    def _parse_model_json(self, content: str) -> Dict[str, Any]:
+        text = str(content or "").strip()
+        if text.startswith("```"):
+            text = re.sub(r"^```(?:json)?\s*", "", text)
+            text = re.sub(r"\s*```$", "", text)
+        try:
+            parsed = json.loads(text)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start >= 0 and end > start:
+                parsed = json.loads(text[start:end + 1])
+                return parsed if isinstance(parsed, dict) else {}
+        raise ValueError("模型返回内容不是合法 JSON")
+
+    def _compact_model_text(self, value: Any, max_len: int) -> str:
+        if isinstance(value, (dict, list)):
+            text = json.dumps(value, ensure_ascii=False)
+        else:
+            text = str(value or "")
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n{4,}", "\n\n\n", text)
+        return text.strip()[:max_len].strip()
+
+    def _text_endpoint(self) -> str:
+        host = "dashscope-intl.aliyuncs.com" if self.region == "ap-southeast-1" else "dashscope.aliyuncs.com"
+        return f"https://{host}/compatible-mode/v1/chat/completions"
+
+    def _progress(self, progress: Optional[Callable[[str], None]], message: str) -> None:
+        logger.info(message)
+        if progress:
+            progress(message)
+
+    def _sleep_between_requests(
+        self,
+        delay_min: float,
+        delay_max: float,
+        record: Optional[Callable[[str], None]] = None,
+        next_action: str = "继续请求",
+    ) -> None:
+        if delay_max <= 0:
+            return
+        delay = delay_min if delay_min == delay_max else random.uniform(delay_min, delay_max)
+        if delay <= 0:
+            return
+        if record:
+            record(f"等待 {delay:.1f} 秒后{next_action}")
+        time.sleep(delay)
+
+
 class JobManager:
     def __init__(self, config_store: ConfigStore):
         self.config_store = config_store
@@ -2278,6 +2963,68 @@ class JobManager:
         thread = threading.Thread(
             target=self._run_rewrite_job,
             args=(job["id"], normalized_targets, topic_text, config_snapshot),
+            daemon=True,
+        )
+        thread.start()
+        return job
+
+    def start_style_profile(
+        self,
+        user_url: str = "",
+        sample_limit: Optional[int] = None,
+        include_image_ocr: Optional[bool] = None,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        config_snapshot = deepcopy(config or self.config_store.load())
+        style_config = config_snapshot.setdefault("style_profile", {})
+        if user_url is not None:
+            style_config["user_url"] = str(user_url or "").strip()
+        style_config["sample_selection"] = "top_liked"
+        style_config["sample_limit"] = to_int(
+            sample_limit if sample_limit is not None else style_config.get("sample_limit"),
+            DEFAULT_STYLE_PROFILE_SAMPLE_LIMIT,
+            MIN_STYLE_PROFILE_SAMPLE_LIMIT,
+            MAX_STYLE_PROFILE_SAMPLE_LIMIT,
+        )
+        if include_image_ocr is not None:
+            style_config["include_image_ocr"] = bool(include_image_ocr)
+        summary = {
+            "target_user": style_config.get("user_url") or "当前登录用户",
+            "sample_selection": "高赞",
+            "sample_limit": style_config["sample_limit"],
+            "include_image_ocr": bool(style_config.get("include_image_ocr")),
+        }
+
+        with self.lock:
+            running = self._running_job_unlocked()
+            if running:
+                raise RuntimeError(f"已有任务正在运行：{running['id']}")
+            job = {
+                "id": uuid.uuid4().hex[:12],
+                "type": "style_profile",
+                "source": "manual_style_profile",
+                "status": "running",
+                "created_at": now_text(),
+                "started_at": now_text(),
+                "finished_at": None,
+                "summary": summary,
+                "progress": {
+                    "value": 2,
+                    "label": "等待画像分析启动",
+                    "phase": "starting",
+                },
+                "logs": [],
+                "log_groups": self._empty_log_groups(),
+                "result": None,
+                "error": None,
+            }
+            self.jobs.insert(0, job)
+            self.jobs = self.jobs[:50]
+            self._persist_unlocked()
+
+        thread = threading.Thread(
+            target=self._run_style_profile_job,
+            args=(job["id"], config_snapshot),
             daemon=True,
         )
         thread.start()
@@ -2546,6 +3293,58 @@ class JobManager:
                     self._set_job_progress_unlocked(job, 100, "仿写失败", "failed", 0, total)
                     self._persist_unlocked()
 
+    def _run_style_profile_job(self, job_id: str, config: Dict[str, Any]) -> None:
+        style_config = config.get("style_profile", {}) if isinstance(config.get("style_profile"), dict) else {}
+        service = StyleProfileService(config)
+
+        def progress(message: str) -> None:
+            with self.lock:
+                job = self._find_job_unlocked(job_id)
+                if not job:
+                    return
+                self._append_job_log_unlocked(job, message, "style_profile")
+                self._update_style_profile_progress_unlocked(job, message)
+                self._persist_unlocked()
+
+        try:
+            with self.lock:
+                job = self._find_job_unlocked(job_id)
+                if job:
+                    self._append_job_log_unlocked(job, "开始写作风格画像任务", "style_profile")
+                    self._set_job_progress_unlocked(job, 3, "开始画像分析", "starting")
+                    self._persist_unlocked()
+
+            result = service.generate(
+                user_url=style_config.get("user_url", ""),
+                sample_limit=style_config.get("sample_limit"),
+                include_image_ocr=style_config.get("include_image_ocr"),
+                progress=progress,
+            )
+            with self.lock:
+                job = self._find_job_unlocked(job_id)
+                if job:
+                    job["status"] = "success"
+                    job["finished_at"] = now_text()
+                    job["result"] = result
+                    self._append_job_log_unlocked(
+                        job,
+                        f"写作风格画像任务结束：样本 {result.get('sample_count', 0)} 篇",
+                        "style_profile",
+                    )
+                    self._set_job_progress_unlocked(job, 100, "画像草稿完成", "completed")
+                    self._persist_unlocked()
+        except Exception as exc:
+            logger.exception(exc)
+            with self.lock:
+                job = self._find_job_unlocked(job_id)
+                if job:
+                    job["status"] = "failed"
+                    job["finished_at"] = now_text()
+                    job["error"] = str(exc)
+                    self._append_job_log_unlocked(job, f"写作风格画像任务失败：{exc}", "style_profile")
+                    self._set_job_progress_unlocked(job, 100, "画像生成失败", "failed")
+                    self._persist_unlocked()
+
     def _normalize_rewrite_targets(self, targets: List[Dict[str, Any]]) -> List[Dict[str, str]]:
         normalized: List[Dict[str, str]] = []
         seen = set()
@@ -2578,6 +3377,11 @@ class JobManager:
             return "crawl"
         if raw in {"rewrite", "ai_rewrite"}:
             return "rewrite"
+        if raw in {"style_profile", "profile", "style"}:
+            return "style_profile"
+        job_type = str(job.get("type") or "").strip()
+        if job_type in JOB_LOG_TYPES:
+            return job_type
         return "rewrite" if job.get("type") == "rewrite" else "crawl"
 
     def _normalize_log_entry(self, item: Any, fallback_type: str = "") -> Dict[str, str]:
@@ -2598,7 +3402,7 @@ class JobManager:
         return any(marker in str(message or "") for marker in REWRITE_LOG_MARKERS)
 
     def _empty_log_groups(self) -> Dict[str, List[Dict[str, str]]]:
-        return {"crawl": [], "rewrite": []}
+        return {log_type: [] for log_type in JOB_LOG_TYPES}
 
     def _job_log_groups(self, job: Dict[str, Any]) -> Dict[str, List[Dict[str, str]]]:
         groups = self._empty_log_groups()
@@ -2611,18 +3415,24 @@ class JobManager:
                         self._normalize_log_entry(item, log_type)
                         for item in entries
                     ][-120:]
-        if groups["crawl"] or groups["rewrite"]:
+        if any(groups.get(log_type) for log_type in JOB_LOG_TYPES):
             return groups
 
         rewrite_active = job.get("type") == "rewrite"
+        style_active = job.get("type") == "style_profile"
         for item in job.get("logs") or []:
             entry = self._normalize_log_entry(item)
             log_type = entry.get("type")
             if log_type not in JOB_LOG_TYPES:
-                log_type = "rewrite" if rewrite_active or self._is_rewrite_log_message(entry.get("message", "")) else "crawl"
+                if style_active:
+                    log_type = "style_profile"
+                else:
+                    log_type = "rewrite" if rewrite_active or self._is_rewrite_log_message(entry.get("message", "")) else "crawl"
                 entry["type"] = log_type
             if log_type == "rewrite":
                 rewrite_active = True
+            if log_type == "style_profile":
+                style_active = True
             groups[log_type].append(entry)
         for log_type in JOB_LOG_TYPES:
             groups[log_type] = groups[log_type][-120:]
@@ -2697,6 +3507,35 @@ class JobManager:
             self._set_job_progress_unlocked(job, value, f"自动配图 {current}/{total}", "rewrite_images", current, total)
         elif "仿写完成" in text:
             self._set_job_progress_unlocked(job, 98, "自动仿写完成", "rewrite_done")
+
+    def _update_style_profile_progress_unlocked(self, job: Dict[str, Any], message: str) -> None:
+        if job.get("type") != "style_profile":
+            return
+        text = str(message or "")
+        detail_match = re.search(r"正在拉取文章详情\s+(\d+)\s*/\s*(\d+)", text)
+        image_match = re.search(r"正在识别样本图片文字\s+(\d+)\s*/\s*(\d+)", text)
+        if "读取主页" in text:
+            self._set_job_progress_unlocked(job, 8, "读取主页文章", "profile_fetching")
+        elif detail_match:
+            current = to_int(detail_match.group(1), 0)
+            total = max(to_int(detail_match.group(2), 1), 1)
+            value = 10 + (current / total) * 45
+            self._set_job_progress_unlocked(job, value, f"拉取详情 {current}/{total}", "profile_fetching", current, total)
+        elif "已选择高赞样本" in text:
+            self._set_job_progress_unlocked(job, 58, "筛选高赞样本", "profile_sampling")
+        elif image_match:
+            current = to_int(image_match.group(1), 0)
+            total = max(to_int(image_match.group(2), 1), 1)
+            value = 60 + (current / total) * 18
+            self._set_job_progress_unlocked(job, value, f"图片识别 {current}/{total}", "profile_ocr", current, total)
+        elif "图片文字识别完成" in text or "关闭图片文字识别" in text or "跳过图片文字识别" in text:
+            self._set_job_progress_unlocked(job, 80, "样本准备完成", "profile_ready")
+        elif "请求文本模型" in text:
+            self._set_job_progress_unlocked(job, 86, "总结写作风格", "profile_model")
+        elif "写入写作风格画像结果" in text:
+            self._set_job_progress_unlocked(job, 94, "写入画像草稿", "profile_writing")
+        elif "写作风格画像完成" in text:
+            self._set_job_progress_unlocked(job, 99, "画像草稿完成", "profile_done")
 
     def _set_rewrite_item_progress_unlocked(
         self,

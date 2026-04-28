@@ -630,6 +630,36 @@ def run_manual_rewrite_job(payload: Dict[str, Any]) -> Dict[str, Any]:
     return job_manager.start_rewrite(raw_targets, topic=topic, config=config)
 
 
+def run_style_profile_job(payload: Dict[str, Any]) -> Dict[str, Any]:
+    style_payload = {
+        "user_url": str(payload.get("user_url") or "").strip(),
+        "sample_selection": "top_liked",
+        "sample_limit": payload.get("sample_limit", 30),
+        "include_image_ocr": bool(payload.get("include_image_ocr")),
+    }
+    config = config_store.save({"style_profile": style_payload})
+    style_config = config.get("style_profile", {}) if isinstance(config.get("style_profile"), dict) else {}
+    return job_manager.start_style_profile(
+        user_url=style_config.get("user_url", ""),
+        sample_limit=style_config.get("sample_limit", 30),
+        include_image_ocr=style_config.get("include_image_ocr", False),
+        config=config,
+    )
+
+
+def apply_style_profile_draft(payload: Dict[str, Any]) -> Dict[str, Any]:
+    profile_draft = payload.get("profile_draft")
+    if not isinstance(profile_draft, dict):
+        raise ValueError("缺少可应用的创作画像草稿")
+    saved_config = config_store.save({
+        "rewrite": {
+            "creator_profile": profile_draft,
+        }
+    })
+    sync_profile_memory(saved_config)
+    return config_store.public()
+
+
 def sync_profile_memory(config: Dict[str, Any]) -> None:
     try:
         rewrite = config.get("rewrite", {}) if isinstance(config.get("rewrite"), dict) else {}
@@ -766,6 +796,10 @@ class AppHandler(BaseHTTPRequestHandler):
                 json_response(self, {"success": True, "job": run_manual_rewrite_job(payload)})
             elif path == "/api/rewrite":
                 json_response(self, {"success": True, "rewrite": run_manual_rewrite(payload)})
+            elif path == "/api/style-profile-job":
+                json_response(self, {"success": True, "job": run_style_profile_job(payload), "config": config_store.public()})
+            elif path == "/api/style-profile/apply":
+                json_response(self, {"success": True, "config": apply_style_profile_draft(payload)})
             elif path == "/api/file/save":
                 root = normalize_file_root(payload.get("root"))
                 config = config_store.load()

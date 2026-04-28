@@ -125,6 +125,13 @@ const settingsEls = {
   rewriteProfileForbiddenInput: document.querySelector('#rewriteProfileForbiddenInput'),
   rewriteProfileSamplesInput: document.querySelector('#rewriteProfileSamplesInput'),
   rewriteProfileInputs: Array.from(document.querySelectorAll('[data-rewrite-profile-input]')),
+  styleProfileUserUrlInput: document.querySelector('#styleProfileUserUrlInput'),
+  styleProfileSampleLimitInput: document.querySelector('#styleProfileSampleLimitInput'),
+  styleProfileImageOcrInput: document.querySelector('#styleProfileImageOcrInput'),
+  generateStyleProfileBtn: document.querySelector('#generateStyleProfileBtn'),
+  applyStyleProfileDraftBtn: document.querySelector('#applyStyleProfileDraftBtn'),
+  styleProfileStatus: document.querySelector('#styleProfileStatus'),
+  styleProfileDraftPreview: document.querySelector('#styleProfileDraftPreview'),
   rewriteTextModelInput: document.querySelector('#rewriteTextModelInput'),
   rewriteVisionModelInput: document.querySelector('#rewriteVisionModelInput'),
   rewriteAnalyzeImagesInput: document.querySelector('#rewriteAnalyzeImagesInput'),
@@ -236,6 +243,11 @@ const state = {
   },
   collectBusy: false,
   rewriteBusy: false,
+  styleProfileBusy: false,
+  styleProfileJobId: '',
+  styleProfilePoller: null,
+  styleProfileDraft: null,
+  latestStyleProfileResult: null,
   savedRewriteApiKey: '',
   collectOverlayState: {
     status: 'idle',
@@ -1460,6 +1472,227 @@ function readRewriteProfileDraft() {
   };
 }
 
+function applyStyleProfileConfig(styleProfile = {}) {
+  if (settingsEls.styleProfileUserUrlInput) {
+    settingsEls.styleProfileUserUrlInput.value = styleProfile.user_url || '';
+  }
+  if (settingsEls.styleProfileSampleLimitInput) {
+    settingsEls.styleProfileSampleLimitInput.value = styleProfile.sample_limit || 30;
+  }
+  if (settingsEls.styleProfileImageOcrInput) {
+    settingsEls.styleProfileImageOcrInput.checked = Boolean(styleProfile.include_image_ocr);
+  }
+  updateStyleProfileStatus();
+}
+
+function readStyleProfileDraft() {
+  return {
+    user_url: (settingsEls.styleProfileUserUrlInput?.value || '').trim(),
+    sample_limit: clampNumber(toNumber(settingsEls.styleProfileSampleLimitInput?.value, 30), 5, 100),
+    include_image_ocr: Boolean(settingsEls.styleProfileImageOcrInput?.checked),
+  };
+}
+
+function profileDraftText(profile = {}) {
+  const fields = [
+    ['账号定位', profile.identity],
+    ['业务背景', profile.business_context],
+    ['目标人群', profile.target_audience],
+    ['转化目标', profile.conversion_goal],
+    ['我的文案风格', profile.writing_style],
+    ['项目人格', profile.content_persona],
+    ['禁用表达与边界', profile.forbidden_rules],
+    ['历史文案样本', profile.sample_texts],
+  ];
+  return fields
+    .filter(([_label, value]) => String(value || '').trim())
+    .map(([label, value]) => `${label}\n${String(value || '').trim()}`)
+    .join('\n\n');
+}
+
+function renderStyleProfileDraft(result = null) {
+  const preview = settingsEls.styleProfileDraftPreview;
+  const applyButton = settingsEls.applyStyleProfileDraftBtn;
+  const profile = result?.profile_draft || state.styleProfileDraft;
+  state.latestStyleProfileResult = result || state.latestStyleProfileResult;
+  state.styleProfileDraft = profile || null;
+  if (applyButton) applyButton.disabled = !state.styleProfileDraft || state.styleProfileBusy;
+  if (!preview) return;
+  if (!state.styleProfileDraft) {
+    preview.hidden = true;
+    preview.innerHTML = '';
+    return;
+  }
+  const styleSummary = result?.style_summary || '';
+  const warning = result?.sample_warning || '';
+  const sampleCount = result?.sample_count;
+  const items = [];
+  if (sampleCount !== undefined) items.push(['样本', `${sampleCount} 篇`]);
+  if (warning) items.push(['提示', warning]);
+  if (styleSummary) items.push(['风格总结', styleSummary]);
+  items.push(['创作画像草稿', profileDraftText(state.styleProfileDraft)]);
+  preview.innerHTML = items.map(([title, body]) => `
+    <section>
+      <h4>${escapeHtml(title)}</h4>
+      <p>${escapeHtml(body)}</p>
+    </section>
+  `).join('');
+  preview.hidden = false;
+}
+
+function updateStyleProfileStatus(message = '', tone = '') {
+  if (!settingsEls.styleProfileStatus) return;
+  if (message) {
+    settingsEls.styleProfileStatus.textContent = message;
+    settingsEls.styleProfileStatus.className = `status-panel ${tone || 'muted'}`;
+    return;
+  }
+  if (state.styleProfileBusy) {
+    settingsEls.styleProfileStatus.textContent = '写作风格画像生成中...';
+    settingsEls.styleProfileStatus.className = 'status-panel muted';
+    return;
+  }
+  if (state.styleProfileDraft) {
+    settingsEls.styleProfileStatus.textContent = '画像草稿已生成，确认后可应用到创作画像。';
+    settingsEls.styleProfileStatus.className = 'status-panel good';
+    return;
+  }
+  settingsEls.styleProfileStatus.textContent = '尚未生成画像草稿';
+  settingsEls.styleProfileStatus.className = 'status-panel muted';
+}
+
+function setStyleProfileBusy(busy) {
+  state.styleProfileBusy = Boolean(busy);
+  if (settingsEls.generateStyleProfileBtn) {
+    settingsEls.generateStyleProfileBtn.disabled = state.styleProfileBusy;
+  }
+  if (settingsEls.applyStyleProfileDraftBtn) {
+    settingsEls.applyStyleProfileDraftBtn.disabled = state.styleProfileBusy || !state.styleProfileDraft;
+  }
+  updateStyleProfileStatus();
+}
+
+function applyProfileDraftToInputs(profile = {}) {
+  applyRewriteProfileConfig({
+    ...profile,
+    enabled: profile.enabled !== false,
+  });
+}
+
+async function startStyleProfileJob() {
+  if (state.styleProfileBusy) return;
+  const draft = readStyleProfileDraft();
+  state.styleProfileDraft = null;
+  state.latestStyleProfileResult = null;
+  renderStyleProfileDraft(null);
+  setStyleProfileBusy(true);
+  updateStyleProfileStatus('正在创建写作风格画像任务...');
+  try {
+    const data = await api('/api/style-profile-job', {
+      method: 'POST',
+      body: JSON.stringify(draft),
+    });
+    state.config = data.config || state.config;
+    if (data.config) applyStyleProfileConfig(data.config.style_profile || {});
+    state.styleProfileJobId = data.job?.id || '';
+    updateStyleProfileStatus(state.styleProfileJobId ? `画像任务已启动：${state.styleProfileJobId}` : '画像任务已启动');
+    pollStyleProfileJob({ immediate: true });
+  } catch (error) {
+    setStyleProfileBusy(false);
+    updateStyleProfileStatus(error.message || '画像任务启动失败', 'bad');
+    throw error;
+  }
+}
+
+function stopStyleProfilePolling() {
+  if (state.styleProfilePoller) {
+    window.clearInterval(state.styleProfilePoller);
+    state.styleProfilePoller = null;
+  }
+}
+
+async function pollStyleProfileJob({ immediate = false } = {}) {
+  if (!state.styleProfileJobId) {
+    setStyleProfileBusy(false);
+    return;
+  }
+
+  const check = async () => {
+    const data = await api('/api/jobs');
+    const job = (data.jobs || []).find((item) => String(item.id) === state.styleProfileJobId);
+    if (!job) return;
+    const progress = job.progress || {};
+    if (job.status === 'running') {
+      updateStyleProfileStatus(progress.label || jobPrimaryMessage(job));
+      return;
+    }
+    stopStyleProfilePolling();
+    setStyleProfileBusy(false);
+    state.styleProfileJobId = '';
+    if (job.status === 'success') {
+      renderStyleProfileDraft(job.result || {});
+      updateStyleProfileStatus('画像草稿已生成，确认后可应用到创作画像。', 'good');
+      toast('写作风格画像草稿已生成');
+      return;
+    }
+    updateStyleProfileStatus(job.error || jobPrimaryMessage(job) || '画像生成失败', 'bad');
+  };
+
+  if (immediate) {
+    await check().catch((error) => {
+      setStyleProfileBusy(false);
+      updateStyleProfileStatus(error.message, 'bad');
+    });
+  }
+  if (!state.styleProfileBusy || !state.styleProfileJobId) return;
+  stopStyleProfilePolling();
+  state.styleProfilePoller = window.setInterval(() => {
+    check().catch((error) => {
+      stopStyleProfilePolling();
+      setStyleProfileBusy(false);
+      updateStyleProfileStatus(error.message, 'bad');
+    });
+  }, 2500);
+}
+
+async function applyStyleProfileDraft() {
+  if (!state.styleProfileDraft) {
+    toast('请先生成画像草稿');
+    return;
+  }
+  const data = await api('/api/style-profile/apply', {
+    method: 'POST',
+    body: JSON.stringify({ profile_draft: state.styleProfileDraft }),
+  });
+  state.config = data.config;
+  state.choices = data.config?.choices || state.choices;
+  applyProfileDraftToInputs(data.config?.rewrite?.creator_profile || state.styleProfileDraft);
+  applySettingsConfig(data.config);
+  renderStyleProfileDraft(state.latestStyleProfileResult);
+  updateStyleProfileStatus('画像草稿已应用到创作画像。', 'good');
+  refreshMemoryPanels().catch(() => {});
+  toast('创作画像已更新');
+}
+
+async function hydrateStyleProfileJobState() {
+  if (!settingsEls.generateStyleProfileBtn) return;
+  const data = await api('/api/jobs');
+  const jobs = data.jobs || [];
+  const running = jobs.find((job) => job.type === 'style_profile' && job.status === 'running');
+  if (running) {
+    state.styleProfileJobId = running.id || '';
+    setStyleProfileBusy(true);
+    updateStyleProfileStatus(jobPrimaryMessage(running));
+    pollStyleProfileJob({ immediate: false });
+    return;
+  }
+  const latest = jobs.find((job) => job.type === 'style_profile' && job.status === 'success' && job.result?.profile_draft);
+  if (latest) {
+    renderStyleProfileDraft(latest.result);
+    updateStyleProfileStatus('已读取最近一次画像草稿，确认后可应用到创作画像。', 'good');
+  }
+}
+
 function setRewriteApiKeyVisible(visible) {
   const input = settingsEls.rewriteApiKeyInput;
   const toggle = settingsEls.rewriteApiKeyToggleBtn;
@@ -1491,6 +1724,7 @@ function applySettingsConfig(config) {
   const collect = config.collect || {};
   const schedule = config.schedule || {};
   const rewrite = config.rewrite || {};
+  const styleProfile = config.style_profile || {};
 
   applyHomeConfig(config);
   applyLoginSummary(config);
@@ -1511,6 +1745,7 @@ function applySettingsConfig(config) {
   if (settingsEls.rewriteTopicSettingsInput) settingsEls.rewriteTopicSettingsInput.value = rewrite.topic || '创业沙龙';
   updateRewriteRequirementSummary();
   applyRewriteProfileConfig(rewrite.creator_profile || {});
+  applyStyleProfileConfig(styleProfile);
   if (settingsEls.rewriteTextModelInput) settingsEls.rewriteTextModelInput.value = rewrite.text_model || 'qwen-plus';
   if (settingsEls.rewriteVisionModelInput) settingsEls.rewriteVisionModelInput.value = rewrite.vision_model || 'qwen3-vl-plus';
   if (settingsEls.rewriteAnalyzeImagesInput) settingsEls.rewriteAnalyzeImagesInput.checked = rewrite.analyze_images !== false;
@@ -1603,6 +1838,10 @@ function readSettingsDraft() {
       creator_profile: readRewriteProfileDraft(),
     },
     memory: readMemoryDraft(),
+    style_profile: {
+      ...readStyleProfileDraft(),
+      sample_selection: 'top_liked',
+    },
   };
 }
 
@@ -1871,6 +2110,9 @@ function jobStatusMeta(status) {
 }
 
 function jobSourceLabel(source, type = 'collect') {
+  if (type === 'style_profile') {
+    return '写作画像';
+  }
   if (type === 'rewrite') {
     return source === 'schedule' ? '自动仿写' : '手动仿写';
   }
@@ -1915,11 +2157,13 @@ function truncateText(value, maxLength = 84) {
 const JOB_LOG_GROUPS = {
   crawl: { label: '爬取日志' },
   rewrite: { label: '创作日志' },
+  style_profile: { label: '画像日志' },
 };
+const JOB_LOG_TYPES = Object.keys(JOB_LOG_GROUPS);
 
 function normalizeJobLogEntry(item, fallbackType = '') {
   if (item && typeof item === 'object') {
-    const type = ['crawl', 'rewrite'].includes(item.type) ? item.type : fallbackType;
+    const type = JOB_LOG_TYPES.includes(item.type) ? item.type : fallbackType;
     return {
       time: String(item.time || ''),
       message: String(item.message || ''),
@@ -1938,7 +2182,7 @@ function looksLikeRewriteLog(message) {
 }
 
 function jobLogGroups(job) {
-  const groups = { crawl: [], rewrite: [] };
+  const groups = Object.fromEntries(JOB_LOG_TYPES.map((type) => [type, []]));
   const storedGroups = job.log_groups || job.logGroups;
   if (storedGroups && typeof storedGroups === 'object') {
     Object.keys(groups).forEach((key) => {
@@ -1947,24 +2191,32 @@ function jobLogGroups(job) {
     });
   }
 
-  if (!groups.crawl.length && !groups.rewrite.length) {
+  if (!JOB_LOG_TYPES.some((type) => groups[type].length)) {
     let rewriteActive = (job.type || 'collect') === 'rewrite';
+    let styleActive = (job.type || 'collect') === 'style_profile';
     const logs = Array.isArray(job.logs) ? job.logs : [];
     logs.forEach((item) => {
       const entry = normalizeJobLogEntry(item);
-      let type = ['crawl', 'rewrite'].includes(entry.type) ? entry.type : '';
+      let type = JOB_LOG_TYPES.includes(entry.type) ? entry.type : '';
       if (!type) {
-        type = rewriteActive || looksLikeRewriteLog(entry.message) ? 'rewrite' : 'crawl';
+        if (styleActive) {
+          type = 'style_profile';
+        } else {
+          type = rewriteActive || looksLikeRewriteLog(entry.message) ? 'rewrite' : 'crawl';
+        }
         entry.type = type;
       }
       if (type === 'rewrite') rewriteActive = true;
+      if (type === 'style_profile') styleActive = true;
       groups[type].push(entry);
     });
   }
 
   const order = (job.type || 'collect') === 'rewrite'
-    ? ['rewrite', 'crawl']
-    : ['crawl', 'rewrite'];
+    ? ['rewrite', 'crawl', 'style_profile']
+    : ((job.type || 'collect') === 'style_profile'
+      ? ['style_profile', 'crawl', 'rewrite']
+      : ['crawl', 'rewrite', 'style_profile']);
   return order
     .map((key) => ({
       id: key,
@@ -1982,6 +2234,9 @@ function visibleJobLogGroups(job) {
   if (state.jobTypeFilter === 'rewrite') {
     return groups.filter((group) => group.id === 'rewrite');
   }
+  if (state.jobTypeFilter === 'style_profile') {
+    return groups.filter((group) => group.id === 'style_profile');
+  }
   return groups;
 }
 
@@ -1996,6 +2251,9 @@ function jobMatchesLogType(job, type = 'all') {
     return jobType === 'rewrite'
       || Boolean(job.result?.rewrite || job.result?.rewrite_error)
       || groups.some((group) => group.id === 'rewrite');
+  }
+  if (type === 'style_profile') {
+    return jobType === 'style_profile' || groups.some((group) => group.id === 'style_profile');
   }
   return true;
 }
@@ -2017,6 +2275,10 @@ function countJobLogIssues(job) {
 }
 
 function jobKeywords(summary = {}, job = {}) {
+  if ((job.type || 'collect') === 'style_profile') {
+    const target = summary.target_user || job.result?.user_url || '当前登录用户';
+    return `写作风格画像 · ${truncateText(target, 40)}`;
+  }
   if ((job.type || 'collect') === 'rewrite') {
     const topic = summary.rewrite_topic || job.result?.topic || 'AI仿写要求';
     const names = Array.isArray(summary.target_names) ? summary.target_names.filter(Boolean) : [];
@@ -2031,6 +2293,11 @@ function jobKeywords(summary = {}, job = {}) {
 }
 
 function jobScopeText(summary = {}, job = {}) {
+  if ((job.type || 'collect') === 'style_profile') {
+    const limit = summary.sample_limit || job.result?.sample_limit || 30;
+    const ocr = (summary.include_image_ocr ?? job.result?.include_image_ocr) ? '识别图片' : '不识别图片';
+    return `高赞 Top ${limit} · ${ocr}`;
+  }
   if ((job.type || 'collect') === 'rewrite') {
     const count = summary.target_count || job.result?.target_count || 0;
     const topic = summary.rewrite_topic || job.result?.topic || '默认要求';
@@ -2085,6 +2352,15 @@ function jobProgress(job) {
 function jobPrimaryMessage(job) {
   const result = job.result || {};
   const latestLog = latestJobLog(job);
+  if ((job.type || 'collect') === 'style_profile') {
+    if (job.status === 'success') {
+      return `画像草稿完成：样本 ${result.sample_count || 0} 篇`;
+    }
+    if (job.status === 'failed' || job.status === 'interrupted') {
+      return truncateText(job.error || latestLog?.message || jobStatusMeta(job.status).label, 120);
+    }
+    return truncateText(latestLog?.message || '正在生成写作风格画像', 120);
+  }
   if ((job.type || 'collect') === 'rewrite') {
     const targetCount = result.target_count || job.summary?.target_count || 0;
     const successCount = result.success_count || 0;
@@ -2112,6 +2388,16 @@ function jobPrimaryMessage(job) {
 function jobMetricItems(job) {
   const summary = job.summary || {};
   const result = job.result || {};
+  if ((job.type || 'collect') === 'style_profile') {
+    const sampleCount = result.sample_count ?? summary.sample_limit ?? '—';
+    const failedCount = result.failed_count ?? countJobLogIssues(job);
+    return [
+      { label: '样本', value: sampleCount === '—' ? sampleCount : `${sampleCount} 篇` },
+      { label: '图片', value: (summary.include_image_ocr ?? result.include_image_ocr) ? '识别' : '关闭' },
+      { label: '异常', value: `${failedCount || 0} 条` },
+      { label: '耗时', value: formatDuration(job.started_at || job.created_at, job.finished_at) },
+    ];
+  }
   if ((job.type || 'collect') === 'rewrite') {
     const targetCount = result.target_count ?? summary.target_count ?? '—';
     const successCount = result.success_count ?? 0;
@@ -2150,6 +2436,7 @@ function jobTypeFilterOptions(jobs) {
     { value: 'all', label: '全部日志', count: statusJobs.length },
     { value: 'crawl', label: '爬取日志', count: statusJobs.filter((job) => jobMatchesLogType(job, 'crawl')).length },
     { value: 'rewrite', label: '创作日志', count: statusJobs.filter((job) => jobMatchesLogType(job, 'rewrite')).length },
+    { value: 'style_profile', label: '画像日志', count: statusJobs.filter((job) => jobMatchesLogType(job, 'style_profile')).length },
   ];
 }
 
@@ -2163,7 +2450,7 @@ function filterJobsByStatus(jobs) {
 
 function filterJobsByLogType(jobs) {
   const filter = state.jobTypeFilter;
-  if (filter === 'crawl' || filter === 'rewrite') {
+  if (filter === 'crawl' || filter === 'rewrite' || filter === 'style_profile') {
     return jobs.filter((job) => jobMatchesLogType(job, filter));
   }
   return jobs;
@@ -2332,7 +2619,9 @@ function renderJobStatusSummary(jobs) {
 
   const meta = jobStatusMeta(latest.status);
   const title = runningJobs.length
-    ? ((latest.type || 'collect') === 'rewrite' ? '正在仿写' : '正在采集')
+    ? ((latest.type || 'collect') === 'rewrite'
+      ? '正在仿写'
+      : ((latest.type || 'collect') === 'style_profile' ? '正在生成画像' : '正在采集'))
     : `最近任务${meta.label}`;
   const subtitle = `${jobSourceLabel(latest.source, latest.type || 'collect')} · ${compactTime(latest.started_at || latest.created_at)} · ${jobPrimaryMessage(latest)}`;
   const successCount = jobs.filter((job) => job.status === 'success').length;
@@ -5820,6 +6109,16 @@ function bindSettingsEvents() {
   settingsEls.rewriteProfileInputs.forEach((input) => {
     input.addEventListener('input', updateRewriteProfileSummary);
   });
+  if (settingsEls.generateStyleProfileBtn) {
+    settingsEls.generateStyleProfileBtn.addEventListener('click', () => {
+      startStyleProfileJob().catch((error) => toast(error.message));
+    });
+  }
+  if (settingsEls.applyStyleProfileDraftBtn) {
+    settingsEls.applyStyleProfileDraftBtn.addEventListener('click', () => {
+      applyStyleProfileDraft().catch((error) => toast(error.message));
+    });
+  }
   if (settingsEls.memoryProjectAddBtn) {
     settingsEls.memoryProjectAddBtn.addEventListener('click', () => {
       openMemoryProjectModal('add');
@@ -5921,6 +6220,7 @@ async function bootSettings() {
   bindSettingsEvents();
   await loadSettingsConfig();
   await refreshMemoryPanels().catch(() => {});
+  await hydrateStyleProfileJobState().catch(() => {});
   await syncBrowserLoginStatus();
 }
 
@@ -5928,6 +6228,7 @@ function cleanup() {
   if (state.jobPoller) {
     window.clearInterval(state.jobPoller);
   }
+  stopStyleProfilePolling();
   stopLoginPolling();
 }
 

@@ -26,6 +26,12 @@
     "output_dir": "",
     "rewrite_output_dir": ""
   },
+  "style_profile": {
+    "user_url": "",
+    "sample_selection": "top_liked",
+    "sample_limit": 30,
+    "include_image_ocr": false
+  },
   "ui": {
     "job_page_size": 10
   },

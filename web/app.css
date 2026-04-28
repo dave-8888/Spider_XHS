@@ -1617,6 +1617,54 @@ select:focus {
   margin-bottom: 14px;
 }
 
+.style-profile-tool {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+  background: var(--panel-bg);
+}
+
+.style-profile-tool .compact-form {
+  gap: 12px;
+}
+
+.compact-switch-row {
+  margin-bottom: 0;
+}
+
+.style-profile-actions {
+  justify-content: flex-start;
+}
+
+.style-profile-draft-preview {
+  display: grid;
+  gap: 10px;
+  max-height: 420px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: rgba(248, 250, 252, 0.06);
+}
+
+.surface:not(.surface-dark) .style-profile-draft-preview {
+  background: rgba(15, 23, 42, 0.04);
+}
+
+.style-profile-draft-preview h4 {
+  margin: 0;
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.style-profile-draft-preview p {
+  margin: 0;
+  color: var(--text-soft);
+  white-space: pre-wrap;
+}
+
 .memory-center-section {
   display: grid;
   gap: 16px;
