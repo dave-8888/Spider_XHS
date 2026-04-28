@@ -1194,15 +1194,23 @@ function updateMemoryProjectModalMeta() {
 function setMemoryProjectModalSaving(saving) {
   state.memoryProjectModalSaving = Boolean(saving);
   const disabled = state.memoryProjectModalSaving;
+  const isPreview = state.memoryProjectModalMode === 'preview';
   [
-    settingsEls.memoryProjectModalInput,
     settingsEls.memoryProjectModalCloseBtn,
     settingsEls.memoryProjectModalCancelBtn,
   ].forEach((element) => {
     if (element) element.disabled = disabled;
   });
+  if (settingsEls.memoryProjectModalInput) {
+    settingsEls.memoryProjectModalInput.disabled = disabled && !isPreview;
+    settingsEls.memoryProjectModalInput.readOnly = isPreview;
+  }
+  if (settingsEls.memoryProjectModalCancelBtn) {
+    settingsEls.memoryProjectModalCancelBtn.textContent = isPreview ? '关闭' : '取消';
+  }
   if (settingsEls.memoryProjectModalSubmitBtn) {
-    settingsEls.memoryProjectModalSubmitBtn.disabled = disabled;
+    settingsEls.memoryProjectModalSubmitBtn.classList.toggle('is-hidden', isPreview);
+    settingsEls.memoryProjectModalSubmitBtn.disabled = disabled || isPreview;
     settingsEls.memoryProjectModalSubmitBtn.textContent = disabled
       ? '保存中...'
       : (state.memoryProjectModalMode === 'edit' ? '保存修改' : '新增');
@@ -1217,27 +1225,30 @@ function openMemoryProjectModal(mode = 'add', index = -1) {
   }
 
   const isEdit = mode === 'edit';
-  const entry = isEdit ? getMemoryProjectEntry(index) : null;
-  if (isEdit && !entry) {
+  const isPreview = mode === 'preview';
+  const entry = (isEdit || isPreview) ? getMemoryProjectEntry(index) : null;
+  if ((isEdit || isPreview) && !entry) {
     toast('项目记忆已变化，请刷新后重试');
     return;
   }
 
-  state.memoryProjectModalMode = isEdit ? 'edit' : 'add';
-  state.memoryProjectModalIndex = isEdit ? Number(entry.index) : -1;
+  state.memoryProjectModalMode = isPreview ? 'preview' : (isEdit ? 'edit' : 'add');
+  state.memoryProjectModalIndex = (isEdit || isPreview) ? Number(entry.index) : -1;
   state.memoryProjectModalPreviousFocus = document.activeElement instanceof Element
     ? document.activeElement
     : null;
 
   if (settingsEls.memoryProjectModalTitle) {
-    settingsEls.memoryProjectModalTitle.textContent = isEdit ? '修改项目记忆' : '新增项目记忆';
+    settingsEls.memoryProjectModalTitle.textContent = isPreview
+      ? '预览项目记忆'
+      : (isEdit ? '修改项目记忆' : '新增项目记忆');
   }
   if (settingsEls.memoryProjectModalKicker) {
-    settingsEls.memoryProjectModalKicker.textContent = isEdit
+    settingsEls.memoryProjectModalKicker.textContent = (isEdit || isPreview)
       ? `MEMORY.md · ${String(Number(entry.index) + 1).padStart(2, '0')}`
       : 'MEMORY.md';
   }
-  settingsEls.memoryProjectModalInput.value = isEdit ? entry.content || '' : '';
+  settingsEls.memoryProjectModalInput.value = (isEdit || isPreview) ? entry.content || '' : '';
   updateMemoryProjectModalMeta();
   setMemoryProjectModalSaving(false);
 
@@ -1246,7 +1257,11 @@ function openMemoryProjectModal(mode = 'add', index = -1) {
   document.body.classList.add('has-memory-project-modal');
 
   window.requestAnimationFrame(() => {
-    settingsEls.memoryProjectModalInput?.focus();
+    if (isPreview) {
+      settingsEls.memoryProjectModalCloseBtn?.focus();
+      return;
+    }
+    settingsEls.memoryProjectModalInput.focus();
     const end = settingsEls.memoryProjectModalInput?.value.length || 0;
     settingsEls.memoryProjectModalInput?.setSelectionRange(end, end);
   });
@@ -1257,7 +1272,16 @@ function closeMemoryProjectModal({ restoreFocus = true } = {}) {
   settingsEls.memoryProjectModal.hidden = true;
   settingsEls.memoryProjectModal.setAttribute('aria-hidden', 'true');
   document.body.classList.remove('has-memory-project-modal');
-  if (settingsEls.memoryProjectModalInput) settingsEls.memoryProjectModalInput.value = '';
+  if (settingsEls.memoryProjectModalInput) {
+    settingsEls.memoryProjectModalInput.value = '';
+    settingsEls.memoryProjectModalInput.readOnly = false;
+    settingsEls.memoryProjectModalInput.disabled = false;
+  }
+  if (settingsEls.memoryProjectModalCancelBtn) settingsEls.memoryProjectModalCancelBtn.textContent = '取消';
+  if (settingsEls.memoryProjectModalSubmitBtn) {
+    settingsEls.memoryProjectModalSubmitBtn.classList.remove('is-hidden');
+    settingsEls.memoryProjectModalSubmitBtn.disabled = false;
+  }
   updateMemoryProjectModalMeta();
   state.memoryProjectModalMode = 'add';
   state.memoryProjectModalIndex = -1;
@@ -1303,15 +1327,17 @@ function renderMemoryProjectEntries(data) {
   settingsEls.memoryProjectList.innerHTML = entries.map((entry) => {
     const index = Number(entry.index || 0);
     const content = entry.content || '';
+    const preview = truncateText(content.replace(/\s+/g, ' '), 52);
+    const chars = entry.chars || content.length;
     return `
       <article class="memory-project-entry">
-        <div class="memory-project-entry-head">
+        <button class="memory-project-entry-preview-btn" data-memory-preview-index="${escapeHtml(index)}" type="button" title="点击预览完整记忆">
           <strong>${escapeHtml(String(index + 1).padStart(2, '0'))}</strong>
-          <span>${escapeHtml(entry.chars || content.length)} 字</span>
-        </div>
-        <p>${escapeHtml(content)}</p>
+          <span class="memory-project-entry-preview">${escapeHtml(preview || '空白记忆')}</span>
+          <em>${escapeHtml(chars)} 字</em>
+        </button>
         <div class="memory-project-entry-actions">
-          <button class="btn btn-ghost" data-memory-edit-index="${escapeHtml(index)}" type="button">编辑</button>
+          <button class="btn btn-ghost" data-memory-edit-index="${escapeHtml(index)}" type="button">修改</button>
           <button class="btn btn-ghost" data-memory-delete-index="${escapeHtml(index)}" type="button">删除</button>
         </div>
       </article>
@@ -1396,6 +1422,10 @@ async function saveMemoryProjectEdit(index, content) {
 
 async function submitMemoryProjectModal() {
   if (state.memoryProjectModalSaving) return;
+  if (state.memoryProjectModalMode === 'preview') {
+    closeMemoryProjectModal({ restoreFocus: true });
+    return;
+  }
   const content = (settingsEls.memoryProjectModalInput?.value || '').trim();
   if (!content) {
     toast(state.memoryProjectModalMode === 'edit' ? '项目记忆不能为空' : '请输入要新增的项目记忆');
@@ -6347,12 +6377,17 @@ function bindSettingsEvents() {
       if (!(event.target instanceof Element)) return;
       const editButton = event.target.closest('[data-memory-edit-index]');
       const deleteButton = event.target.closest('[data-memory-delete-index]');
+      const previewEntry = event.target.closest('[data-memory-preview-index]');
       if (editButton) {
         openMemoryProjectModal('edit', toNumber(editButton.dataset.memoryEditIndex, -1));
         return;
       }
       if (deleteButton) {
         deleteMemoryProjectEntry(toNumber(deleteButton.dataset.memoryDeleteIndex, -1)).catch((error) => toast(error.message));
+        return;
+      }
+      if (previewEntry) {
+        openMemoryProjectModal('preview', toNumber(previewEntry.dataset.memoryPreviewIndex, -1));
       }
     });
   }

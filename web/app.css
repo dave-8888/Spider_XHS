@@ -1490,8 +1490,83 @@ select:focus {
   justify-content: flex-end;
 }
 
+body[data-page="advanced-settings"] .surface.advanced-section {
+  padding: 0;
+}
+
 .advanced-section {
+  overflow: hidden;
+}
+
+.advanced-section-summary {
+  min-width: 0;
+  margin-bottom: 0;
   padding: 20px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.advanced-section-summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-section-summary::marker {
+  content: "";
+}
+
+.advanced-section-summary > div {
+  min-width: 0;
+}
+
+.advanced-section-summary h2 {
+  padding-right: 12px;
+}
+
+.advanced-section-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  margin-left: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  color: var(--text-soft);
+  background: var(--surface-strong);
+  transition: color 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.advanced-section-toggle svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.18s ease;
+}
+
+.advanced-section-summary:hover .advanced-section-toggle,
+.advanced-section-summary:focus-visible .advanced-section-toggle {
+  border-color: rgba(191, 47, 72, 0.28);
+  color: var(--accent);
+  background: rgba(191, 47, 72, 0.08);
+}
+
+.advanced-section-summary:focus-visible {
+  outline: 3px solid rgba(191, 47, 72, 0.2);
+  outline-offset: -3px;
+}
+
+.advanced-section[open] .advanced-section-toggle svg {
+  transform: rotate(180deg);
+}
+
+.advanced-section-body {
+  padding: 0 20px 20px;
+  border-top: 1px solid var(--line-soft);
 }
 
 .advanced-prompt-grid textarea {
@@ -1735,15 +1810,17 @@ select:focus {
 .memory-project-list {
   display: grid;
   align-content: start;
-  gap: 10px;
-  height: clamp(240px, 38vh, 360px);
+  gap: 6px;
+  min-height: 44px;
+  max-height: 180px;
+  height: auto;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 10px;
+  padding: 6px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: rgba(15, 23, 42, 0.03);
-  scroll-padding: 10px;
+  scroll-padding: 6px;
   scroll-snap-type: y proximity;
   scrollbar-gutter: stable;
 }
@@ -1755,45 +1832,77 @@ select:focus {
 }
 
 .memory-project-entry {
-  display: grid;
+  display: flex;
+  align-items: center;
   gap: 8px;
-  padding: 12px;
+  min-height: 40px;
+  padding: 4px 6px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--panel-bg);
   scroll-snap-align: start;
 }
 
-.memory-project-entry-head,
+.memory-project-entry-preview-btn,
 .memory-project-entry-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
   align-items: center;
-  justify-content: space-between;
 }
 
-.memory-project-entry-head {
-  color: var(--text-soft);
+.memory-project-entry-preview-btn {
+  min-width: 0;
+  flex: 1;
+  gap: 10px;
+  height: 32px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.memory-project-entry-preview-btn:hover,
+.memory-project-entry-preview-btn:focus-visible {
+  background: rgba(191, 47, 72, 0.08);
+  outline: none;
+}
+
+.memory-project-entry-preview-btn strong,
+.memory-project-entry-preview-btn em {
+  flex: 0 0 auto;
+  color: var(--text-faint);
   font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
 }
 
-.memory-project-entry p {
-  margin: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+.memory-project-entry-preview {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
   color: var(--text);
   font-size: 13px;
-  line-height: 1.6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .memory-project-entry-actions {
+  flex: 0 0 auto;
+  gap: 6px;
   justify-content: flex-end;
 }
 
 .memory-project-entry-actions .btn {
-  min-height: 34px;
-  padding: 0 12px;
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.memory-project-modal-field textarea[readonly] {
+  background: rgba(15, 23, 42, 0.03);
+  cursor: text;
 }
 
 .memory-project-modal {

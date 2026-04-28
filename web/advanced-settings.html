@@ -101,14 +101,18 @@
       </div>
     </section>
 
-    <section class="surface reveal advanced-section">
-      <div class="section-title">
+    <details class="surface reveal advanced-section">
+      <summary class="section-title advanced-section-summary">
         <span class="section-index">01</span>
         <div>
           <h2>仿写提示词</h2>
           <p class="muted">主文案模型会把参考笔记、图片理解、创作画像和长期记忆注入到模板里。</p>
         </div>
-      </div>
+        <span class="advanced-section-toggle" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+        </span>
+      </summary>
+      <div class="advanced-section-body">
       <div class="field-grid field-grid-2 advanced-prompt-grid">
         <label class="field">
           <span>文案模型 System Prompt</span>
@@ -131,16 +135,21 @@
           <textarea id="advancedVisionUserPromptInput" rows="10" spellcheck="false"></textarea>
         </label>
       </div>
-    </section>
+      </div>
+    </details>
 
-    <section class="surface reveal advanced-section">
-      <div class="section-title">
+    <details class="surface reveal advanced-section">
+      <summary class="section-title advanced-section-summary">
         <span class="section-index">02</span>
         <div>
           <h2>模型与生成参数</h2>
           <p class="muted">这些高级参数会在下一次手动仿写或自动仿写时生效。</p>
         </div>
-      </div>
+        <span class="advanced-section-toggle" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+        </span>
+      </summary>
+      <div class="advanced-section-body">
       <div class="field-grid field-grid-2">
         <label class="field">
           <span>文本模型</span>
@@ -231,16 +240,21 @@
           </label>
         </div>
       </div>
-    </section>
+      </div>
+    </details>
 
-    <section class="surface reveal advanced-section">
-      <div class="section-title">
+    <details class="surface reveal advanced-section">
+      <summary class="section-title advanced-section-summary">
         <span class="section-index">03</span>
         <div>
           <h2>创作画像</h2>
           <p class="muted">长期保留账号定位、用户风格、项目人格和合规边界。</p>
         </div>
-      </div>
+        <span class="advanced-section-toggle" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+        </span>
+      </summary>
+      <div class="advanced-section-body">
       <div class="field-grid field-grid-2">
         <div class="row spread switch-row full-width">
           <div>
@@ -320,7 +334,8 @@
           <div id="styleProfileDraftPreview" class="style-profile-draft-preview" hidden></div>
         </div>
       </div>
-    </section>
+      </div>
+    </details>
   </main>
 
   <div id="toast" class="toast" aria-live="polite"></div>
