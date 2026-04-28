@@ -160,6 +160,7 @@ const advancedEls = {
   imageWatermarkInput: document.querySelector('#advancedImageWatermarkInput'),
   imageSizeInput: document.querySelector('#advancedImageSizeInput'),
   textSystemPromptInput: document.querySelector('#advancedTextSystemPromptInput'),
+  safetyRulesInput: document.querySelector('#advancedSafetyRulesInput'),
   textUserPromptInput: document.querySelector('#advancedTextUserPromptInput'),
   visionSystemPromptInput: document.querySelector('#advancedVisionSystemPromptInput'),
   visionUserPromptInput: document.querySelector('#advancedVisionUserPromptInput'),
@@ -1821,7 +1822,9 @@ function setAdvancedStatus(config = state.config || {}, message = '') {
   const source = rewrite.api_key_source ? ` · 来源：${rewrite.api_key_source}` : '';
   const preview = rewrite.api_key_preview ? ` · ${rewrite.api_key_preview}` : '';
   const apiText = rewrite.api_key_present ? `DashScope API Key 已配置${source}${preview}` : 'DashScope API Key 未配置';
-  const promptText = rewrite.text_user_prompt_template ? 'Prompt 模板已载入' : 'Prompt 模板待载入';
+  const promptText = rewrite.text_user_prompt_template && rewrite.safety_rules
+    ? 'Prompt 模板与安全准则已载入'
+    : 'Prompt 模板待载入';
   advancedEls.status.textContent = message || `${apiText} · ${promptText}`;
   advancedEls.status.className = `status-panel ${rewrite.api_key_present ? 'good' : 'muted'}`;
 }
@@ -1868,6 +1871,7 @@ function applyAdvancedConfig(config) {
   if (advancedEls.imageWatermarkInput) advancedEls.imageWatermarkInput.checked = Boolean(rewrite.image_watermark);
   if (advancedEls.imageSizeInput) advancedEls.imageSizeInput.value = rewrite.image_size || '1K';
   if (advancedEls.textSystemPromptInput) advancedEls.textSystemPromptInput.value = rewrite.text_system_prompt || '';
+  if (advancedEls.safetyRulesInput) advancedEls.safetyRulesInput.value = rewrite.safety_rules || '';
   if (advancedEls.textUserPromptInput) advancedEls.textUserPromptInput.value = rewrite.text_user_prompt_template || '';
   if (advancedEls.visionSystemPromptInput) advancedEls.visionSystemPromptInput.value = rewrite.vision_system_prompt || '';
   if (advancedEls.visionUserPromptInput) advancedEls.visionUserPromptInput.value = rewrite.vision_user_prompt_template || '';
@@ -1894,6 +1898,7 @@ function readAdvancedRewriteDraft() {
     image_watermark: Boolean(advancedEls.imageWatermarkInput?.checked),
     image_size: advancedEls.imageSizeInput?.value || '1K',
     text_system_prompt: (advancedEls.textSystemPromptInput?.value || '').trim(),
+    safety_rules: (advancedEls.safetyRulesInput?.value || '').trim(),
     text_user_prompt_template: (advancedEls.textUserPromptInput?.value || '').trim(),
     vision_system_prompt: (advancedEls.visionSystemPromptInput?.value || '').trim(),
     vision_user_prompt_template: (advancedEls.visionUserPromptInput?.value || '').trim(),
