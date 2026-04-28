@@ -12,6 +12,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from urllib.parse import unquote
 
 import requests
 from loguru import logger
@@ -62,6 +63,7 @@ REWRITE_LOG_MARKERS = (
 )
 DEFAULT_REWRITE_REQUIREMENTS = "创业沙龙"
 MAX_REWRITE_REQUIREMENTS_LENGTH = 2000
+REWRITE_PREVIEW_TOPIC_SOURCE = "preview_popup"
 DEFAULT_CREATOR_PERSONA = "真诚、具体、懂业务、有判断力；像朋友一样说人话，不制造焦虑，不夸大承诺。"
 MAX_REWRITE_PROFILE_TEXT_LENGTH = 1800
 MAX_REWRITE_PROFILE_SAMPLE_LENGTH = 6000
@@ -536,11 +538,41 @@ def note_asset_dir_candidates_for_markdown(markdown_path: Path) -> List[Path]:
     return [markdown_path.parent / name / markdown_path.stem for name in names]
 
 
+def linked_info_path_for_markdown(markdown_path: Path) -> Optional[Path]:
+    try:
+        with markdown_path.open("r", encoding="utf-8") as file:
+            head = file.read(8192)
+    except OSError:
+        return None
+    match = re.search(
+        r"\[info\.json\]\(\s*(?:<([^>\n]+)>|([^)]+?))\s*\)",
+        head,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    raw_target = str(match.group(1) or match.group(2) or "").strip()
+    if not raw_target or re.match(r"^[a-z][a-z0-9+.-]*:", raw_target, flags=re.IGNORECASE):
+        return None
+    target = unquote(raw_target.split("#", 1)[0].strip())
+    if not target:
+        return None
+    candidate = (markdown_path.parent / target).resolve()
+    try:
+        candidate.relative_to(markdown_path.parent.resolve())
+    except ValueError:
+        return None
+    return candidate if candidate.name == "info.json" else None
+
+
 def note_info_path_for_markdown(markdown_path: Path) -> Path:
     for asset_dir in note_asset_dir_candidates_for_markdown(markdown_path):
         info_path = asset_dir / "info.json"
         if info_path.exists():
             return info_path
+    linked_info_path = linked_info_path_for_markdown(markdown_path)
+    if linked_info_path and linked_info_path.exists():
+        return linked_info_path
     return note_asset_dir_for_markdown(markdown_path) / "info.json"
 
 
@@ -552,7 +584,78 @@ def markdown_for_note_asset_dir(asset_dir: Path) -> Optional[Path]:
         candidate = note_parent / f"{asset_dir.name}{suffix}"
         if candidate.exists() and candidate.is_file():
             return candidate
+    info_path = asset_dir / "info.json"
+    if info_path.exists():
+        for candidate in sorted(note_parent.glob("*")):
+            if candidate.is_file() and is_output_markdown_file(candidate):
+                linked_info_path = linked_info_path_for_markdown(candidate)
+                if linked_info_path and linked_info_path.resolve() == info_path.resolve():
+                    return candidate
     return None
+
+
+def markdown_display_title(markdown_path: Optional[Path]) -> str:
+    if not markdown_path:
+        return ""
+    try:
+        with markdown_path.open("r", encoding="utf-8") as file:
+            head = file.read(2048)
+    except OSError:
+        return ""
+    for line in head.splitlines():
+        text = line.strip()
+        if not text or text.startswith(">"):
+            continue
+        if text.startswith("#"):
+            text = text.lstrip("#").strip()
+        if text and text not in {"正文", "媒体"}:
+            return text[:120].strip()
+    return ""
+
+
+def markdown_text_excerpt(markdown_path: Optional[Path], max_len: int = 6000) -> str:
+    if not markdown_path:
+        return ""
+    try:
+        text = markdown_path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    text = re.sub(r"!\[[^\]]*\]\(\s*(?:<[^>\n]+>|[^)]+)\s*\)", "", text)
+    text = re.sub(r"\[([^\]\n]+)\]\(\s*(?:<[^>\n]+>|[^)]+)\s*\)", r"\1", text)
+    text = re.sub(r"^[ \t]*#{1,6}[ \t]*", "", text, flags=re.MULTILINE)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{4,}", "\n\n\n", text)
+    return text.strip()[:max_len].strip()
+
+
+def markdown_sibling_image_paths(markdown_path: Optional[Path], source_root: Path, limit: int = 12) -> List[str]:
+    if not markdown_path:
+        return []
+    image_paths: List[str] = []
+    seen = set()
+    image_roots = [
+        markdown_path.parent / "images",
+        markdown_path.parent / "assert",
+        markdown_path.parent / "assets",
+        markdown_path.parent / "media",
+    ]
+    for image_root in image_roots:
+        if not image_root.exists() or not image_root.is_dir():
+            continue
+        for child in sorted(image_root.rglob("*")):
+            if len(image_paths) >= limit:
+                return image_paths
+            if not child.is_file() or child.suffix.lower() not in [".jpg", ".jpeg", ".png", ".webp", ".gif"]:
+                continue
+            try:
+                rel_path = relative_to_root(child, source_root)
+            except ValueError:
+                continue
+            if rel_path in seen:
+                continue
+            seen.add(rel_path)
+            image_paths.append(rel_path)
+    return image_paths
 
 
 def resolve_note_reference_path(target: Path) -> Optional[Path]:
@@ -616,6 +719,9 @@ def note_markdown_path_for_reference(note_ref: Path) -> Optional[Path]:
 
 def note_asset_dir_for_reference(note_ref: Path) -> Path:
     if is_output_markdown_file(note_ref):
+        info_path = note_info_path_for_markdown(note_ref)
+        if info_path.exists():
+            return info_path.parent
         return note_asset_dir_for_markdown(note_ref)
     if note_ref.is_dir() and note_ref.parent.name == "assert":
         return note_ref
@@ -650,6 +756,192 @@ def rewrite_requirements_label(value: Any, max_len: int = 48) -> str:
     first_line = re.split(r"[\n。！？!?；;]", text, maxsplit=1)[0].strip()
     label = first_line or DEFAULT_REWRITE_REQUIREMENTS
     return label[:max_len].strip() or DEFAULT_REWRITE_REQUIREMENTS
+
+
+REWRITE_CONFLICT_FIELD_PATTERNS: Dict[str, Tuple[str, ...]] = {
+    "主题": (
+        r"(?:^|\n)\s*#{0,6}\s*(?:主题|活动主题|选题)\s*[:：]\s*([^\n；;。]+)",
+    ),
+    "时间": (
+        r"(?:^|\n)\s*#{0,6}\s*(?:时间|活动时间|日期|举办时间)\s*[:：]\s*([^\n；;。]+)",
+    ),
+    "地点": (
+        r"(?:^|\n)\s*#{0,6}\s*(?:地点|地址|场地|城市|位置)\s*[:：]\s*([^\n；;。]+)",
+    ),
+    "转化目标": (
+        r"(?:^|\n)\s*#{0,6}\s*(?:转化目标|引导|行动引导|报名方式|CTA)\s*[:：]\s*([^\n；;。]+)",
+    ),
+    "禁用表达": (
+        r"(?:^|\n)\s*#{0,6}\s*(?:禁用表达|限制|边界|禁忌|不要)\s*[:：]\s*([^\n]+)",
+    ),
+}
+REWRITE_ACTIVITY_TERMS = (
+    "沙龙",
+    "活动",
+    "线下",
+    "报名",
+    "私信",
+    "评论",
+    "地点",
+    "地址",
+    "时间",
+    "周日",
+    "周六",
+    "本周",
+    "下午",
+    "上午",
+    "北京",
+    "上海",
+    "广州",
+    "深圳",
+    "国润大厦",
+)
+REWRITE_LEGACY_PROFILE_MARKERS = (
+    "创业沙龙",
+    "创业搭子",
+    "线下",
+    "资源链接",
+    "报名",
+    "私信",
+    "评论",
+    "北京",
+    "国润大厦",
+    "本周",
+    "周日",
+    "下午",
+)
+
+
+def _compact_conflict_text(value: Any, max_len: int = 120) -> str:
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:max_len].strip()
+
+
+def _conflict_compare_key(value: Any) -> str:
+    text = str(value or "").lower()
+    text = re.sub(r"[\s#*`_\-—:：,，.。;；、!！?？()\[\]{}<>《》【】\"'“”‘’]+", "", text)
+    return text.strip()
+
+
+def _extract_rewrite_conflict_fields(text: Any) -> Dict[str, str]:
+    source = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+    fields: Dict[str, str] = {}
+    for field, patterns in REWRITE_CONFLICT_FIELD_PATTERNS.items():
+        values = []
+        for pattern in patterns:
+            for match in re.finditer(pattern, source, flags=re.IGNORECASE):
+                value = _compact_conflict_text(match.group(1), 160)
+                if value:
+                    values.append(value)
+        if values:
+            fields[field] = "；".join(dict.fromkeys(values))
+    return fields
+
+
+def _rewrite_values_conflict(current: str, existing: str) -> bool:
+    current_key = _conflict_compare_key(current)
+    existing_key = _conflict_compare_key(existing)
+    if not current_key or not existing_key:
+        return False
+    if current_key == existing_key:
+        return False
+    if current_key in existing_key or existing_key in current_key:
+        return False
+    return True
+
+
+def _rewrite_text_has_activity_info(text: Any) -> bool:
+    source = str(text or "")
+    if any(term in source for term in REWRITE_ACTIVITY_TERMS):
+        return True
+    fields = _extract_rewrite_conflict_fields(source)
+    return any(fields.get(field) for field in ("时间", "地点", "转化目标"))
+
+
+def _rewrite_source_entries_for_conflicts(rewrite_config: Dict[str, Any]) -> List[Tuple[str, str]]:
+    entries: List[Tuple[str, str]] = []
+    default_topic = str(rewrite_config.get("topic") or "").strip()
+    if default_topic:
+        entries.append(("默认仿写要求", default_topic))
+    profile = rewrite_config.get("creator_profile") if isinstance(rewrite_config.get("creator_profile"), dict) else {}
+    for key, label in [
+        ("business_context", "创作画像：业务背景"),
+        ("conversion_goal", "创作画像：转化目标"),
+        ("forbidden_rules", "创作画像：禁用表达与边界"),
+        ("sample_texts", "创作画像：历史文案样本"),
+    ]:
+        text = str(profile.get(key) or "").strip()
+        if text:
+            entries.append((label, text))
+    return entries
+
+
+def detect_rewrite_requirement_conflicts(
+    current_requirements: Any,
+    rewrite_config: Dict[str, Any],
+) -> List[Dict[str, str]]:
+    current_text = normalize_rewrite_requirements(current_requirements)
+    current_fields = _extract_rewrite_conflict_fields(current_text)
+    current_key = _conflict_compare_key(current_text)
+    conflicts: List[Dict[str, str]] = []
+    seen = set()
+
+    def add_conflict(field: str, current: str, existing: str, source: str, reason: str) -> None:
+        key = (
+            field,
+            _conflict_compare_key(current),
+            _conflict_compare_key(existing),
+            source,
+            reason,
+        )
+        if key in seen:
+            return
+        seen.add(key)
+        conflicts.append({
+            "field": field,
+            "current": _compact_conflict_text(current, 180) or "未在本次要求中明确覆盖",
+            "existing": _compact_conflict_text(existing, 180),
+            "source": source,
+            "reason": reason,
+        })
+
+    source_entries = _rewrite_source_entries_for_conflicts(rewrite_config)
+    for source, existing_text in source_entries:
+        existing_fields = _extract_rewrite_conflict_fields(existing_text)
+        for field, current_value in current_fields.items():
+            existing_value = existing_fields.get(field)
+            if existing_value and _rewrite_values_conflict(current_value, existing_value):
+                add_conflict(
+                    field,
+                    current_value,
+                    existing_value,
+                    source,
+                    "本次要求和已有配置里的同类信息不一致，继续可能混入旧事实。",
+                )
+
+    if not _rewrite_text_has_activity_info(current_text):
+        for source, existing_text in source_entries:
+            existing_key = _conflict_compare_key(existing_text)
+            if existing_key and (existing_key in current_key or current_key in existing_key):
+                continue
+            markers = [
+                marker
+                for marker in REWRITE_LEGACY_PROFILE_MARKERS
+                if marker in existing_text and marker not in current_text
+            ]
+            if not markers:
+                continue
+            add_conflict(
+                "旧画像信息",
+                "未在本次要求中明确覆盖活动/转化细节",
+                "、".join(dict.fromkeys(markers[:6])),
+                source,
+                "本次要求较泛，旧创作画像或默认要求可能继续带入这些固定信息。",
+            )
+            break
+
+    return conflicts
 
 
 def pick_extension(url: str, content_type: str, default_ext: str) -> str:
@@ -1484,12 +1776,14 @@ class RewriteService:
         rewrite_root: Optional[Path] = None,
         config: Optional[Dict[str, Any]] = None,
         cancel_event: Optional[threading.Event] = None,
+        allow_plain_markdown_sources: bool = False,
     ) -> None:
         self.source_root = source_root.resolve()
         self.rewrite_root = (rewrite_root or source_root).resolve()
         self.output_root = self.rewrite_root
         self.config = config or {}
         self.cancel_event = cancel_event
+        self.allow_plain_markdown_sources = allow_plain_markdown_sources
         self.topic = normalize_rewrite_requirements(self.config.get("topic"))
         self.text_model = str(self.config.get("text_model") or "qwen-plus").strip() or "qwen-plus"
         self.vision_model = (
@@ -1822,12 +2116,32 @@ class RewriteService:
         note_ref = resolve_note_reference_path(target)
         if note_ref:
             return note_ref
+        plain_markdown_ref = self._plain_markdown_reference(target)
+        if plain_markdown_ref:
+            return plain_markdown_ref
         raise FileNotFoundError("请选择包含 info.json 的单篇笔记目录或 Markdown 文件")
 
+    def _plain_markdown_reference(self, target: Path) -> Optional[Path]:
+        if not self.allow_plain_markdown_sources:
+            return None
+        if target.is_file() and is_output_markdown_file(target) and target.name not in REWRITE_RECENT_EXCLUDED_FILES:
+            return target
+        if target.is_dir():
+            for candidate in sorted(target.glob("*")):
+                if (
+                    candidate.is_file()
+                    and is_output_markdown_file(candidate)
+                    and candidate.name not in REWRITE_RECENT_EXCLUDED_FILES
+                ):
+                    return candidate
+        return None
+
     def _load_note_folder(self, note_folder: Path) -> Dict[str, Any]:
-        note_ref = resolve_note_reference_path(note_folder) or note_folder
+        note_ref = resolve_note_reference_path(note_folder) or self._plain_markdown_reference(note_folder) or note_folder
         info_path = note_info_path_for_reference(note_ref)
         if not info_path:
+            if self.allow_plain_markdown_sources and is_output_markdown_file(note_ref):
+                return self._load_plain_markdown_note(note_ref)
             raise FileNotFoundError("缺少 info.json")
         info = read_json(info_path, {})
         if not isinstance(info, dict):
@@ -1839,10 +2153,15 @@ class RewriteService:
             for child in sorted(assert_dir.iterdir()):
                 if child.is_file() and child.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp", ".gif"]:
                     local_images.append(relative_to_root(child, self.source_root))
-        fallback_name = markdown_path.stem if markdown_path else note_ref.name
+        fallback_name = (
+            markdown_display_title(markdown_path)
+            or (markdown_path.stem if markdown_path else note_ref.name)
+        )
+        info_title = str(info.get("title") or "").strip()
+        title = info_title if info_title and info_title != "无标题" else fallback_name
         return {
             "note_id": str(info.get("note_id") or fallback_name),
-            "title": str(info.get("title") or fallback_name),
+            "title": title,
             "desc": str(info.get("desc") or ""),
             "liked_count": info.get("liked_count"),
             "collected_count": info.get("collected_count"),
@@ -1856,6 +2175,33 @@ class RewriteService:
             "folder": relative_to_root(note_ref, self.source_root),
             "markdown": relative_to_root(markdown_path, self.source_root) if markdown_path else "",
             "info": relative_to_root(info_path, self.source_root),
+            "local_images": local_images,
+        }
+
+    def _load_plain_markdown_note(self, markdown_path: Path) -> Dict[str, Any]:
+        title = markdown_display_title(markdown_path) or markdown_path.stem
+        desc = markdown_text_excerpt(markdown_path)
+        local_images = markdown_sibling_image_paths(markdown_path, self.source_root)
+        try:
+            note_id = relative_to_root(markdown_path, self.source_root)
+        except ValueError:
+            note_id = markdown_path.stem
+        return {
+            "note_id": note_id,
+            "title": title,
+            "desc": desc,
+            "liked_count": None,
+            "collected_count": None,
+            "comment_count": None,
+            "share_count": None,
+            "upload_time": "",
+            "note_url": "",
+            "note_type": "AI创作稿",
+            "tags": [],
+            "image_list": [],
+            "folder": relative_to_root(markdown_path.parent, self.source_root),
+            "markdown": relative_to_root(markdown_path, self.source_root),
+            "info": "",
             "local_images": local_images,
         }
 

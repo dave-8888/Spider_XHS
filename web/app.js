@@ -1852,6 +1852,26 @@ const TEMPLATE_VARIABLE_SCOPE_LABELS = {
   vision_user_prompt_template: '视觉模型 User Prompt',
 };
 
+const TEMPLATE_VARIABLE_SCOPE_META = {
+  text_user_prompt_template: {
+    eyebrow: '内容生成',
+    className: 'is-text',
+  },
+  vision_user_prompt_template: {
+    eyebrow: '图片理解',
+    className: 'is-vision',
+  },
+};
+
+function templateVariableScopeMeta(scope = '') {
+  const meta = TEMPLATE_VARIABLE_SCOPE_META[scope] || TEMPLATE_VARIABLE_SCOPE_META.text_user_prompt_template;
+  return {
+    label: TEMPLATE_VARIABLE_SCOPE_LABELS[scope] || 'Prompt 模板',
+    eyebrow: meta.eyebrow,
+    className: meta.className,
+  };
+}
+
 function advancedPromptInputForScope(scope = '') {
   if (scope === 'vision_user_prompt_template') return advancedEls.visionUserPromptInput;
   return advancedEls.textUserPromptInput;
@@ -1876,7 +1896,7 @@ function renderAdvancedTemplateVariables(rewrite = {}) {
   if (!advancedEls.templateVariables) return;
   const variables = Array.isArray(rewrite.template_variables) ? rewrite.template_variables : [];
   if (!variables.length) {
-    advancedEls.templateVariables.innerHTML = '<div class="muted">暂无可用模板变量</div>';
+    advancedEls.templateVariables.innerHTML = '<div class="template-variable-empty">暂无可用模板变量</div>';
     return;
   }
 
@@ -1887,19 +1907,41 @@ function renderAdvancedTemplateVariables(rewrite = {}) {
     return acc;
   }, new Map());
 
-  advancedEls.templateVariables.innerHTML = Array.from(groups.entries()).map(([scope, items]) => `
-    <div class="template-variable-group">
-      <div class="template-variable-group-title">${escapeHtml(TEMPLATE_VARIABLE_SCOPE_LABELS[scope] || 'Prompt 模板')}</div>
-      <div class="template-variable-list">
-        ${items.map((item) => `
-          <button class="template-variable-btn" type="button" data-template-variable-token="${escapeHtml(item.token || '')}" data-template-variable-scope="${escapeHtml(scope)}" title="${escapeHtml(item.description || '')}">
-            ${escapeHtml(item.token || '')}
-          </button>
-        `).join('')}
+  advancedEls.templateVariables.innerHTML = Array.from(groups.entries()).map(([scope, items]) => {
+    const meta = templateVariableScopeMeta(scope);
+    return `
+    <section class="template-variable-group ${escapeHtml(meta.className)}">
+      <div class="template-variable-group-head">
+        <div class="template-variable-group-title-wrap">
+          <span class="template-variable-group-kicker">${escapeHtml(meta.eyebrow)}</span>
+          <strong class="template-variable-group-title">${escapeHtml(meta.label)}</strong>
+        </div>
+        <span class="template-variable-count">${escapeHtml(items.length)} 个</span>
       </div>
-      <div class="template-variable-description">${escapeHtml(items.map((item) => `${item.token || ''}：${item.description || ''}`).join('；'))}</div>
-    </div>
-  `).join('');
+      <div class="template-variable-list">
+        ${items.map((item) => {
+          const name = item.name || item.token || '模板变量';
+          const token = item.token || '';
+          const description = item.description || '';
+          return `
+          <button
+            class="template-variable-btn"
+            type="button"
+            data-template-variable-token="${escapeHtml(token)}"
+            data-template-variable-scope="${escapeHtml(scope)}"
+            title="${escapeHtml(description)}"
+            aria-label="${escapeHtml(`插入变量 ${name}`)}"
+          >
+            <span class="template-variable-name">${escapeHtml(name)}</span>
+            <code class="template-variable-token">${escapeHtml(token)}</code>
+            <span class="template-variable-desc">${escapeHtml(description)}</span>
+          </button>
+        `;
+        }).join('')}
+      </div>
+    </section>
+  `;
+  }).join('');
 }
 
 function setAdvancedStatus(config = state.config || {}, message = '') {
