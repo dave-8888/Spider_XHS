@@ -2109,6 +2109,17 @@ function jobStatusMeta(status) {
   return map[status] || { label: status || '未知', tone: 'idle' };
 }
 
+function jobCancelRequested(job = {}) {
+  return job.status === 'running' && Boolean(job.cancel_requested || job.cancelRequested);
+}
+
+function jobVisualMeta(job = {}) {
+  if (jobCancelRequested(job)) {
+    return { label: '终止中', tone: 'interrupted' };
+  }
+  return jobStatusMeta(job.status);
+}
+
 function jobSourceLabel(source, type = 'collect') {
   if (type === 'style_profile') {
     return '写作画像';
@@ -2353,6 +2364,9 @@ function jobPrimaryMessage(job) {
   const result = job.result || {};
   const latestLog = latestJobLog(job);
   if ((job.type || 'collect') === 'style_profile') {
+    if (jobCancelRequested(job)) {
+      return '正在终止写作风格画像任务';
+    }
     if (job.status === 'success') {
       return `画像草稿完成：样本 ${result.sample_count || 0} 篇`;
     }
@@ -2362,6 +2376,9 @@ function jobPrimaryMessage(job) {
     return truncateText(latestLog?.message || '正在生成写作风格画像', 120);
   }
   if ((job.type || 'collect') === 'rewrite') {
+    if (jobCancelRequested(job)) {
+      return '正在终止 AI 仿写任务，等待当前步骤收尾';
+    }
     const targetCount = result.target_count || job.summary?.target_count || 0;
     const successCount = result.success_count || 0;
     const failedCount = result.failed_count || 0;
@@ -2372,6 +2389,9 @@ function jobPrimaryMessage(job) {
       return truncateText(job.error || latestLog?.message || jobStatusMeta(job.status).label, 120);
     }
     return truncateText(latestLog?.message || `正在仿写：${successCount}/${targetCount || '—'}`, 120);
+  }
+  if (jobCancelRequested(job)) {
+    return '正在终止采集任务，等待当前步骤收尾';
   }
   if (job.status === 'success') {
     const rewriteText = result.rewrite?.article_count
@@ -2462,6 +2482,11 @@ function filterJobs(jobs) {
 
 function jobCanBeDeleted(job = {}) {
   return Boolean(job.id) && job.status !== 'running';
+}
+
+function jobCanBeCanceled(job = {}) {
+  const type = job.type || 'collect';
+  return Boolean(job.id) && job.status === 'running' && ['collect', 'rewrite', 'style_profile'].includes(type);
 }
 
 function currentPageJobs(jobs = state.currentJobs) {
@@ -2599,6 +2624,50 @@ async function deleteSelectedJobs() {
   toast(skippedCount ? '运行中的任务日志暂不能删除' : '没有可删除的任务日志');
 }
 
+async function cancelJob(jobId) {
+  const normalizedId = String(jobId || '').trim();
+  if (!normalizedId) return;
+
+  const existingJob = state.currentJobs.find((job) => String(job.id) === normalizedId);
+  if (!jobCanBeCanceled(existingJob)) {
+    toast('任务已经结束');
+    return;
+  }
+  if (jobCancelRequested(existingJob)) {
+    toast('任务正在终止');
+    return;
+  }
+
+  existingJob.cancel_requested = true;
+  existingJob.progress = {
+    ...(existingJob.progress || {}),
+    label: '正在终止',
+    phase: 'canceling',
+  };
+  renderJobs(state.currentJobs);
+
+  try {
+    const data = await api('/api/jobs/cancel', {
+      method: 'POST',
+      body: JSON.stringify({ id: normalizedId }),
+    });
+    if (data.job) {
+      const nextJobs = state.currentJobs.map((job) => (
+        String(job.id) === normalizedId ? data.job : job
+      ));
+      renderJobs(nextJobs);
+    }
+    toast(data.message || '已请求终止任务');
+    await loadJobs();
+  } catch (error) {
+    if (existingJob) {
+      existingJob.cancel_requested = false;
+    }
+    renderJobs(state.currentJobs);
+    throw error;
+  }
+}
+
 function renderJobStatusSummary(jobs) {
   if (!homeEls.jobStatusSummary) return;
   const runningJobs = jobs.filter((job) => job.status === 'running');
@@ -2617,7 +2686,7 @@ function renderJobStatusSummary(jobs) {
     return;
   }
 
-  const meta = jobStatusMeta(latest.status);
+  const meta = jobVisualMeta(latest);
   const title = runningJobs.length
     ? ((latest.type || 'collect') === 'rewrite'
       ? '正在仿写'
@@ -2903,12 +2972,14 @@ function renderJobs(jobs) {
 
   homeEls.jobList.classList.remove('muted', 'job-list-empty');
   homeEls.jobList.innerHTML = visibleJobs.map((job) => {
-    const meta = jobStatusMeta(job.status);
+    const meta = jobVisualMeta(job);
     const summary = job.summary || {};
     const logGroups = visibleJobLogGroups(job);
     const progress = jobProgress(job);
     const highlight = job.id === state.highlightedJobId ? ' job-card-highlight' : '';
     const deletable = jobCanBeDeleted(job);
+    const cancelable = jobCanBeCanceled(job);
+    const canceling = jobCancelRequested(job);
     const selected = state.jobMultiSelectMode && state.selectedJobIds.has(String(job.id));
     const metricHtml = jobMetricItems(job).map((item) => `
       <div class="job-metric">
@@ -2947,6 +3018,11 @@ function renderJobs(jobs) {
             <div class="job-subtitle">${escapeHtml(jobSourceLabel(job.source, job.type || 'collect'))} · ${escapeHtml(compactTime(job.started_at || job.created_at))} · ${escapeHtml(jobScopeText(summary, job))}</div>
           </div>
           <div class="job-card-actions">
+            ${cancelable ? `
+              <button class="job-cancel-btn" type="button" data-job-cancel-id="${escapeHtml(job.id)}" ${canceling ? 'disabled' : ''}>
+                ${escapeHtml(canceling ? '终止中' : '终止')}
+              </button>
+            ` : ''}
             <button class="job-copy-id" type="button" data-job-id="${escapeHtml(job.id)}">复制ID</button>
             <span class="badge ${escapeHtml(meta.tone)}">${escapeHtml(meta.label)}</span>
           </div>
@@ -5882,6 +5958,13 @@ function bindHomeEvents() {
     homeEls.jobList.addEventListener('click', (event) => {
       if (event.target.closest('.job-select')) {
         event.stopPropagation();
+        return;
+      }
+      const cancelButton = event.target.closest('[data-job-cancel-id]');
+      if (cancelButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        cancelJob(cancelButton.dataset.jobCancelId || '').catch((error) => toast(error.message));
         return;
       }
       const button = event.target.closest('.job-copy-id');

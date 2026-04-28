@@ -2277,7 +2277,8 @@ select:focus {
   flex-shrink: 0;
 }
 
-.job-copy-id {
+.job-copy-id,
+.job-cancel-btn {
   min-height: 28px;
   padding: 0 10px;
   border: 1px solid var(--line-soft);
@@ -2292,6 +2293,22 @@ select:focus {
   border-color: var(--blue);
   color: var(--blue);
   background: var(--blue-soft);
+}
+
+.job-cancel-btn {
+  color: var(--warning);
+  background: rgba(157, 106, 23, 0.08);
+}
+
+.job-cancel-btn:hover:not(:disabled) {
+  border-color: rgba(157, 106, 23, 0.42);
+  color: var(--warning);
+  background: rgba(157, 106, 23, 0.14);
+}
+
+.job-cancel-btn:disabled {
+  cursor: wait;
+  opacity: 0.66;
 }
 
 .badge {

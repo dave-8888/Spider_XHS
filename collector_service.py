@@ -119,6 +119,25 @@ WEEKDAY_LABELS = {
 }
 
 
+class JobCanceled(BaseException):
+    """Raised when a user requests cooperative task cancellation."""
+
+
+def check_cancel_requested(cancel_event: Optional[threading.Event]) -> None:
+    if cancel_event and cancel_event.is_set():
+        raise JobCanceled("任务已终止")
+
+
+def sleep_with_cancel(delay: float, cancel_event: Optional[threading.Event] = None) -> None:
+    if delay <= 0:
+        return
+    if cancel_event:
+        if cancel_event.wait(delay):
+            raise JobCanceled("任务已终止")
+        return
+    time.sleep(delay)
+
+
 def ensure_data_dirs() -> None:
     for path in [DATA_ROOT, DEFAULT_MARKDOWN_ROOT, DEFAULT_REWRITE_ROOT, DEFAULT_STYLE_PROFILE_ROOT]:
         path.mkdir(parents=True, exist_ok=True)
@@ -429,7 +448,12 @@ def pick_extension(url: str, content_type: str, default_ext: str) -> str:
     return default_ext
 
 
-def download_url(url: str, target_without_ext: Path, default_ext: str) -> Tuple[Optional[str], Optional[str]]:
+def download_url(
+    url: str,
+    target_without_ext: Path,
+    default_ext: str,
+    cancel_event: Optional[threading.Event] = None,
+) -> Tuple[Optional[str], Optional[str]]:
     if not url:
         return None, "URL 为空"
     headers = {
@@ -439,17 +463,22 @@ def download_url(url: str, target_without_ext: Path, default_ext: str) -> Tuple[
         )
     }
     try:
+        check_cancel_requested(cancel_event)
         with requests.get(url, headers=headers, stream=True, timeout=30) as response:
             response.raise_for_status()
+            check_cancel_requested(cancel_event)
             ext = pick_extension(url, response.headers.get("content-type", ""), default_ext)
             target_path = target_without_ext.with_suffix(ext)
             tmp_path = target_path.with_suffix(target_path.suffix + ".tmp")
             with tmp_path.open("wb") as file:
                 for chunk in response.iter_content(chunk_size=1024 * 512):
+                    check_cancel_requested(cancel_event)
                     if chunk:
                         file.write(chunk)
             tmp_path.replace(target_path)
             return target_path.name, None
+    except JobCanceled:
+        raise
     except Exception as exc:
         return None, str(exc)
 
@@ -501,7 +530,13 @@ def render_markdown(note: Dict[str, Any], media_items: List[Dict[str, Any]], inf
     return "\n".join(lines)
 
 
-def save_note_as_markdown(note: Dict[str, Any], keyword_dir: Path, output_root: Path) -> Dict[str, Any]:
+def save_note_as_markdown(
+    note: Dict[str, Any],
+    keyword_dir: Path,
+    output_root: Path,
+    cancel_event: Optional[threading.Event] = None,
+) -> Dict[str, Any]:
+    check_cancel_requested(cancel_event)
     note_id = str(note.get("note_id") or uuid.uuid4().hex)
     title = safe_filename(note.get("title"), fallback="无标题", max_len=60)
     md_path = available_note_markdown_path(keyword_dir, title)
@@ -515,7 +550,8 @@ def save_note_as_markdown(note: Dict[str, Any], keyword_dir: Path, output_root: 
     note_type = note.get("note_type")
     if note_type == "图集":
         for index, url in enumerate(note.get("image_list") or []):
-            file_name, error = download_url(url, assert_dir / f"image_{index + 1}", ".jpg")
+            check_cancel_requested(cancel_event)
+            file_name, error = download_url(url, assert_dir / f"image_{index + 1}", ".jpg", cancel_event)
             media_items.append({
                 "type": "image",
                 "label": f"图片 {index + 1}",
@@ -527,7 +563,8 @@ def save_note_as_markdown(note: Dict[str, Any], keyword_dir: Path, output_root: 
         poster_rel = None
         cover_url = note.get("video_cover")
         if cover_url:
-            file_name, error = download_url(cover_url, assert_dir / "cover", ".jpg")
+            check_cancel_requested(cancel_event)
+            file_name, error = download_url(cover_url, assert_dir / "cover", ".jpg", cancel_event)
             poster_rel = f"assert/{note_name}/{file_name}" if file_name else None
             media_items.append({
                 "type": "image",
@@ -537,7 +574,8 @@ def save_note_as_markdown(note: Dict[str, Any], keyword_dir: Path, output_root: 
                 "error": error,
             })
         video_url = note.get("video_addr")
-        file_name, error = download_url(video_url, assert_dir / "video", ".mp4")
+        check_cancel_requested(cancel_event)
+        file_name, error = download_url(video_url, assert_dir / "video", ".mp4", cancel_event)
         media_items.append({
             "type": "video",
             "label": "视频",
@@ -548,8 +586,10 @@ def save_note_as_markdown(note: Dict[str, Any], keyword_dir: Path, output_root: 
         })
 
     info_path = assert_dir / "info.json"
+    check_cancel_requested(cancel_event)
     info_path.write_text(json.dumps(note, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    check_cancel_requested(cancel_event)
     md_path.write_text(render_markdown(note, media_items, info_rel_path), encoding="utf-8")
 
     return {
@@ -941,7 +981,14 @@ class ContentCollector:
     def __init__(self) -> None:
         self.xhs_apis = XHS_Apis()
 
-    def run(self, config: Dict[str, Any], source: str = "manual", progress: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
+    def run(
+        self,
+        config: Dict[str, Any],
+        source: str = "manual",
+        progress: Optional[Callable[[str], None]] = None,
+        cancel_event: Optional[threading.Event] = None,
+    ) -> Dict[str, Any]:
+        check_cancel_requested(cancel_event)
         cookies = config.get("login", {}).get("cookies") or load_env()
         if not cookies:
             raise ValueError("缺少登录 Cookie，请先在页面中配置 Cookie 或 .env 的 COOKIES")
@@ -986,6 +1033,7 @@ class ContentCollector:
         }
 
         for keyword in keywords:
+            check_cancel_requested(cancel_event)
             self._progress(progress, f"开始搜索关键词：{keyword}")
             keyword_result = {
                 "keyword": keyword,
@@ -1003,7 +1051,9 @@ class ContentCollector:
                     filters,
                     search_delay_min,
                     search_delay_max,
+                    cancel_event=cancel_event,
                 )
+                check_cancel_requested(cancel_event)
                 keyword_result["searched"] = len(note_urls)
                 self._progress(progress, f"关键词 {keyword} 获取到 {len(note_urls)} 条搜索结果")
 
@@ -1011,10 +1061,12 @@ class ContentCollector:
                 days = publish_days_filter(filters)
                 content_type = to_int(filters.get("content_type"), 2, 0, 2)
                 for index, note_url in enumerate(note_urls, start=1):
+                    check_cancel_requested(cancel_event)
                     if index > 1:
-                        self._sleep_between_requests(detail_delay_min, detail_delay_max)
+                        self._sleep_between_requests(detail_delay_min, detail_delay_max, cancel_event)
                     self._progress(progress, f"拉取详情 {keyword} {index}/{len(note_urls)}")
                     success, msg, note_info = self._fetch_note(note_url, cookies)
+                    check_cancel_requested(cancel_event)
                     if not success or not note_info:
                         keyword_result["failed"] += 1
                         self._progress(progress, f"详情失败：{msg}")
@@ -1031,17 +1083,22 @@ class ContentCollector:
                 selected = candidates[:final_limit]
                 keyword_dir = batch_dir / safe_filename(keyword, fallback="keyword", max_len=60)
                 for note in selected:
+                    check_cancel_requested(cancel_event)
                     try:
-                        saved = save_note_as_markdown(note, keyword_dir, output_root)
+                        saved = save_note_as_markdown(note, keyword_dir, output_root, cancel_event)
                         result["items"].append(saved)
                         keyword_result["saved"] += 1
                         self._progress(progress, f"已保存：{saved['title']}")
+                    except JobCanceled:
+                        raise
                     except Exception as exc:
                         keyword_result["failed"] += 1
                         self._progress(progress, f"保存失败：{exc}")
                         logger.exception(exc)
 
                 keyword_result["message"] = f"保存 {keyword_result['saved']} 篇"
+            except JobCanceled:
+                raise
             except Exception as exc:
                 keyword_result["failed"] += 1
                 keyword_result["message"] = str(exc)
@@ -1052,6 +1109,7 @@ class ContentCollector:
             result["failed_count"] += keyword_result["failed"]
             result["keywords"].append(keyword_result)
 
+        check_cancel_requested(cancel_event)
         result["finished_at"] = now_text()
         clean_empty_batch_dirs(batch_dir, include_root=True)
         self._progress(progress, f"采集完成：保存 {result['saved_count']} 篇，失败 {result['failed_count']} 条")
@@ -1065,7 +1123,9 @@ class ContentCollector:
         filters: Dict[str, Any],
         delay_min: float,
         delay_max: float,
+        cancel_event: Optional[threading.Event] = None,
     ) -> List[str]:
+        check_cancel_requested(cancel_event)
         success, msg, notes = self.xhs_apis.search_some_note(
             keyword,
             request_num,
@@ -1075,8 +1135,9 @@ class ContentCollector:
             note_time=publish_api_filter(filters),
             note_range=to_int(filters.get("note_range"), 0, 0, 3),
             pos_distance=to_int(filters.get("pos_distance"), 0, 0, 2),
-            page_delay_callback=lambda _page: self._sleep_between_requests(delay_min, delay_max),
+            page_delay_callback=lambda _page: self._sleep_between_requests(delay_min, delay_max, cancel_event),
         )
+        check_cancel_requested(cancel_event)
         if not success:
             raise RuntimeError(msg)
 
@@ -1095,12 +1156,16 @@ class ContentCollector:
                 seen.add(note_url)
         return urls
 
-    def _sleep_between_requests(self, delay_min: float, delay_max: float) -> None:
+    def _sleep_between_requests(
+        self,
+        delay_min: float,
+        delay_max: float,
+        cancel_event: Optional[threading.Event] = None,
+    ) -> None:
         if delay_max <= 0:
             return
         delay = delay_min if delay_min == delay_max else random.uniform(delay_min, delay_max)
-        if delay > 0:
-            time.sleep(delay)
+        sleep_with_cancel(delay, cancel_event)
 
     def _fetch_note(self, note_url: str, cookies: str) -> Tuple[bool, Any, Optional[Dict[str, Any]]]:
         try:
@@ -1125,11 +1190,13 @@ class RewriteService:
         source_root: Path,
         rewrite_root: Optional[Path] = None,
         config: Optional[Dict[str, Any]] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> None:
         self.source_root = source_root.resolve()
         self.rewrite_root = (rewrite_root or source_root).resolve()
         self.output_root = self.rewrite_root
         self.config = config or {}
+        self.cancel_event = cancel_event
         self.topic = normalize_rewrite_requirements(self.config.get("topic"))
         self.text_model = str(self.config.get("text_model") or "qwen-plus").strip() or "qwen-plus"
         self.vision_model = (
@@ -1160,6 +1227,7 @@ class RewriteService:
         result: Dict[str, Any],
         progress: Optional[Callable[[str], None]] = None,
     ) -> Optional[Dict[str, Any]]:
+        self._check_cancel()
         notes = self._notes_from_collection_result(result)
         if not notes:
             return None
@@ -1172,11 +1240,14 @@ class RewriteService:
         topic: Optional[str] = None,
         progress: Optional[Callable[[str], None]] = None,
     ) -> Dict[str, Any]:
+        self._check_cancel()
         if topic:
             self.topic = normalize_rewrite_requirements(topic)
         note_ref = self._resolve_note_folder(relative_path)
+        self._check_cancel()
         target_note = self._load_note_folder(note_ref)
         peers = self._peer_notes(note_ref)
+        self._check_cancel()
         notes = [target_note] + [note for note in peers if note.get("note_id") != target_note.get("note_id")]
         output_parent = self._rewrite_parent_for_note(note_ref)
         target_dir = available_child_path(
@@ -1225,6 +1296,7 @@ class RewriteService:
         target_note: Optional[Dict[str, Any]] = None,
         progress: Optional[Callable[[str], None]] = None,
     ) -> Dict[str, Any]:
+        self._check_cancel()
         if not self.api_key:
             raise RuntimeError("缺少 DASHSCOPE_API_KEY，无法调用阿里百炼模型生成仿写文案")
 
@@ -1232,17 +1304,21 @@ class RewriteService:
         stage_logs: List[Dict[str, str]] = []
 
         def record(message: str) -> None:
+            self._check_cancel()
             stage_logs.append({"time": now_text(), "message": message})
             self._progress(progress, message)
 
+        self._check_cancel()
         output_dir.mkdir(parents=True, exist_ok=True)
         record("正在准备仿写输出目录")
         if self.analyze_images:
             record(f"正在识别图文图片：{self.vision_model}")
             image_analysis_notes = notes[:10] if mode == "batch" else ([target_note] if target_note else notes[:1])
             self._attach_image_analysis([note for note in image_analysis_notes if note], record)
+        self._check_cancel()
         record(f"正在请求文本模型：{self.text_model}")
         payload = self._call_text_model(notes, mode=mode, target_note=target_note)
+        self._check_cancel()
         record("文本模型已返回，正在整理仿写结构")
         articles = self._normalize_articles(payload.get("articles"), notes, mode=mode, target_note=target_note)
         article_filename = self._article_output_filename(articles)
@@ -1255,6 +1331,7 @@ class RewriteService:
             images_dir = output_dir / "images"
             images_dir.mkdir(parents=True, exist_ok=True)
             for index, article in enumerate(articles, start=1):
+                self._check_cancel()
                 prompt = str(article.get("image_prompt") or "").strip()
                 if not prompt:
                     continue
@@ -1263,12 +1340,19 @@ class RewriteService:
                 try:
                     image_urls = self._generate_image(prompt, self._reference_image(note))
                     if image_urls:
-                        file_name, error = download_url(image_urls[0], images_dir / f"article_{index:02d}", ".jpg")
+                        file_name, error = download_url(
+                            image_urls[0],
+                            images_dir / f"article_{index:02d}",
+                            ".jpg",
+                            self.cancel_event,
+                        )
                         if file_name:
                             article["generated_image"] = f"images/{file_name}"
                         else:
                             article["generated_image_url"] = image_urls[0]
                             article["image_download_error"] = error
+                except JobCanceled:
+                    raise
                 except Exception as exc:
                     article["image_error"] = str(exc)
                     record(f"配图生成失败 {index}/{len(articles)}：{exc}")
@@ -1304,8 +1388,10 @@ class RewriteService:
         result["result_path"] = relative_to_root(output_dir / "result.json", self.rewrite_root)
         result["log_path"] = relative_to_root(output_dir / "仿写日志.md", self.rewrite_root)
         result["finished_at"] = now_text()
+        self._check_cancel()
         record("正在写入仿写结果文件")
         self._write_result_files(output_dir, result)
+        self._check_cancel()
         record("正在写入仿写日志")
         stage_logs.append({
             "time": now_text(),
@@ -1313,6 +1399,7 @@ class RewriteService:
         })
         self._write_rewrite_log(output_dir, result, notes, target_note, stage_logs)
         try:
+            self._check_cancel()
             self.memory_runtime.sync_rewrite_result(result, notes)
         except Exception as exc:
             logger.warning(f"Hermes 仿写记忆同步失败：{exc}")
@@ -1434,6 +1521,7 @@ class RewriteService:
         ready_count = 0
         cache_count = 0
         for index, note in enumerate(notes, start=1):
+            self._check_cancel()
             image_inputs = self._vision_image_inputs(note)
             if not image_inputs:
                 continue
@@ -1453,6 +1541,8 @@ class RewriteService:
                 note["image_analysis"] = analysis
                 self._write_image_analysis_cache(note, image_inputs, analysis)
                 ready_count += 1
+            except JobCanceled:
+                raise
             except Exception as exc:
                 error = str(exc)
                 note["image_analysis_error"] = error
@@ -1576,6 +1666,7 @@ class RewriteService:
         })
 
     def _call_vision_model(self, note: Dict[str, Any], image_inputs: List[Dict[str, Any]]) -> Dict[str, Any]:
+        self._check_cancel()
         title = str(note.get("title") or "")
         desc = str(note.get("desc") or "")[:800]
         prompt = (
@@ -1611,6 +1702,7 @@ class RewriteService:
             timeout=180,
         )
         response.raise_for_status()
+        self._check_cancel()
         data = response.json()
         content_text = self._message_content_to_text(
             data.get("choices", [{}])[0].get("message", {}).get("content", "")
@@ -1745,6 +1837,7 @@ class RewriteService:
         mode: str,
         target_note: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        self._check_cancel()
         request_notes = []
         for note in notes[:10]:
             request_note = {
@@ -1834,6 +1927,7 @@ class RewriteService:
             timeout=180,
         )
         response.raise_for_status()
+        self._check_cancel()
         data = response.json()
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         return self._parse_model_json(self._message_content_to_text(content))
@@ -2108,6 +2202,7 @@ class RewriteService:
         return f"https://{host}/api/v1/tasks/{task_id}"
 
     def _generate_image(self, prompt: str, reference_image: str = "") -> List[str]:
+        self._check_cancel()
         content = [{"text": prompt}]
         parameters = {
             "prompt_extend": True,
@@ -2136,19 +2231,21 @@ class RewriteService:
             timeout=60,
         )
         response.raise_for_status()
+        self._check_cancel()
         data = response.json()
         task_id = data.get("output", {}).get("task_id") or data.get("output", {}).get("taskId")
         if not task_id:
             return self._extract_image_urls(data)
         deadline = time.time() + 240
         while time.time() < deadline:
-            time.sleep(6)
+            sleep_with_cancel(6, self.cancel_event)
             status_response = requests.get(
                 self._task_endpoint(str(task_id)),
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 timeout=30,
             )
             status_response.raise_for_status()
+            self._check_cancel()
             status_data = status_response.json()
             status = str(status_data.get("output", {}).get("task_status") or "").upper()
             if status in {"SUCCEEDED", "SUCCESS"}:
@@ -2198,14 +2295,24 @@ class RewriteService:
         return notes[0] if notes else None
 
     def _progress(self, progress: Optional[Callable[[str], None]], message: str) -> None:
+        self._check_cancel()
         logger.info(message)
         if progress:
             progress(message)
 
+    def _check_cancel(self) -> None:
+        check_cancel_requested(self.cancel_event)
+
 
 class StyleProfileService:
-    def __init__(self, config: Dict[str, Any], output_root: Path = DEFAULT_STYLE_PROFILE_ROOT) -> None:
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        output_root: Path = DEFAULT_STYLE_PROFILE_ROOT,
+        cancel_event: Optional[threading.Event] = None,
+    ) -> None:
         self.config = config or {}
+        self.cancel_event = cancel_event
         rewrite = self.config.get("rewrite", {}) if isinstance(self.config.get("rewrite"), dict) else {}
         collect = self.config.get("collect", {}) if isinstance(self.config.get("collect"), dict) else {}
         self.style_config = (
@@ -2254,6 +2361,7 @@ class StyleProfileService:
         include_image_ocr: Optional[bool] = None,
         progress: Optional[Callable[[str], None]] = None,
     ) -> Dict[str, Any]:
+        self._check_cancel()
         if not self.cookies:
             raise ValueError("缺少登录 Cookie，请先在页面中配置 Cookie")
         if not self.api_key:
@@ -2277,6 +2385,7 @@ class StyleProfileService:
         stage_logs: List[Dict[str, str]] = []
 
         def record(message: str) -> None:
+            self._check_cancel()
             stage_logs.append({"time": now_text(), "message": message})
             self._progress(progress, message)
 
@@ -2291,6 +2400,7 @@ class StyleProfileService:
                 f"继续读取主页第 {page} 页",
             ),
         )
+        self._check_cancel()
         if not success:
             raise RuntimeError(str(msg))
         note_urls = self._note_urls_from_user_notes(simple_notes)
@@ -2300,6 +2410,7 @@ class StyleProfileService:
         notes: List[Dict[str, Any]] = []
         failed_count = 0
         for index, note_url in enumerate(note_urls, start=1):
+            self._check_cancel()
             if index > 1:
                 self._sleep_between_requests(
                     self.detail_delay_min,
@@ -2309,6 +2420,7 @@ class StyleProfileService:
                 )
             record(f"正在拉取文章详情 {index}/{len(note_urls)}")
             note = self._fetch_note_detail(note_url)
+            self._check_cancel()
             if note:
                 notes.append(note)
             else:
@@ -2332,6 +2444,7 @@ class StyleProfileService:
 
         record(f"正在请求文本模型总结写作风格：{self.text_model}")
         payload = self._call_text_model(selected_notes, target_user_url, sample_warning)
+        self._check_cancel()
         result = self._normalize_result(
             payload,
             target_user_url,
@@ -2348,12 +2461,14 @@ class StyleProfileService:
         result["report_path"] = relative_to_root(output_dir / "写作风格分析报告.md", self.output_root)
         result["log_path"] = relative_to_root(output_dir / "画像生成日志.md", self.output_root)
         result["finished_at"] = now_text()
+        self._check_cancel()
         record("正在写入写作风格画像结果")
         self._write_result_files(output_dir, result, stage_logs)
         record(f"写作风格画像完成：样本 {len(selected_notes)} 篇")
         return result
 
     def _resolve_user_url(self, value: Any) -> str:
+        self._check_cancel()
         raw = str(value or "").strip()
         if raw:
             return self._user_url_with_query(raw)
@@ -2423,8 +2538,10 @@ class StyleProfileService:
         return urls
 
     def _fetch_note_detail(self, note_url: str) -> Optional[Dict[str, Any]]:
+        self._check_cancel()
         try:
             success, _msg, note_info = self.xhs_apis.get_note_info(note_url, self.cookies)
+            self._check_cancel()
             if not success or not note_info:
                 return None
             item = note_info["data"]["items"][0]
@@ -2438,6 +2555,7 @@ class StyleProfileService:
         ready_count = 0
         image_note_count = 0
         for index, note in enumerate(notes, start=1):
+            self._check_cancel()
             image_urls = [
                 str(url or "").strip()
                 for url in note.get("image_list") or []
@@ -2452,6 +2570,8 @@ class StyleProfileService:
                 record(f"正在识别样本图片文字 {index}/{len(notes)}：{title}")
                 note["image_analysis"] = self._call_vision_model(note, image_urls)
                 ready_count += 1
+            except JobCanceled:
+                raise
             except Exception as exc:
                 note["image_analysis_error"] = str(exc)
                 record(f"图片文字识别失败 {index}/{len(notes)}：{exc}")
@@ -2461,6 +2581,7 @@ class StyleProfileService:
             record("样本中没有可识别图片，跳过图片文字识别")
 
     def _call_vision_model(self, note: Dict[str, Any], image_urls: List[str]) -> Dict[str, Any]:
+        self._check_cancel()
         prompt = (
             "请识别这些小红书图文图片里的文字和表达方式。重点读取图片上的标题、大字、长文案、"
             "截图文字和封面钩子，同时总结版式给写作风格带来的影响。"
@@ -2494,6 +2615,7 @@ class StyleProfileService:
             timeout=180,
         )
         response.raise_for_status()
+        self._check_cancel()
         data = response.json()
         content_text = self._message_content_to_text(
             data.get("choices", [{}])[0].get("message", {}).get("content", "")
@@ -2513,6 +2635,7 @@ class StyleProfileService:
         user_url: str,
         sample_warning: str,
     ) -> Dict[str, Any]:
+        self._check_cancel()
         request_notes = []
         for note in notes:
             item = {
@@ -2588,6 +2711,7 @@ class StyleProfileService:
             timeout=180,
         )
         response.raise_for_status()
+        self._check_cancel()
         data = response.json()
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         return self._parse_model_json(self._message_content_to_text(content))
@@ -2840,9 +2964,13 @@ class StyleProfileService:
         return f"https://{host}/compatible-mode/v1/chat/completions"
 
     def _progress(self, progress: Optional[Callable[[str], None]], message: str) -> None:
+        self._check_cancel()
         logger.info(message)
         if progress:
             progress(message)
+
+    def _check_cancel(self) -> None:
+        check_cancel_requested(self.cancel_event)
 
     def _sleep_between_requests(
         self,
@@ -2858,7 +2986,7 @@ class StyleProfileService:
             return
         if record:
             record(f"等待 {delay:.1f} 秒后{next_action}")
-        time.sleep(delay)
+        sleep_with_cancel(delay, self.cancel_event)
 
 
 class JobManager:
@@ -2866,6 +2994,7 @@ class JobManager:
         self.config_store = config_store
         self.collector = ContentCollector()
         self.lock = threading.Lock()
+        self.cancel_events: Dict[str, threading.Event] = {}
         self.jobs: List[Dict[str, Any]] = read_json(JOB_HISTORY_PATH, [])
         if not isinstance(self.jobs, list):
             self.jobs = []
@@ -2906,6 +3035,7 @@ class JobManager:
             }
             self.jobs.insert(0, job)
             self.jobs = self.jobs[:50]
+            self.cancel_events[job["id"]] = threading.Event()
             self._persist_unlocked()
 
         thread = threading.Thread(target=self._run_job, args=(job["id"], config_snapshot), daemon=True)
@@ -2958,6 +3088,7 @@ class JobManager:
             }
             self.jobs.insert(0, job)
             self.jobs = self.jobs[:50]
+            self.cancel_events[job["id"]] = threading.Event()
             self._persist_unlocked()
 
         thread = threading.Thread(
@@ -3020,6 +3151,7 @@ class JobManager:
             }
             self.jobs.insert(0, job)
             self.jobs = self.jobs[:50]
+            self.cancel_events[job["id"]] = threading.Event()
             self._persist_unlocked()
 
         thread = threading.Thread(
@@ -3079,12 +3211,50 @@ class JobManager:
             "missing_ids": missing_ids,
         }
 
+    def cancel_job(self, job_id: str) -> Dict[str, Any]:
+        normalized_id = str(job_id or "").strip()
+        if not normalized_id:
+            raise ValueError("缺少任务 ID")
+
+        with self.lock:
+            job = self._find_job_unlocked(normalized_id)
+            if not job:
+                raise ValueError("任务不存在")
+            if job.get("status") != "running":
+                job_copy = deepcopy(job)
+                self._prepare_job_for_response(job_copy)
+                return {
+                    "cancel_requested": False,
+                    "message": "任务已经结束",
+                    "job": job_copy,
+                }
+
+            job["cancel_requested"] = True
+            job["cancel_requested_at"] = now_text()
+            self._append_job_log_unlocked(job, "收到终止请求，正在等待当前步骤收尾", self._default_log_type(job))
+            current_progress = job.get("progress") if isinstance(job.get("progress"), dict) else {}
+            self._set_job_progress_unlocked(job, current_progress.get("value", 0), "正在终止", "canceling")
+            cancel_event = self.cancel_events.setdefault(normalized_id, threading.Event())
+            cancel_event.set()
+            self._persist_unlocked()
+            job_copy = deepcopy(job)
+            self._prepare_job_for_response(job_copy)
+
+        return {
+            "cancel_requested": True,
+            "message": "已请求终止任务",
+            "job": job_copy,
+        }
+
     def has_running(self) -> bool:
         with self.lock:
             return self._running_job_unlocked() is not None
 
     def _run_job(self, job_id: str, config: Dict[str, Any]) -> None:
+        cancel_event = self._cancel_event(job_id)
+
         def progress(message: str, log_type: str = "crawl") -> None:
+            check_cancel_requested(cancel_event)
             with self.lock:
                 job = self._find_job_unlocked(job_id)
                 if not job:
@@ -3094,7 +3264,13 @@ class JobManager:
                 self._persist_unlocked()
 
         try:
-            result = self.collector.run(config, source=self._job_source(job_id), progress=progress)
+            result = self.collector.run(
+                config,
+                source=self._job_source(job_id),
+                progress=progress,
+                cancel_event=cancel_event,
+            )
+            check_cancel_requested(cancel_event)
             try:
                 HermesRuntime(config).sync_collect_result(result)
             except Exception as exc:
@@ -3102,6 +3278,7 @@ class JobManager:
                 logger.warning(f"Hermes 采集记忆同步失败：{exc}")
             rewrite_config = config.get("rewrite", {}) if isinstance(config.get("rewrite"), dict) else {}
             if rewrite_config.get("enabled") and result.get("saved_count"):
+                check_cancel_requested(cancel_event)
                 try:
                     progress("开始自动生成仿写文案", "rewrite")
 
@@ -3112,10 +3289,12 @@ class JobManager:
                         resolve_output_root(config),
                         resolve_rewrite_output_root(config),
                         {**rewrite_config, "_memory": config.get("memory", {})},
+                        cancel_event=cancel_event,
                     ).rewrite_from_collection(
                         result,
                         progress=rewrite_progress,
                     )
+                    check_cancel_requested(cancel_event)
                     if rewrite_result:
                         result["rewrite"] = {
                             "root": rewrite_result.get("root") or "rewrite",
@@ -3128,10 +3307,13 @@ class JobManager:
                             "result_path": rewrite_result.get("result_path"),
                             "log_path": rewrite_result.get("log_path"),
                         }
+                except JobCanceled:
+                    raise
                 except Exception as exc:
                     result["rewrite_error"] = str(exc)
                     progress(f"自动仿写失败：{exc}", "rewrite")
                     logger.exception(exc)
+            check_cancel_requested(cancel_event)
             with self.lock:
                 job = self._find_job_unlocked(job_id)
                 if job:
@@ -3139,6 +3321,17 @@ class JobManager:
                     job["finished_at"] = now_text()
                     job["result"] = result
                     self._set_job_progress_unlocked(job, 100, "已完成", "completed")
+                    self._persist_unlocked()
+        except JobCanceled as exc:
+            with self.lock:
+                job = self._find_job_unlocked(job_id)
+                if job:
+                    job["status"] = "interrupted"
+                    job["finished_at"] = now_text()
+                    job["error"] = str(exc) or "任务已终止"
+                    job["cancel_requested"] = True
+                    self._append_job_log_unlocked(job, "采集任务已终止", "crawl")
+                    self._set_job_progress_unlocked(job, 100, "已终止", "interrupted")
                     self._persist_unlocked()
         except Exception as exc:
             logger.exception(exc)
@@ -3151,6 +3344,8 @@ class JobManager:
                     self._append_job_log_unlocked(job, f"任务失败：{exc}", "crawl")
                     self._set_job_progress_unlocked(job, 100, "失败", "failed")
                     self._persist_unlocked()
+        finally:
+            self._clear_cancel_event(job_id)
 
     def _run_rewrite_job(
         self,
@@ -3159,6 +3354,7 @@ class JobManager:
         topic: str,
         config: Dict[str, Any],
     ) -> None:
+        cancel_event = self._cancel_event(job_id)
         total = len(targets)
         result = {
             "type": "rewrite",
@@ -3173,9 +3369,15 @@ class JobManager:
         rewrite_config = dict(config.get("rewrite", {}) if isinstance(config.get("rewrite"), dict) else {})
         rewrite_config["topic"] = topic
         rewrite_config["_memory"] = config.get("memory", {})
-        service = RewriteService(resolve_output_root(config), resolve_rewrite_output_root(config), rewrite_config)
+        service = RewriteService(
+            resolve_output_root(config),
+            resolve_rewrite_output_root(config),
+            rewrite_config,
+            cancel_event=cancel_event,
+        )
 
         try:
+            check_cancel_requested(cancel_event)
             with self.lock:
                 job = self._find_job_unlocked(job_id)
                 if job:
@@ -3185,6 +3387,7 @@ class JobManager:
                     self._persist_unlocked()
 
             for index, target in enumerate(targets, start=1):
+                check_cancel_requested(cancel_event)
                 target_path = target["path"]
                 target_name = target.get("name") or Path(target_path).name
                 item = {"path": target_path, "name": target_name}
@@ -3197,6 +3400,7 @@ class JobManager:
                         self._persist_unlocked()
 
                 def progress(message: str, item_index: int = index) -> None:
+                    check_cancel_requested(cancel_event)
                     with self.lock:
                         job = self._find_job_unlocked(job_id)
                         if not job:
@@ -3207,6 +3411,7 @@ class JobManager:
 
                 try:
                     rewrite_result = service.rewrite_note(target_path, topic=topic, progress=progress)
+                    check_cancel_requested(cancel_event)
                     item.update({
                         "root": rewrite_result.get("root") or "rewrite",
                         "output_dir": rewrite_result.get("output_dir"),
@@ -3233,6 +3438,8 @@ class JobManager:
                                 total,
                             )
                             self._persist_unlocked()
+                except JobCanceled:
+                    raise
                 except Exception as exc:
                     item["error"] = str(exc)
                     result["failed_count"] += 1
@@ -3253,6 +3460,7 @@ class JobManager:
                             )
                             self._persist_unlocked()
 
+            check_cancel_requested(cancel_event)
             result["finished_at"] = now_text()
             final_status = "success" if result["success_count"] > 0 else "failed"
             final_label = f"完成：成功 {result['success_count']}/{total}"
@@ -3281,6 +3489,25 @@ class JobManager:
                         total,
                     )
                     self._persist_unlocked()
+        except JobCanceled as exc:
+            result["finished_at"] = now_text()
+            result["canceled_count"] = max(0, total - len(result.get("items") or []))
+            with self.lock:
+                job = self._find_job_unlocked(job_id)
+                if job:
+                    job["status"] = "interrupted"
+                    job["finished_at"] = now_text()
+                    job["result"] = result
+                    job["error"] = str(exc) or "任务已终止"
+                    job["cancel_requested"] = True
+                    self._append_job_log_unlocked(
+                        job,
+                        f"AI 仿写任务已终止：成功 {result['success_count']} 篇，失败 {result['failed_count']} 篇",
+                        "rewrite",
+                    )
+                    current = min(len(result.get("items") or []), total)
+                    self._set_job_progress_unlocked(job, 100, "已终止", "interrupted", current, total)
+                    self._persist_unlocked()
         except Exception as exc:
             logger.exception(exc)
             with self.lock:
@@ -3292,12 +3519,16 @@ class JobManager:
                     self._append_job_log_unlocked(job, f"AI 仿写任务失败：{exc}", "rewrite")
                     self._set_job_progress_unlocked(job, 100, "仿写失败", "failed", 0, total)
                     self._persist_unlocked()
+        finally:
+            self._clear_cancel_event(job_id)
 
     def _run_style_profile_job(self, job_id: str, config: Dict[str, Any]) -> None:
+        cancel_event = self._cancel_event(job_id)
         style_config = config.get("style_profile", {}) if isinstance(config.get("style_profile"), dict) else {}
-        service = StyleProfileService(config)
+        service = StyleProfileService(config, cancel_event=cancel_event)
 
         def progress(message: str) -> None:
+            check_cancel_requested(cancel_event)
             with self.lock:
                 job = self._find_job_unlocked(job_id)
                 if not job:
@@ -3307,6 +3538,7 @@ class JobManager:
                 self._persist_unlocked()
 
         try:
+            check_cancel_requested(cancel_event)
             with self.lock:
                 job = self._find_job_unlocked(job_id)
                 if job:
@@ -3320,6 +3552,7 @@ class JobManager:
                 include_image_ocr=style_config.get("include_image_ocr"),
                 progress=progress,
             )
+            check_cancel_requested(cancel_event)
             with self.lock:
                 job = self._find_job_unlocked(job_id)
                 if job:
@@ -3333,6 +3566,17 @@ class JobManager:
                     )
                     self._set_job_progress_unlocked(job, 100, "画像草稿完成", "completed")
                     self._persist_unlocked()
+        except JobCanceled as exc:
+            with self.lock:
+                job = self._find_job_unlocked(job_id)
+                if job:
+                    job["status"] = "interrupted"
+                    job["finished_at"] = now_text()
+                    job["error"] = str(exc) or "任务已终止"
+                    job["cancel_requested"] = True
+                    self._append_job_log_unlocked(job, "写作风格画像任务已终止", "style_profile")
+                    self._set_job_progress_unlocked(job, 100, "已终止", "interrupted")
+                    self._persist_unlocked()
         except Exception as exc:
             logger.exception(exc)
             with self.lock:
@@ -3344,6 +3588,8 @@ class JobManager:
                     self._append_job_log_unlocked(job, f"写作风格画像任务失败：{exc}", "style_profile")
                     self._set_job_progress_unlocked(job, 100, "画像生成失败", "failed")
                     self._persist_unlocked()
+        finally:
+            self._clear_cancel_event(job_id)
 
     def _normalize_rewrite_targets(self, targets: List[Dict[str, Any]]) -> List[Dict[str, str]]:
         normalized: List[Dict[str, str]] = []
@@ -3592,6 +3838,18 @@ class JobManager:
         with self.lock:
             job = self._find_job_unlocked(job_id)
             return job.get("source", "manual") if job else "manual"
+
+    def _cancel_event(self, job_id: str) -> threading.Event:
+        with self.lock:
+            return self.cancel_events.setdefault(job_id, threading.Event())
+
+    def _clear_cancel_event(self, job_id: str) -> None:
+        with self.lock:
+            self.cancel_events.pop(job_id, None)
+
+    def _default_log_type(self, job: Dict[str, Any]) -> str:
+        job_type = str(job.get("type") or "collect")
+        return job_type if job_type in JOB_LOG_TYPES else "crawl"
 
     def _find_job_unlocked(self, job_id: str) -> Optional[Dict[str, Any]]:
         for job in self.jobs:

@@ -864,6 +864,11 @@ class AppHandler(BaseHTTPRequestHandler):
                         payload.get("ids") if isinstance(payload.get("ids"), list) else [],
                     ),
                 })
+            elif path == "/api/jobs/cancel":
+                json_response(self, {
+                    "success": True,
+                    **job_manager.cancel_job(str(payload.get("id") or "")),
+                })
             elif path == "/api/login/check":
                 self._check_login(payload)
             elif path == "/api/login/browser/start":
