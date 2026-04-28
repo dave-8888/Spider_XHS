@@ -369,6 +369,8 @@ def safe_web_path(url_path: str) -> Path:
         target = WEB_ROOT / "rewrite.html"
     elif url_path in ["/settings", "/settings/"]:
         target = WEB_ROOT / "settings.html"
+    elif url_path in ["/advanced-settings", "/advanced-settings/"]:
+        target = WEB_ROOT / "advanced-settings.html"
     else:
         rel = unquote(url_path.lstrip("/"))
         if rel.startswith("ui/"):
@@ -780,6 +782,11 @@ class AppHandler(BaseHTTPRequestHandler):
             payload = read_body(self)
             if path == "/api/config":
                 saved_config = config_store.save(payload)
+                sync_profile_memory(saved_config)
+                json_response(self, {"success": True, "config": config_store.public()})
+            elif path == "/api/config/reset":
+                section = str(payload.get("section") or "").strip()
+                saved_config = config_store.reset_section(section)
                 sync_profile_memory(saved_config)
                 json_response(self, {"success": True, "config": config_store.public()})
             elif path == "/api/schedule":

@@ -63,6 +63,10 @@
             <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z"/><path d="M19 12a7.1 7.1 0 0 0-.1-1l2-1.5-2-3.5-2.4 1a7.6 7.6 0 0 0-1.7-1L14.5 3h-5l-.3 3a7.6 7.6 0 0 0-1.7 1L5.1 6l-2 3.5 2 1.5a7.1 7.1 0 0 0 0 2l-2 1.5 2 3.5 2.4-1a7.6 7.6 0 0 0 1.7 1l.3 3h5l.3-3a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.5-2-1.5a7.1 7.1 0 0 0 .1-1z"/></svg></span>
             <span class="nav-label">设置</span>
           </a>
+          <a class="nav-link" href="/advanced-settings" title="高级设置">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h10"/><path d="M18 7h2"/><path d="M16 5v4"/><path d="M4 17h2"/><path d="M10 17h10"/><path d="M8 15v4"/></svg></span>
+            <span class="nav-label">高级设置</span>
+          </a>
         </nav>
         <div class="theme-switch" role="group" aria-label="主题模式">
           <button class="theme-option" data-theme-option="light" data-short-label="浅" type="button">浅色</button>
@@ -320,8 +324,8 @@
       <div class="section-title">
         <span class="section-index">06</span>
         <div>
-          <h2>大模型配置</h2>
-          <p class="muted">阿里百炼 API Key、文本模型、图片识别模型、图片模型与仿写生成。</p>
+          <h2>AI 创作基础配置</h2>
+          <p class="muted">管理 DashScope API Key、自动仿写、默认要求与输出目录。</p>
         </div>
       </div>
 
@@ -337,6 +341,13 @@
       </div>
 
       <div id="rewriteApiStatus" class="status-panel muted">正在读取模型配置...</div>
+
+      <div class="button-pair settings-advanced-link">
+        <a class="btn btn-secondary btn-icon-text" href="/advanced-settings">
+          <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10"/><path d="M18 7h2"/><path d="M16 5v4"/><path d="M4 17h2"/><path d="M10 17h10"/><path d="M8 15v4"/></svg>
+          打开高级设置
+        </a>
+      </div>
 
       <div class="field-grid field-grid-2">
         <div class="field full-width">
@@ -382,135 +393,6 @@
           </summary>
           <textarea id="rewriteTopicSettingsInput" rows="5" placeholder="创业沙龙">创业沙龙</textarea>
         </details>
-        <div class="row spread switch-row full-width">
-          <div>
-            <strong>启用创作画像</strong>
-            <p class="muted">用于长期保留账号定位、用户风格、项目人格和合规边界。</p>
-          </div>
-          <label class="switch">
-            <input id="rewriteProfileEnabledInput" type="checkbox">
-            <span></span>
-          </label>
-        </div>
-        <details class="field full-width collapsible-field rewrite-profile-panel" open>
-          <summary>
-            <span>创作画像</span>
-            <strong id="rewriteProfileSummary">未配置</strong>
-          </summary>
-          <div class="field-grid field-grid-2">
-            <label class="field">
-              <span>账号定位</span>
-              <textarea id="rewriteProfileIdentityInput" data-rewrite-profile-input rows="3" placeholder="例如：一个做本地创业沙龙的组织者，擅长把资源、经验和同频人连接起来。"></textarea>
-            </label>
-            <label class="field">
-              <span>业务背景</span>
-              <textarea id="rewriteProfileBusinessInput" data-rewrite-profile-input rows="3" placeholder="你在做什么业务、主要服务、优势和当前阶段。"></textarea>
-            </label>
-            <label class="field">
-              <span>目标人群</span>
-              <textarea id="rewriteProfileAudienceInput" data-rewrite-profile-input rows="3" placeholder="用户是谁、他们在焦虑什么、最在意什么。"></textarea>
-            </label>
-            <label class="field">
-              <span>转化目标</span>
-              <textarea id="rewriteProfileConversionInput" data-rewrite-profile-input rows="3" placeholder="例如：引导评论关键词、私信咨询、报名活动、领取资料。"></textarea>
-            </label>
-            <label class="field full-width">
-              <span>我的文案风格</span>
-              <textarea id="rewriteProfileStyleInput" data-rewrite-profile-input rows="4" placeholder="例如：短句多、先讲真实观察，再给判断；不喊口号，少用夸张词，结尾自然引导。"></textarea>
-            </label>
-            <label class="field full-width">
-              <span>项目人格</span>
-              <textarea id="rewriteProfilePersonaInput" data-rewrite-profile-input rows="4" placeholder="这个项目稳定的性格底色。"></textarea>
-            </label>
-            <label class="field full-width">
-              <span>禁用表达与边界</span>
-              <textarea id="rewriteProfileForbiddenInput" data-rewrite-profile-input rows="4" placeholder="不能承诺的效果、不能出现的词、品牌或行业合规边界。"></textarea>
-            </label>
-            <label class="field full-width">
-              <span>历史文案样本</span>
-              <textarea id="rewriteProfileSamplesInput" data-rewrite-profile-input rows="7" placeholder="粘贴 3-10 段你自己的代表性文案，模型只学习语气、节奏和句式，不照抄原文。"></textarea>
-            </label>
-            <div class="field full-width style-profile-tool">
-              <span>自动总结我的风格</span>
-              <div class="field-grid field-grid-2 compact-form">
-                <label class="field">
-                  <span>小红书主页</span>
-                  <input id="styleProfileUserUrlInput" type="url" placeholder="留空则使用当前登录账号">
-                </label>
-                <label class="field">
-                  <span>高赞样本数</span>
-                  <input id="styleProfileSampleLimitInput" type="number" min="5" max="100" step="1" value="30">
-                </label>
-              </div>
-              <div class="row spread switch-row compact-switch-row">
-                <div>
-                  <strong>识别图文图片文字</strong>
-                  <p class="muted">开启后会读取图片里的标题、长文案和封面钩子。</p>
-                </div>
-                <label class="switch">
-                  <input id="styleProfileImageOcrInput" type="checkbox">
-                  <span></span>
-                </label>
-              </div>
-              <div class="button-pair style-profile-actions">
-                <button id="generateStyleProfileBtn" class="btn btn-secondary btn-icon-text" type="button">
-                  <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5 14.5 9l2.5 2.5L6.5 22H4z"/><path d="m13 6.5 2.5-2.5L20 8.5 17.5 11"/><path d="M6 4.5v3M4.5 6h3M19 16.5v3M17.5 18h3"/></svg>
-                  生成画像草稿
-                </button>
-                <button id="applyStyleProfileDraftBtn" class="btn btn-primary btn-icon-text" type="button" disabled>
-                  <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
-                  应用草稿
-                </button>
-              </div>
-              <div id="styleProfileStatus" class="status-panel muted">尚未生成画像草稿</div>
-              <div id="styleProfileDraftPreview" class="style-profile-draft-preview" hidden></div>
-            </div>
-          </div>
-        </details>
-        <div class="row spread switch-row full-width">
-          <div>
-            <strong>仿写前识别图文图片</strong>
-            <p class="muted">先提取图片文字、封面钩子和视觉版式，再交给文本模型分析仿写。</p>
-          </div>
-          <label class="switch">
-            <input id="rewriteAnalyzeImagesInput" type="checkbox">
-            <span></span>
-          </label>
-        </div>
-        <label class="field">
-          <span>文本模型</span>
-          <input id="rewriteTextModelInput" type="text" value="qwen-plus">
-        </label>
-        <label class="field">
-          <span>图片识别模型</span>
-          <input id="rewriteVisionModelInput" type="text" value="qwen3-vl-plus">
-        </label>
-        <label class="field">
-          <span>单篇识别图片数</span>
-          <input id="rewriteVisionImageLimitInput" type="number" min="1" max="6" value="4">
-        </label>
-        <label class="field">
-          <span>图片模型</span>
-          <input id="rewriteImageModelInput" type="text" value="wan2.6-image">
-        </label>
-        <label class="field">
-          <span>服务区域</span>
-          <select id="rewriteRegionInput">
-            <option value="cn-beijing">北京</option>
-            <option value="ap-southeast-1">新加坡</option>
-          </select>
-        </label>
-      </div>
-
-      <div class="row spread switch-row">
-        <div>
-          <strong>同时调用图片模型</strong>
-          <p class="muted">关闭时只生成图片提示词。</p>
-        </div>
-        <label class="switch">
-          <input id="rewriteGenerateImagesInput" type="checkbox">
-          <span></span>
-        </label>
       </div>
     </section>
 

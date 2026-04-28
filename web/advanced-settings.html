@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Spider_XHS 高级设置</title>
+  <script>
+    (() => {
+      const key = 'spider_xhs_theme';
+      const sidebarKey = 'spider_xhs_sidebar';
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      let mode = 'system';
+      try {
+        const stored = localStorage.getItem(key);
+        mode = ['light', 'dark', 'system'].includes(stored) ? stored : 'system';
+      } catch (_error) {
+        mode = 'system';
+      }
+      document.documentElement.dataset.themeMode = mode;
+      document.documentElement.dataset.theme = mode === 'system'
+        ? (prefersDark ? 'dark' : 'light')
+        : mode;
+      try {
+        const storedSidebar = localStorage.getItem(sidebarKey);
+        document.documentElement.dataset.sidebar = storedSidebar === 'collapsed' ? 'collapsed' : 'expanded';
+      } catch (_error) {
+        document.documentElement.dataset.sidebar = 'expanded';
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/ui/app.css">
+</head>
+<body data-page="advanced-settings">
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/" aria-label="Spider_XHS 采集台">
+        <span class="brand-mark">SX</span>
+        <span class="brand-copy">
+          <span class="brand-name">Spider_XHS</span>
+          <span class="brand-subtitle">Business Console</span>
+        </span>
+      </a>
+      <button class="sidebar-toggle" data-sidebar-toggle type="button" aria-label="收起左侧菜单" aria-expanded="true" title="收起左侧菜单">
+        <svg class="sidebar-toggle-icon sidebar-toggle-icon-collapse" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/><path d="M20 5v14"/></svg>
+        <svg class="sidebar-toggle-icon sidebar-toggle-icon-expand" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/><path d="M4 5v14"/></svg>
+        <span class="sidebar-toggle-label">收起菜单</span>
+      </button>
+      <div class="topbar-actions">
+        <nav class="topnav" aria-label="主导航">
+          <a class="nav-link" href="/" title="任务监控">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 13h4l2-6 4 10 2-4h4"/><path d="M4 19h16"/></svg></span>
+            <span class="nav-label">任务监控</span>
+          </a>
+          <a class="nav-link" href="/rewrite?root=crawl" data-rewrite-root-nav="crawl" title="素材库">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5v7A2.5 2.5 0 0 1 17.5 18h-11A2.5 2.5 0 0 1 4 15.5z"/><path d="M4 9h16"/></svg></span>
+            <span class="nav-label">素材库</span>
+          </a>
+          <a class="nav-link" href="/rewrite?root=rewrite" data-rewrite-root-nav="rewrite" title="AI创作">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m4.5 19.5 9.8-9.8 2 2-9.8 9.8h-2z"/><path d="m13.7 6.3 2-2 4 4-2 2"/><path d="M6 4.5v3M4.5 6h3M18 16.5v3M16.5 18h3"/></svg></span>
+            <span class="nav-label">AI创作</span>
+          </a>
+          <a class="nav-link" href="/settings" title="设置">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z"/><path d="M19 12a7.1 7.1 0 0 0-.1-1l2-1.5-2-3.5-2.4 1a7.6 7.6 0 0 0-1.7-1L14.5 3h-5l-.3 3a7.6 7.6 0 0 0-1.7 1L5.1 6l-2 3.5 2 1.5a7.1 7.1 0 0 0 0 2l-2 1.5 2 3.5 2.4-1a7.6 7.6 0 0 0 1.7 1l.3 3h5l.3-3a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.5-2-1.5a7.1 7.1 0 0 0 .1-1z"/></svg></span>
+            <span class="nav-label">设置</span>
+          </a>
+          <a class="nav-link active" href="/advanced-settings" aria-current="page" title="高级设置">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h10"/><path d="M18 7h2"/><path d="M16 5v4"/><path d="M4 17h2"/><path d="M10 17h10"/><path d="M8 15v4"/></svg></span>
+            <span class="nav-label">高级设置</span>
+          </a>
+        </nav>
+        <div class="theme-switch" role="group" aria-label="主题模式">
+          <button class="theme-option" data-theme-option="light" data-short-label="浅" type="button">浅色</button>
+          <button class="theme-option" data-theme-option="dark" data-short-label="深" type="button">深色</button>
+          <button class="theme-option" data-theme-option="system" data-short-label="系" type="button">系统</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="page-shell advanced-settings-page">
+    <section class="surface hero advanced-hero reveal">
+      <div class="hero-copy">
+        <p class="eyebrow eyebrow-muted">Prompt Lab</p>
+        <h1>高级设置</h1>
+        <p class="hero-lead">查看和调整 AI 仿写的模型参数、提示词模板、创作画像与生成开关。</p>
+        <div id="advancedConfigStatus" class="status-panel muted">正在读取高级配置...</div>
+      </div>
+      <div class="settings-title-actions advanced-hero-actions">
+        <a class="btn btn-secondary btn-icon-text" href="/settings">
+          <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m11 6-6 6 6 6"/><path d="M5 12h14"/></svg>
+          返回设置
+        </a>
+        <button id="resetAdvancedRewriteBtn" class="btn btn-ghost btn-icon-text" type="button">
+          <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 8a7 7 0 0 0-12.2-2.4L5 7.5"/><path d="M5 4v3.5h3.5"/><path d="M5 16a7 7 0 0 0 12.2 2.4L19 16.5"/><path d="M19 20v-3.5h-3.5"/></svg>
+          恢复默认
+        </button>
+        <button id="saveAdvancedRewriteBtn" class="btn btn-primary btn-icon-text" type="button">
+          <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5 9.2 17 19 7"/></svg>
+          保存高级设置
+        </button>
+      </div>
+    </section>
+
+    <section class="surface reveal advanced-section">
+      <div class="section-title">
+        <span class="section-index">01</span>
+        <div>
+          <h2>仿写提示词</h2>
+          <p class="muted">主文案模型会把参考笔记、图片理解、创作画像和长期记忆注入到模板里。</p>
+        </div>
+      </div>
+      <div class="field-grid field-grid-2 advanced-prompt-grid">
+        <label class="field">
+          <span>文案模型 System Prompt</span>
+          <textarea id="advancedTextSystemPromptInput" rows="5" spellcheck="false"></textarea>
+        </label>
+        <label class="field">
+          <span>视觉模型 System Prompt</span>
+          <textarea id="advancedVisionSystemPromptInput" rows="5" spellcheck="false"></textarea>
+        </label>
+        <label class="field full-width">
+          <span>文案模型 User Prompt 模板</span>
+          <textarea id="advancedTextUserPromptInput" rows="14" spellcheck="false"></textarea>
+        </label>
+        <label class="field full-width">
+          <span>视觉模型 User Prompt 模板</span>
+          <textarea id="advancedVisionUserPromptInput" rows="10" spellcheck="false"></textarea>
+        </label>
+      </div>
+    </section>
+
+    <section class="surface reveal advanced-section">
+      <div class="section-title">
+        <span class="section-index">02</span>
+        <div>
+          <h2>模型与生成参数</h2>
+          <p class="muted">这些高级参数会在下一次手动仿写或自动仿写时生效。</p>
+        </div>
+      </div>
+      <div class="field-grid field-grid-2">
+        <label class="field">
+          <span>文本模型</span>
+          <input id="advancedTextModelInput" type="text" value="qwen-plus">
+        </label>
+        <label class="field">
+          <span>文本温度</span>
+          <input id="advancedTextTemperatureInput" type="number" min="0" max="2" step="0.01" value="0.82">
+        </label>
+        <label class="field">
+          <span>图片识别模型</span>
+          <input id="advancedVisionModelInput" type="text" value="qwen3-vl-plus">
+        </label>
+        <label class="field">
+          <span>视觉温度</span>
+          <input id="advancedVisionTemperatureInput" type="number" min="0" max="2" step="0.01" value="0.2">
+        </label>
+        <label class="field">
+          <span>图片模型</span>
+          <input id="advancedImageModelInput" type="text" value="wan2.6-image">
+        </label>
+        <label class="field">
+          <span>服务区域</span>
+          <select id="advancedRegionInput">
+            <option value="cn-beijing">北京</option>
+            <option value="ap-southeast-1">新加坡</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>单篇识别图片数</span>
+          <input id="advancedVisionImageLimitInput" type="number" min="1" max="6" value="4">
+        </label>
+        <label class="field">
+          <span>图片尺寸</span>
+          <select id="advancedImageSizeInput">
+            <option value="1K">1K</option>
+            <option value="2K">2K</option>
+          </select>
+        </label>
+        <div class="row spread switch-row">
+          <div>
+            <strong>仿写前识别图片</strong>
+            <p class="muted">读取图片文字、封面钩子和视觉结构。</p>
+          </div>
+          <label class="switch">
+            <input id="advancedAnalyzeImagesInput" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+        <div class="row spread switch-row">
+          <div>
+            <strong>生成图片提示词</strong>
+            <p class="muted">关闭后仿写结果里的 image_prompt 可留空。</p>
+          </div>
+          <label class="switch">
+            <input id="advancedGenerateImagePromptsInput" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+        <div class="row spread switch-row">
+          <div>
+            <strong>调用图片模型</strong>
+            <p class="muted">开启后会根据 image_prompt 生成配图。</p>
+          </div>
+          <label class="switch">
+            <input id="advancedGenerateImagesInput" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+        <div class="row spread switch-row">
+          <div>
+            <strong>图片 Prompt 扩展</strong>
+            <p class="muted">交给图片模型前由平台自动扩展提示词。</p>
+          </div>
+          <label class="switch">
+            <input id="advancedImagePromptExtendInput" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+        <div class="row spread switch-row">
+          <div>
+            <strong>图片水印</strong>
+            <p class="muted">默认关闭，避免生成素材带平台水印。</p>
+          </div>
+          <label class="switch">
+            <input id="advancedImageWatermarkInput" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <section class="surface reveal advanced-section">
+      <div class="section-title">
+        <span class="section-index">03</span>
+        <div>
+          <h2>创作画像</h2>
+          <p class="muted">长期保留账号定位、用户风格、项目人格和合规边界。</p>
+        </div>
+      </div>
+      <div class="field-grid field-grid-2">
+        <div class="row spread switch-row full-width">
+          <div>
+            <strong>启用创作画像</strong>
+            <p class="muted">让模型优先贴近账号定位、目标人群和表达习惯。</p>
+          </div>
+          <label class="switch">
+            <input id="advancedProfileEnabledInput" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+        <label class="field">
+          <span>账号定位</span>
+          <textarea id="advancedProfileIdentityInput" rows="3"></textarea>
+        </label>
+        <label class="field">
+          <span>业务背景</span>
+          <textarea id="advancedProfileBusinessInput" rows="3"></textarea>
+        </label>
+        <label class="field">
+          <span>目标人群</span>
+          <textarea id="advancedProfileAudienceInput" rows="3"></textarea>
+        </label>
+        <label class="field">
+          <span>转化目标</span>
+          <textarea id="advancedProfileConversionInput" rows="3"></textarea>
+        </label>
+        <label class="field full-width">
+          <span>我的文案风格</span>
+          <textarea id="advancedProfileStyleInput" rows="4"></textarea>
+        </label>
+        <label class="field full-width">
+          <span>项目人格</span>
+          <textarea id="advancedProfilePersonaInput" rows="4"></textarea>
+        </label>
+        <label class="field full-width">
+          <span>禁用表达与边界</span>
+          <textarea id="advancedProfileForbiddenInput" rows="4"></textarea>
+        </label>
+        <label class="field full-width">
+          <span>历史文案样本</span>
+          <textarea id="advancedProfileSamplesInput" rows="7"></textarea>
+        </label>
+        <div class="field full-width style-profile-tool">
+          <span>自动总结我的风格</span>
+          <div class="field-grid field-grid-2 compact-form">
+            <label class="field">
+              <span>小红书主页</span>
+              <input id="styleProfileUserUrlInput" type="url" placeholder="留空则使用当前登录账号">
+            </label>
+            <label class="field">
+              <span>高赞样本数</span>
+              <input id="styleProfileSampleLimitInput" type="number" min="5" max="100" step="1" value="30">
+            </label>
+          </div>
+          <div class="row spread switch-row compact-switch-row">
+            <div>
+              <strong>识别图文图片文字</strong>
+              <p class="muted">开启后会读取图片里的标题、长文案和封面钩子。</p>
+            </div>
+            <label class="switch">
+              <input id="styleProfileImageOcrInput" type="checkbox">
+              <span></span>
+            </label>
+          </div>
+          <div class="button-pair style-profile-actions">
+            <button id="generateStyleProfileBtn" class="btn btn-secondary btn-icon-text" type="button">
+              <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5 14.5 9l2.5 2.5L6.5 22H4z"/><path d="m13 6.5 2.5-2.5L20 8.5 17.5 11"/><path d="M6 4.5v3M4.5 6h3M19 16.5v3M17.5 18h3"/></svg>
+              生成画像草稿
+            </button>
+            <button id="applyStyleProfileDraftBtn" class="btn btn-primary btn-icon-text" type="button" disabled>
+              <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              应用草稿
+            </button>
+          </div>
+          <div id="styleProfileStatus" class="status-panel muted">尚未生成画像草稿</div>
+          <div id="styleProfileDraftPreview" class="style-profile-draft-preview" hidden></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" aria-live="polite"></div>
+  <script src="/ui/app.js"></script>
+</body>
+</html>

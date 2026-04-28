@@ -1464,6 +1464,42 @@ select:focus {
   flex: 1 1 118px;
 }
 
+.settings-advanced-link {
+  justify-content: flex-start;
+  margin-bottom: 14px;
+}
+
+.advanced-settings-page {
+  gap: 18px;
+}
+
+.advanced-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 22px;
+  align-items: end;
+  padding: 24px;
+}
+
+.advanced-hero .status-panel {
+  max-width: 760px;
+  margin: 16px 0 0;
+}
+
+.advanced-hero-actions {
+  justify-content: flex-end;
+}
+
+.advanced-section {
+  padding: 20px;
+}
+
+.advanced-prompt-grid textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .priority-card {
   position: relative;
 }
@@ -4349,6 +4385,15 @@ body.has-memory-project-modal {
     grid-template-columns: 1fr;
   }
 
+  .advanced-hero {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .advanced-hero-actions {
+    justify-content: flex-start;
+  }
+
   .command-panel {
     min-height: 0;
   }
@@ -4484,6 +4529,10 @@ body.has-memory-project-modal {
 
   .settings-title-actions {
     width: 100%;
+  }
+
+  .advanced-hero-actions .btn {
+    flex: 1 1 180px;
   }
 
   .command-hero {

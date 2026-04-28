@@ -114,17 +114,6 @@ const settingsEls = {
   rewriteApiKeyToggleBtn: document.querySelector('#rewriteApiKeyToggleBtn'),
   rewriteTopicSettingsInput: document.querySelector('#rewriteTopicSettingsInput'),
   rewriteRequirementSummary: document.querySelector('#rewriteRequirementSummary'),
-  rewriteProfileEnabledInput: document.querySelector('#rewriteProfileEnabledInput'),
-  rewriteProfileSummary: document.querySelector('#rewriteProfileSummary'),
-  rewriteProfileIdentityInput: document.querySelector('#rewriteProfileIdentityInput'),
-  rewriteProfileBusinessInput: document.querySelector('#rewriteProfileBusinessInput'),
-  rewriteProfileAudienceInput: document.querySelector('#rewriteProfileAudienceInput'),
-  rewriteProfileConversionInput: document.querySelector('#rewriteProfileConversionInput'),
-  rewriteProfileStyleInput: document.querySelector('#rewriteProfileStyleInput'),
-  rewriteProfilePersonaInput: document.querySelector('#rewriteProfilePersonaInput'),
-  rewriteProfileForbiddenInput: document.querySelector('#rewriteProfileForbiddenInput'),
-  rewriteProfileSamplesInput: document.querySelector('#rewriteProfileSamplesInput'),
-  rewriteProfileInputs: Array.from(document.querySelectorAll('[data-rewrite-profile-input]')),
   styleProfileUserUrlInput: document.querySelector('#styleProfileUserUrlInput'),
   styleProfileSampleLimitInput: document.querySelector('#styleProfileSampleLimitInput'),
   styleProfileImageOcrInput: document.querySelector('#styleProfileImageOcrInput'),
@@ -132,13 +121,6 @@ const settingsEls = {
   applyStyleProfileDraftBtn: document.querySelector('#applyStyleProfileDraftBtn'),
   styleProfileStatus: document.querySelector('#styleProfileStatus'),
   styleProfileDraftPreview: document.querySelector('#styleProfileDraftPreview'),
-  rewriteTextModelInput: document.querySelector('#rewriteTextModelInput'),
-  rewriteVisionModelInput: document.querySelector('#rewriteVisionModelInput'),
-  rewriteAnalyzeImagesInput: document.querySelector('#rewriteAnalyzeImagesInput'),
-  rewriteVisionImageLimitInput: document.querySelector('#rewriteVisionImageLimitInput'),
-  rewriteImageModelInput: document.querySelector('#rewriteImageModelInput'),
-  rewriteRegionInput: document.querySelector('#rewriteRegionInput'),
-  rewriteGenerateImagesInput: document.querySelector('#rewriteGenerateImagesInput'),
   rewriteApiStatus: document.querySelector('#rewriteApiStatus'),
   memoryEnabledInput: document.querySelector('#memoryEnabledInput'),
   memoryStatus: document.querySelector('#memoryStatus'),
@@ -158,6 +140,38 @@ const settingsEls = {
   checkLoginBtn: document.querySelector('#checkLoginBtn'),
   openLoginBrowserBtn: document.querySelector('#openLoginBrowserBtn'),
   openExternalLoginBrowserBtn: document.querySelector('#openExternalLoginBrowserBtn'),
+};
+
+const advancedEls = {
+  status: document.querySelector('#advancedConfigStatus'),
+  saveBtn: document.querySelector('#saveAdvancedRewriteBtn'),
+  resetBtn: document.querySelector('#resetAdvancedRewriteBtn'),
+  textModelInput: document.querySelector('#advancedTextModelInput'),
+  visionModelInput: document.querySelector('#advancedVisionModelInput'),
+  imageModelInput: document.querySelector('#advancedImageModelInput'),
+  regionInput: document.querySelector('#advancedRegionInput'),
+  analyzeImagesInput: document.querySelector('#advancedAnalyzeImagesInput'),
+  generateImagePromptsInput: document.querySelector('#advancedGenerateImagePromptsInput'),
+  generateImagesInput: document.querySelector('#advancedGenerateImagesInput'),
+  visionImageLimitInput: document.querySelector('#advancedVisionImageLimitInput'),
+  textTemperatureInput: document.querySelector('#advancedTextTemperatureInput'),
+  visionTemperatureInput: document.querySelector('#advancedVisionTemperatureInput'),
+  imagePromptExtendInput: document.querySelector('#advancedImagePromptExtendInput'),
+  imageWatermarkInput: document.querySelector('#advancedImageWatermarkInput'),
+  imageSizeInput: document.querySelector('#advancedImageSizeInput'),
+  textSystemPromptInput: document.querySelector('#advancedTextSystemPromptInput'),
+  textUserPromptInput: document.querySelector('#advancedTextUserPromptInput'),
+  visionSystemPromptInput: document.querySelector('#advancedVisionSystemPromptInput'),
+  visionUserPromptInput: document.querySelector('#advancedVisionUserPromptInput'),
+  profileEnabledInput: document.querySelector('#advancedProfileEnabledInput'),
+  profileIdentityInput: document.querySelector('#advancedProfileIdentityInput'),
+  profileBusinessInput: document.querySelector('#advancedProfileBusinessInput'),
+  profileAudienceInput: document.querySelector('#advancedProfileAudienceInput'),
+  profileConversionInput: document.querySelector('#advancedProfileConversionInput'),
+  profileStyleInput: document.querySelector('#advancedProfileStyleInput'),
+  profilePersonaInput: document.querySelector('#advancedProfilePersonaInput'),
+  profileForbiddenInput: document.querySelector('#advancedProfileForbiddenInput'),
+  profileSamplesInput: document.querySelector('#advancedProfileSamplesInput'),
 };
 
 const desktopBridge = window.spiderDesktop && typeof window.spiderDesktop.isDesktop === 'function'
@@ -1425,53 +1439,6 @@ function updateRewriteRequirementSummary() {
   settingsEls.rewriteRequirementSummary.textContent = truncateText(requirement.replace(/\s+/g, ' '), 34);
 }
 
-function compactFieldValue(value) {
-  return String(value || '').replace(/\s+/g, ' ').trim();
-}
-
-function updateRewriteProfileSummary() {
-  if (!settingsEls.rewriteProfileSummary) return;
-  if (!settingsEls.rewriteProfileEnabledInput?.checked) {
-    settingsEls.rewriteProfileSummary.textContent = '未启用';
-    return;
-  }
-  const identity = compactFieldValue(settingsEls.rewriteProfileIdentityInput?.value);
-  const audience = compactFieldValue(settingsEls.rewriteProfileAudienceInput?.value);
-  const style = compactFieldValue(settingsEls.rewriteProfileStyleInput?.value);
-  const persona = compactFieldValue(settingsEls.rewriteProfilePersonaInput?.value);
-  const summary = [identity, audience, style || persona].filter(Boolean).join(' · ');
-  settingsEls.rewriteProfileSummary.textContent = summary ? truncateText(summary, 44) : '使用默认人格';
-}
-
-function applyRewriteProfileConfig(profile = {}) {
-  if (settingsEls.rewriteProfileEnabledInput) {
-    settingsEls.rewriteProfileEnabledInput.checked = profile.enabled !== false;
-  }
-  if (settingsEls.rewriteProfileIdentityInput) settingsEls.rewriteProfileIdentityInput.value = profile.identity || '';
-  if (settingsEls.rewriteProfileBusinessInput) settingsEls.rewriteProfileBusinessInput.value = profile.business_context || '';
-  if (settingsEls.rewriteProfileAudienceInput) settingsEls.rewriteProfileAudienceInput.value = profile.target_audience || '';
-  if (settingsEls.rewriteProfileConversionInput) settingsEls.rewriteProfileConversionInput.value = profile.conversion_goal || '';
-  if (settingsEls.rewriteProfileStyleInput) settingsEls.rewriteProfileStyleInput.value = profile.writing_style || '';
-  if (settingsEls.rewriteProfilePersonaInput) settingsEls.rewriteProfilePersonaInput.value = profile.content_persona || '';
-  if (settingsEls.rewriteProfileForbiddenInput) settingsEls.rewriteProfileForbiddenInput.value = profile.forbidden_rules || '';
-  if (settingsEls.rewriteProfileSamplesInput) settingsEls.rewriteProfileSamplesInput.value = profile.sample_texts || '';
-  updateRewriteProfileSummary();
-}
-
-function readRewriteProfileDraft() {
-  return {
-    enabled: settingsEls.rewriteProfileEnabledInput?.checked !== false,
-    identity: (settingsEls.rewriteProfileIdentityInput?.value || '').trim(),
-    business_context: (settingsEls.rewriteProfileBusinessInput?.value || '').trim(),
-    target_audience: (settingsEls.rewriteProfileAudienceInput?.value || '').trim(),
-    conversion_goal: (settingsEls.rewriteProfileConversionInput?.value || '').trim(),
-    writing_style: (settingsEls.rewriteProfileStyleInput?.value || '').trim(),
-    content_persona: (settingsEls.rewriteProfilePersonaInput?.value || '').trim(),
-    forbidden_rules: (settingsEls.rewriteProfileForbiddenInput?.value || '').trim(),
-    sample_texts: (settingsEls.rewriteProfileSamplesInput?.value || '').trim(),
-  };
-}
-
 function applyStyleProfileConfig(styleProfile = {}) {
   if (settingsEls.styleProfileUserUrlInput) {
     settingsEls.styleProfileUserUrlInput.value = styleProfile.user_url || '';
@@ -1573,10 +1540,11 @@ function setStyleProfileBusy(busy) {
 }
 
 function applyProfileDraftToInputs(profile = {}) {
-  applyRewriteProfileConfig({
+  const normalized = {
     ...profile,
     enabled: profile.enabled !== false,
-  });
+  };
+  applyAdvancedProfileConfig(normalized);
 }
 
 async function startStyleProfileJob() {
@@ -1724,7 +1692,6 @@ function applySettingsConfig(config) {
   const collect = config.collect || {};
   const schedule = config.schedule || {};
   const rewrite = config.rewrite || {};
-  const styleProfile = config.style_profile || {};
 
   applyHomeConfig(config);
   applyLoginSummary(config);
@@ -1744,15 +1711,6 @@ function applySettingsConfig(config) {
   applyRewriteApiKeyField(rewrite);
   if (settingsEls.rewriteTopicSettingsInput) settingsEls.rewriteTopicSettingsInput.value = rewrite.topic || '创业沙龙';
   updateRewriteRequirementSummary();
-  applyRewriteProfileConfig(rewrite.creator_profile || {});
-  applyStyleProfileConfig(styleProfile);
-  if (settingsEls.rewriteTextModelInput) settingsEls.rewriteTextModelInput.value = rewrite.text_model || 'qwen-plus';
-  if (settingsEls.rewriteVisionModelInput) settingsEls.rewriteVisionModelInput.value = rewrite.vision_model || 'qwen3-vl-plus';
-  if (settingsEls.rewriteAnalyzeImagesInput) settingsEls.rewriteAnalyzeImagesInput.checked = rewrite.analyze_images !== false;
-  if (settingsEls.rewriteVisionImageLimitInput) settingsEls.rewriteVisionImageLimitInput.value = rewrite.vision_image_limit || 4;
-  if (settingsEls.rewriteImageModelInput) settingsEls.rewriteImageModelInput.value = rewrite.image_model || 'wan2.6-image';
-  if (settingsEls.rewriteRegionInput) settingsEls.rewriteRegionInput.value = rewrite.region || 'cn-beijing';
-  if (settingsEls.rewriteGenerateImagesInput) settingsEls.rewriteGenerateImagesInput.checked = Boolean(rewrite.generate_images);
 
   renderSettingsWeekdays();
   updateScheduleView();
@@ -1827,21 +1785,8 @@ function readSettingsDraft() {
       enabled: Boolean(settingsEls.rewriteEnabledInput?.checked),
       api_key: rewriteApiKeyChanged ? rewriteApiKeyValue : '',
       topic: (settingsEls.rewriteTopicSettingsInput?.value || '创业沙龙').trim() || '创业沙龙',
-      text_model: (settingsEls.rewriteTextModelInput?.value || 'qwen-plus').trim() || 'qwen-plus',
-      vision_model: (settingsEls.rewriteVisionModelInput?.value || 'qwen3-vl-plus').trim() || 'qwen3-vl-plus',
-      image_model: (settingsEls.rewriteImageModelInput?.value || 'wan2.6-image').trim() || 'wan2.6-image',
-      region: settingsEls.rewriteRegionInput?.value || 'cn-beijing',
-      analyze_images: settingsEls.rewriteAnalyzeImagesInput?.checked !== false,
-      vision_image_limit: toNumber(settingsEls.rewriteVisionImageLimitInput?.value, 4),
-      generate_image_prompts: true,
-      generate_images: Boolean(settingsEls.rewriteGenerateImagesInput?.checked),
-      creator_profile: readRewriteProfileDraft(),
     },
     memory: readMemoryDraft(),
-    style_profile: {
-      ...readStyleProfileDraft(),
-      sample_selection: 'top_liked',
-    },
   };
 }
 
@@ -1868,6 +1813,171 @@ async function saveSettings() {
   }
   refreshMemoryPanels().catch(() => {});
   toast('设置已保存，尚未配置 DashScope API Key');
+}
+
+function setAdvancedStatus(config = state.config || {}, message = '') {
+  if (!advancedEls.status) return;
+  const rewrite = config.rewrite || {};
+  const source = rewrite.api_key_source ? ` · 来源：${rewrite.api_key_source}` : '';
+  const preview = rewrite.api_key_preview ? ` · ${rewrite.api_key_preview}` : '';
+  const apiText = rewrite.api_key_present ? `DashScope API Key 已配置${source}${preview}` : 'DashScope API Key 未配置';
+  const promptText = rewrite.text_user_prompt_template ? 'Prompt 模板已载入' : 'Prompt 模板待载入';
+  advancedEls.status.textContent = message || `${apiText} · ${promptText}`;
+  advancedEls.status.className = `status-panel ${rewrite.api_key_present ? 'good' : 'muted'}`;
+}
+
+function applyAdvancedProfileConfig(profile = {}) {
+  if (advancedEls.profileEnabledInput) advancedEls.profileEnabledInput.checked = profile.enabled !== false;
+  if (advancedEls.profileIdentityInput) advancedEls.profileIdentityInput.value = profile.identity || '';
+  if (advancedEls.profileBusinessInput) advancedEls.profileBusinessInput.value = profile.business_context || '';
+  if (advancedEls.profileAudienceInput) advancedEls.profileAudienceInput.value = profile.target_audience || '';
+  if (advancedEls.profileConversionInput) advancedEls.profileConversionInput.value = profile.conversion_goal || '';
+  if (advancedEls.profileStyleInput) advancedEls.profileStyleInput.value = profile.writing_style || '';
+  if (advancedEls.profilePersonaInput) advancedEls.profilePersonaInput.value = profile.content_persona || '';
+  if (advancedEls.profileForbiddenInput) advancedEls.profileForbiddenInput.value = profile.forbidden_rules || '';
+  if (advancedEls.profileSamplesInput) advancedEls.profileSamplesInput.value = profile.sample_texts || '';
+}
+
+function readAdvancedProfileDraft() {
+  return {
+    enabled: advancedEls.profileEnabledInput?.checked !== false,
+    identity: (advancedEls.profileIdentityInput?.value || '').trim(),
+    business_context: (advancedEls.profileBusinessInput?.value || '').trim(),
+    target_audience: (advancedEls.profileAudienceInput?.value || '').trim(),
+    conversion_goal: (advancedEls.profileConversionInput?.value || '').trim(),
+    writing_style: (advancedEls.profileStyleInput?.value || '').trim(),
+    content_persona: (advancedEls.profilePersonaInput?.value || '').trim(),
+    forbidden_rules: (advancedEls.profileForbiddenInput?.value || '').trim(),
+    sample_texts: (advancedEls.profileSamplesInput?.value || '').trim(),
+  };
+}
+
+function applyAdvancedConfig(config) {
+  const rewrite = config.rewrite || {};
+  if (advancedEls.textModelInput) advancedEls.textModelInput.value = rewrite.text_model || 'qwen-plus';
+  if (advancedEls.visionModelInput) advancedEls.visionModelInput.value = rewrite.vision_model || 'qwen3-vl-plus';
+  if (advancedEls.imageModelInput) advancedEls.imageModelInput.value = rewrite.image_model || 'wan2.6-image';
+  if (advancedEls.regionInput) advancedEls.regionInput.value = rewrite.region || 'cn-beijing';
+  if (advancedEls.analyzeImagesInput) advancedEls.analyzeImagesInput.checked = rewrite.analyze_images !== false;
+  if (advancedEls.generateImagePromptsInput) advancedEls.generateImagePromptsInput.checked = rewrite.generate_image_prompts !== false;
+  if (advancedEls.generateImagesInput) advancedEls.generateImagesInput.checked = Boolean(rewrite.generate_images);
+  if (advancedEls.visionImageLimitInput) advancedEls.visionImageLimitInput.value = rewrite.vision_image_limit || 4;
+  if (advancedEls.textTemperatureInput) advancedEls.textTemperatureInput.value = rewrite.text_temperature ?? 0.82;
+  if (advancedEls.visionTemperatureInput) advancedEls.visionTemperatureInput.value = rewrite.vision_temperature ?? 0.2;
+  if (advancedEls.imagePromptExtendInput) advancedEls.imagePromptExtendInput.checked = rewrite.image_prompt_extend !== false;
+  if (advancedEls.imageWatermarkInput) advancedEls.imageWatermarkInput.checked = Boolean(rewrite.image_watermark);
+  if (advancedEls.imageSizeInput) advancedEls.imageSizeInput.value = rewrite.image_size || '1K';
+  if (advancedEls.textSystemPromptInput) advancedEls.textSystemPromptInput.value = rewrite.text_system_prompt || '';
+  if (advancedEls.textUserPromptInput) advancedEls.textUserPromptInput.value = rewrite.text_user_prompt_template || '';
+  if (advancedEls.visionSystemPromptInput) advancedEls.visionSystemPromptInput.value = rewrite.vision_system_prompt || '';
+  if (advancedEls.visionUserPromptInput) advancedEls.visionUserPromptInput.value = rewrite.vision_user_prompt_template || '';
+  applyAdvancedProfileConfig(rewrite.creator_profile || {});
+  applyStyleProfileConfig(config.style_profile || {});
+  setAdvancedStatus(config);
+}
+
+function readAdvancedRewriteDraft() {
+  const generateImages = Boolean(advancedEls.generateImagesInput?.checked);
+  const generateImagePrompts = Boolean(advancedEls.generateImagePromptsInput?.checked) || generateImages;
+  return {
+    text_model: (advancedEls.textModelInput?.value || 'qwen-plus').trim() || 'qwen-plus',
+    vision_model: (advancedEls.visionModelInput?.value || 'qwen3-vl-plus').trim() || 'qwen3-vl-plus',
+    image_model: (advancedEls.imageModelInput?.value || 'wan2.6-image').trim() || 'wan2.6-image',
+    region: advancedEls.regionInput?.value || 'cn-beijing',
+    analyze_images: advancedEls.analyzeImagesInput?.checked !== false,
+    vision_image_limit: clampNumber(toNumber(advancedEls.visionImageLimitInput?.value, 4), 1, 6),
+    generate_image_prompts: generateImagePrompts,
+    generate_images: generateImages,
+    text_temperature: clampNumber(toNumber(advancedEls.textTemperatureInput?.value, 0.82), 0, 2),
+    vision_temperature: clampNumber(toNumber(advancedEls.visionTemperatureInput?.value, 0.2), 0, 2),
+    image_prompt_extend: advancedEls.imagePromptExtendInput?.checked !== false,
+    image_watermark: Boolean(advancedEls.imageWatermarkInput?.checked),
+    image_size: advancedEls.imageSizeInput?.value || '1K',
+    text_system_prompt: (advancedEls.textSystemPromptInput?.value || '').trim(),
+    text_user_prompt_template: (advancedEls.textUserPromptInput?.value || '').trim(),
+    vision_system_prompt: (advancedEls.visionSystemPromptInput?.value || '').trim(),
+    vision_user_prompt_template: (advancedEls.visionUserPromptInput?.value || '').trim(),
+    creator_profile: readAdvancedProfileDraft(),
+  };
+}
+
+async function loadAdvancedConfig() {
+  const config = await getConfigRaw();
+  applyAdvancedConfig(config);
+  return config;
+}
+
+async function saveAdvancedRewriteSettings() {
+  if (advancedEls.saveBtn) advancedEls.saveBtn.disabled = true;
+  if (advancedEls.resetBtn) advancedEls.resetBtn.disabled = true;
+  try {
+    const data = await api('/api/config', {
+      method: 'POST',
+      body: JSON.stringify({
+        rewrite: readAdvancedRewriteDraft(),
+        style_profile: {
+          ...readStyleProfileDraft(),
+          sample_selection: 'top_liked',
+        },
+      }),
+    });
+    state.config = data.config;
+    state.choices = data.config?.choices || state.choices;
+    applyAdvancedConfig(data.config);
+    toast('高级设置已保存');
+  } finally {
+    if (advancedEls.saveBtn) advancedEls.saveBtn.disabled = false;
+    if (advancedEls.resetBtn) advancedEls.resetBtn.disabled = false;
+  }
+}
+
+async function resetAdvancedRewriteSettings() {
+  if (!window.confirm('确定恢复 AI 仿写高级设置为默认值吗？自动仿写开关、默认仿写要求和 DashScope API Key 会保留。')) return;
+  if (advancedEls.saveBtn) advancedEls.saveBtn.disabled = true;
+  if (advancedEls.resetBtn) advancedEls.resetBtn.disabled = true;
+  try {
+    const data = await api('/api/config/reset', {
+      method: 'POST',
+      body: JSON.stringify({ section: 'rewrite' }),
+    });
+    state.config = data.config;
+    state.choices = data.config?.choices || state.choices;
+    applyAdvancedConfig(data.config);
+    toast('AI 仿写高级设置已恢复默认');
+  } finally {
+    if (advancedEls.saveBtn) advancedEls.saveBtn.disabled = false;
+    if (advancedEls.resetBtn) advancedEls.resetBtn.disabled = false;
+  }
+}
+
+function bindAdvancedSettingsEvents() {
+  if (advancedEls.saveBtn) {
+    advancedEls.saveBtn.addEventListener('click', () => {
+      saveAdvancedRewriteSettings().catch((error) => toast(error.message));
+    });
+  }
+  if (advancedEls.resetBtn) {
+    advancedEls.resetBtn.addEventListener('click', () => {
+      resetAdvancedRewriteSettings().catch((error) => toast(error.message));
+    });
+  }
+  if (settingsEls.generateStyleProfileBtn) {
+    settingsEls.generateStyleProfileBtn.addEventListener('click', () => {
+      startStyleProfileJob().catch((error) => toast(error.message));
+    });
+  }
+  if (settingsEls.applyStyleProfileDraftBtn) {
+    settingsEls.applyStyleProfileDraftBtn.addEventListener('click', () => {
+      applyStyleProfileDraft().catch((error) => toast(error.message));
+    });
+  }
+  if (advancedEls.generateImagesInput && advancedEls.generateImagePromptsInput) {
+    advancedEls.generateImagesInput.addEventListener('change', () => {
+      if (advancedEls.generateImagesInput.checked) {
+        advancedEls.generateImagePromptsInput.checked = true;
+      }
+    });
+  }
 }
 
 async function pickOutputFolder(root = 'crawl') {
@@ -6186,22 +6296,6 @@ function bindSettingsEvents() {
   if (settingsEls.rewriteTopicSettingsInput) {
     settingsEls.rewriteTopicSettingsInput.addEventListener('input', updateRewriteRequirementSummary);
   }
-  if (settingsEls.rewriteProfileEnabledInput) {
-    settingsEls.rewriteProfileEnabledInput.addEventListener('change', updateRewriteProfileSummary);
-  }
-  settingsEls.rewriteProfileInputs.forEach((input) => {
-    input.addEventListener('input', updateRewriteProfileSummary);
-  });
-  if (settingsEls.generateStyleProfileBtn) {
-    settingsEls.generateStyleProfileBtn.addEventListener('click', () => {
-      startStyleProfileJob().catch((error) => toast(error.message));
-    });
-  }
-  if (settingsEls.applyStyleProfileDraftBtn) {
-    settingsEls.applyStyleProfileDraftBtn.addEventListener('click', () => {
-      applyStyleProfileDraft().catch((error) => toast(error.message));
-    });
-  }
   if (settingsEls.memoryProjectAddBtn) {
     settingsEls.memoryProjectAddBtn.addEventListener('click', () => {
       openMemoryProjectModal('add');
@@ -6307,6 +6401,12 @@ async function bootSettings() {
   await syncBrowserLoginStatus();
 }
 
+async function bootAdvancedSettings() {
+  bindAdvancedSettingsEvents();
+  await loadAdvancedConfig();
+  await hydrateStyleProfileJobState().catch(() => {});
+}
+
 function cleanup() {
   if (state.jobPoller) {
     window.clearInterval(state.jobPoller);
@@ -6321,6 +6421,10 @@ async function boot() {
   bindThemeEvents();
   if (page === 'settings') {
     await bootSettings();
+    return;
+  }
+  if (page === 'advanced-settings') {
+    await bootAdvancedSettings();
     return;
   }
   if (page === 'rewrite') {
