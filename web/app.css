@@ -2831,6 +2831,10 @@ body[data-page="advanced-settings"] .surface.advanced-section {
   line-height: 1.55;
 }
 
+.job-prompt-log {
+  max-height: 320px;
+}
+
 .file-section-title {
   align-items: center;
 }
@@ -3852,9 +3856,9 @@ body.has-file-preview-fullscreen {
   white-space: nowrap;
 }
 
-.preview-rewrite-input {
+.preview-rewrite-input,
+.preview-rewrite-ai-input {
   width: 100%;
-  min-height: 120px;
   resize: vertical;
   padding: 10px 11px;
   border: 1px solid var(--field-border);
@@ -3865,7 +3869,18 @@ body.has-file-preview-fullscreen {
   line-height: 1.55;
 }
 
-.preview-rewrite-input:focus {
+.preview-rewrite-input {
+  min-height: 120px;
+}
+
+.preview-rewrite-ai-input {
+  min-height: 38px;
+  resize: none;
+  font-size: 12px;
+}
+
+.preview-rewrite-input:focus,
+.preview-rewrite-ai-input:focus {
   border-color: var(--blue);
   box-shadow: 0 0 0 3px var(--field-focus);
   outline: none;
@@ -3875,6 +3890,10 @@ body.has-file-preview-fullscreen {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+.preview-rewrite-ai {
+  margin-right: auto;
 }
 
 .file-preview {

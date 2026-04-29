@@ -67,7 +67,9 @@ const homeEls = {
   previewRewriteBtn: document.querySelector('#previewRewriteBtn'),
   previewRewritePopover: document.querySelector('#previewRewritePopover'),
   previewRewriteInput: document.querySelector('#previewRewriteInput'),
+  previewRewriteAiInput: document.querySelector('#previewRewriteAiInput'),
   previewRewriteName: document.querySelector('#previewRewriteName'),
+  generatePreviewRewritePromptBtn: document.querySelector('#generatePreviewRewritePromptBtn'),
   submitPreviewRewriteBtn: document.querySelector('#submitPreviewRewriteBtn'),
   cancelPreviewRewriteBtn: document.querySelector('#cancelPreviewRewriteBtn'),
   copyPreviewTextBtn: document.querySelector('#copyPreviewTextBtn'),
@@ -259,6 +261,7 @@ const state = {
   },
   collectBusy: false,
   rewriteBusy: false,
+  rewritePromptGenerating: false,
   styleProfileBusy: false,
   styleProfileJobId: '',
   styleProfilePoller: null,
@@ -2533,6 +2536,50 @@ function visibleJobLogGroups(job) {
   return groups;
 }
 
+function normalizeTextPrompts(value = {}) {
+  if (!value || typeof value !== 'object') return null;
+  const systemPrompt = String(value.system_prompt || value.systemPrompt || '').trim();
+  const userPrompt = String(value.user_prompt || value.userPrompt || '').trim();
+  if (!systemPrompt && !userPrompt) return null;
+  return { systemPrompt, userPrompt };
+}
+
+function formatTextPrompts(prompts = {}) {
+  return [
+    '【系统提示词】',
+    prompts.systemPrompt || '未记录',
+    '',
+    '【用户提示词】',
+    prompts.userPrompt || '未记录',
+  ].join('\n');
+}
+
+function jobPromptSections(job = {}) {
+  const result = job.result || {};
+  const sections = [];
+  const addSection = (label, value) => {
+    const prompts = normalizeTextPrompts(value);
+    if (!prompts) return;
+    sections.push({
+      label: label || '文案模型提示词',
+      countLabel: `${Number(Boolean(prompts.systemPrompt)) + Number(Boolean(prompts.userPrompt))} 段`,
+      prompts,
+    });
+  };
+
+  addSection('文案模型提示词', result.text_prompts || result.textPrompts);
+  if (Array.isArray(result.items)) {
+    result.items.forEach((item, index) => {
+      const name = item?.name || item?.path || `第 ${index + 1} 篇`;
+      addSection(`${name} · 文案模型提示词`, item?.text_prompts || item?.textPrompts);
+    });
+  }
+  if (result.rewrite && typeof result.rewrite === 'object') {
+    addSection('自动仿写 · 文案模型提示词', result.rewrite.text_prompts || result.rewrite.textPrompts);
+  }
+  return sections;
+}
+
 function jobMatchesLogType(job, type = 'all') {
   if (type === 'all') return true;
   const jobType = job.type || 'collect';
@@ -3257,6 +3304,9 @@ function renderJobs(jobs) {
     const meta = jobVisualMeta(job);
     const summary = job.summary || {};
     const logGroups = visibleJobLogGroups(job);
+    const promptSections = ['all', 'rewrite'].includes(state.jobTypeFilter)
+      ? jobPromptSections(job)
+      : [];
     const progress = jobProgress(job);
     const highlight = job.id === state.highlightedJobId ? ' job-card-highlight' : '';
     const deletable = jobCanBeDeleted(job);
@@ -3281,6 +3331,21 @@ function renderJobs(jobs) {
             <strong>${escapeHtml(group.logs.length)} 条</strong>
           </summary>
           <pre class="job-log" data-job-id="${escapeHtml(job.id)}" data-log-key="${escapeHtml(logKey)}">${escapeHtml(logText)}</pre>
+        </details>
+      `;
+    }).join('');
+    const promptDetailHtml = promptSections.map((section, index) => {
+      const logKey = `${job.id}:prompt:${index}`;
+      const storedOpen = state.jobLogOpenState.get(logKey);
+      const shouldOpen = storedOpen !== undefined ? storedOpen : job.id === state.highlightedJobId;
+      const promptText = formatTextPrompts(section.prompts);
+      return `
+        <details class="job-detail job-prompt-detail" data-job-id="${escapeHtml(job.id)}" data-log-key="${escapeHtml(logKey)}"${shouldOpen ? ' open' : ''}>
+          <summary>
+            <span>${escapeHtml(section.label)}</span>
+            <strong>${escapeHtml(section.countLabel)}</strong>
+          </summary>
+          <pre class="job-log job-prompt-log" data-job-id="${escapeHtml(job.id)}" data-log-key="${escapeHtml(logKey)}">${escapeHtml(promptText)}</pre>
         </details>
       `;
     }).join('');
@@ -3315,6 +3380,7 @@ function renderJobs(jobs) {
         <div class="job-card-grid">${metricHtml}</div>
         <div class="job-latest">${escapeHtml(jobPrimaryMessage(job))}</div>
         ${detailHtml}
+        ${promptDetailHtml}
       </article>
     `;
   }).join('');
@@ -4427,7 +4493,8 @@ function closePreviewRewritePopover({ restoreFocus = false } = {}) {
 function updatePreviewRewriteState() {
   const target = currentPreviewRewriteTarget();
   const busy = state.collectBusy || state.rewriteBusy;
-  const disabled = !target || busy;
+  const generating = Boolean(state.rewritePromptGenerating);
+  const disabled = !target || busy || generating;
 
   if (!target && state.previewRewriteOpen) {
     closePreviewRewritePopover({ restoreFocus: false });
@@ -4446,16 +4513,23 @@ function updatePreviewRewriteState() {
     homeEls.previewRewriteName.textContent = target?.name || '当前预览';
   }
   if (homeEls.previewRewriteInput) {
-    homeEls.previewRewriteInput.disabled = busy;
+    homeEls.previewRewriteInput.disabled = busy || generating;
+  }
+  if (homeEls.previewRewriteAiInput) {
+    homeEls.previewRewriteAiInput.disabled = busy || generating;
+  }
+  if (homeEls.generatePreviewRewritePromptBtn) {
+    homeEls.generatePreviewRewritePromptBtn.disabled = disabled;
+    homeEls.generatePreviewRewritePromptBtn.textContent = generating ? '生成中...' : 'AI生成/修改提示词';
   }
   if (homeEls.submitPreviewRewriteBtn) {
     homeEls.submitPreviewRewriteBtn.disabled = disabled;
-    homeEls.submitPreviewRewriteBtn.textContent = state.rewriteBusy
-      ? '启动中...'
-      : (target?.root === 'rewrite' ? '开始二次仿写' : '开始仿写');
+    homeEls.submitPreviewRewriteBtn.textContent = generating
+      ? '生成中...'
+      : (state.rewriteBusy ? '启动中...' : (target?.root === 'rewrite' ? '开始二次仿写' : '开始仿写'));
   }
   if (homeEls.cancelPreviewRewriteBtn) {
-    homeEls.cancelPreviewRewriteBtn.disabled = busy;
+    homeEls.cancelPreviewRewriteBtn.disabled = busy || generating;
   }
 }
 
@@ -4474,6 +4548,9 @@ function openPreviewRewritePopover() {
   }
   if (homeEls.previewRewriteInput) {
     homeEls.previewRewriteInput.value = previewRewriteDefaultTopic();
+  }
+  if (homeEls.previewRewriteAiInput) {
+    homeEls.previewRewriteAiInput.value = '';
   }
   if (homeEls.previewRewritePopover) {
     homeEls.previewRewritePopover.hidden = false;
@@ -4511,6 +4588,50 @@ async function submitPreviewRewrite() {
   const started = await rewriteEntries([target], { topic, topicSource: 'preview_popup' });
   if (started === false) return;
   closePreviewRewritePopover({ restoreFocus: true });
+}
+
+async function generatePreviewRewritePrompt() {
+  const target = currentPreviewRewriteTarget();
+  if (!target) {
+    toast('当前预览不可生成提示词');
+    updatePreviewRewriteState();
+    return;
+  }
+  if (state.rewritePromptGenerating || state.collectBusy || state.rewriteBusy) return;
+
+  state.rewritePromptGenerating = true;
+  updatePreviewRewriteState();
+  try {
+    const currentPrompt = (homeEls.previewRewriteInput?.value || '').trim();
+    const userInstruction = (homeEls.previewRewriteAiInput?.value || '').trim();
+    const refining = Boolean(currentPrompt && userInstruction);
+    toast(refining ? '正在根据你的要求修改仿写提示词' : '正在根据记忆和当前文章生成仿写提示词');
+    const data = await api('/api/rewrite-requirement', {
+      method: 'POST',
+      body: JSON.stringify({
+        root: target.root,
+        path: target.path,
+        current_prompt: currentPrompt,
+        user_instruction: userInstruction,
+      }),
+    });
+    const prompt = (data.requirement?.rewrite_prompt || '').trim();
+    if (!prompt) {
+      throw new Error('AI 未返回可用的仿写提示词');
+    }
+    if (homeEls.previewRewriteInput) {
+      homeEls.previewRewriteInput.value = prompt;
+      homeEls.previewRewriteInput.focus();
+      homeEls.previewRewriteInput.setSelectionRange(prompt.length, prompt.length);
+    }
+    if (homeEls.previewRewriteAiInput && userInstruction) {
+      homeEls.previewRewriteAiInput.value = '';
+    }
+    toast(refining ? '已按你的要求修改提示词' : (data.requirement?.memory_used ? '已结合记忆生成提示词' : '已根据当前文章生成提示词'));
+  } finally {
+    state.rewritePromptGenerating = false;
+    updatePreviewRewriteState();
+  }
 }
 
 function updateFileToolbarState() {
@@ -6380,6 +6501,11 @@ function bindHomeEvents() {
   if (homeEls.cancelPreviewRewriteBtn) {
     homeEls.cancelPreviewRewriteBtn.addEventListener('click', () => {
       closePreviewRewritePopover({ restoreFocus: true });
+    });
+  }
+  if (homeEls.generatePreviewRewritePromptBtn) {
+    homeEls.generatePreviewRewritePromptBtn.addEventListener('click', () => {
+      generatePreviewRewritePrompt().catch((error) => toast(error.message));
     });
   }
   if (homeEls.submitPreviewRewriteBtn) {

@@ -660,6 +660,27 @@ def run_manual_rewrite_job(payload: Dict[str, Any]) -> Dict[str, Any]:
     return job_manager.start_rewrite(raw_targets, topic=topic, config=config)
 
 
+def generate_rewrite_requirement(payload: Dict[str, Any]) -> Dict[str, Any]:
+    relative_path = str(payload.get("path") or "").strip()
+    if not relative_path:
+        raise ValueError("请选择要生成提示词的文章")
+    root = normalize_file_root(payload.get("root"))
+    config = config_store.load()
+    rewrite_config = dict(config.get("rewrite", {}) if isinstance(config.get("rewrite"), dict) else {})
+    rewrite_config["_memory"] = config.get("memory", {})
+    service = RewriteService(
+        resolve_file_output_root(config, root),
+        resolve_rewrite_output_root(config),
+        rewrite_config,
+        allow_plain_markdown_sources=root == "rewrite",
+    )
+    return service.generate_rewrite_requirement_prompt(
+        relative_path,
+        current_prompt=payload.get("current_prompt"),
+        user_instruction=payload.get("user_instruction"),
+    )
+
+
 def run_style_profile_job(payload: Dict[str, Any]) -> Dict[str, Any]:
     style_payload = {
         "user_url": str(payload.get("user_url") or "").strip(),
@@ -831,6 +852,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 json_response(self, {"success": True, "job": run_manual_rewrite_job(payload)})
             elif path == "/api/rewrite":
                 json_response(self, {"success": True, "rewrite": run_manual_rewrite(payload)})
+            elif path == "/api/rewrite-requirement":
+                json_response(self, {"success": True, "requirement": generate_rewrite_requirement(payload)})
             elif path == "/api/style-profile-job":
                 json_response(self, {"success": True, "job": run_style_profile_job(payload), "config": config_store.public()})
             elif path == "/api/style-profile/apply":

@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from collector_service import RewriteService
+from collector_service import JobManager, RewriteService
 
 
 class RewritePromptLogTests(unittest.TestCase):
@@ -23,6 +23,13 @@ class RewritePromptLogTests(unittest.TestCase):
                 "system_prompt": "系统提示词内容\n\n【安全准则】\n安全准则内容",
                 "user_prompt": "用户提示词内容",
             }
+            self.assertEqual(
+                service._text_prompts_payload(),
+                {
+                    "system_prompt": "系统提示词内容\n\n【安全准则】\n安全准则内容",
+                    "user_prompt": "用户提示词内容",
+                },
+            )
             result = {
                 "started_at": "2026-04-28 20:00:00",
                 "finished_at": "2026-04-28 20:01:00",
@@ -52,6 +59,41 @@ class RewritePromptLogTests(unittest.TestCase):
             self.assertIn("安全准则内容", log_text)
             self.assertIn("### 用户提示词", log_text)
             self.assertIn("用户提示词内容", log_text)
+
+    def test_job_manager_can_backfill_prompts_from_rewrite_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "仿写日志.md"
+            log_path.write_text(
+                "\n".join([
+                    "# 测试 仿写日志",
+                    "",
+                    "## 文案模型提示词",
+                    "",
+                    "### 系统提示词",
+                    "",
+                    "```text",
+                    "系统提示词内容",
+                    "```",
+                    "",
+                    "### 用户提示词",
+                    "",
+                    "```text",
+                    "用户提示词内容",
+                    "```",
+                    "",
+                    "## 输出文件",
+                ]),
+                encoding="utf-8",
+            )
+            manager = object.__new__(JobManager)
+
+            self.assertEqual(
+                manager._text_prompts_from_rewrite_log(log_path),
+                {
+                    "system_prompt": "系统提示词内容",
+                    "user_prompt": "用户提示词内容",
+                },
+            )
 
 
 if __name__ == "__main__":

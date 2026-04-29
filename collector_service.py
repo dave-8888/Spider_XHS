@@ -1883,6 +1883,15 @@ class RewriteService:
             fence += "`"
         return [f"{fence}{info}", body, fence]
 
+    def _text_prompts_payload(self) -> Dict[str, str]:
+        prompts = self._last_text_model_prompts if isinstance(self._last_text_model_prompts, dict) else {}
+        payload = {}
+        for key in ("system_prompt", "user_prompt"):
+            text = str(prompts.get(key) or "").strip()
+            if text:
+                payload[key] = text
+        return payload
+
     def _render_text_prompt_template(self, template: str, values: Dict[str, str]) -> str:
         scope = "text_user_prompt_template"
         has_input = rewrite_prompt_template_has_variable(template, scope, "输入数据")
@@ -2069,6 +2078,7 @@ class RewriteService:
             "image_analyses": self._result_image_analyses(notes[:10]),
             "analysis_report": analysis_report,
             "articles": articles,
+            "text_prompts": self._text_prompts_payload(),
         }
         result["root"] = "rewrite"
         result["output_dir"] = relative_to_root(output_dir, self.rewrite_root)
@@ -2737,6 +2747,102 @@ class RewriteService:
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         return self._parse_model_json(self._message_content_to_text(content))
 
+    def generate_rewrite_requirement_prompt(
+        self,
+        relative_path: str,
+        current_prompt: Any = "",
+        user_instruction: Any = "",
+    ) -> Dict[str, Any]:
+        self._check_cancel()
+        if not self.api_key:
+            raise RuntimeError("缺少 DASHSCOPE_API_KEY，无法调用阿里百炼模型生成仿写提示词")
+        note_ref = self._resolve_note_folder(relative_path)
+        target_note = self._load_note_folder(note_ref)
+        profile = self._creator_profile_payload()
+        current_prompt_text = normalize_rewrite_requirements(current_prompt)
+        user_instruction_text = normalize_rewrite_requirements(user_instruction, max_len=1000)
+        memory_query = " ".join([
+            self.topic,
+            current_prompt_text,
+            user_instruction_text,
+            str(target_note.get("title") or ""),
+            str(target_note.get("desc") or "")[:500],
+            str(profile.get("identity") or ""),
+            str(profile.get("target_audience") or ""),
+            str(profile.get("writing_style") or ""),
+        ])
+        memory_context = self.memory_runtime.build_context(memory_query, top_k=self.memory_runtime.top_k)
+        payload = {
+            "current_default_requirement": self.topic,
+            "current_prompt_in_window": current_prompt_text,
+            "user_generation_or_revision_instruction": user_instruction_text,
+            "creator_profile": self._localized_creator_profile_payload(profile),
+            "target_note": self._localized_note_payload({
+                "note_id": target_note.get("note_id"),
+                "title": target_note.get("title"),
+                "desc": str(target_note.get("desc") or "")[:1800],
+                "metrics": {
+                    "liked": target_note.get("liked_count"),
+                    "collected": target_note.get("collected_count"),
+                    "comment": target_note.get("comment_count"),
+                    "share": target_note.get("share_count"),
+                },
+                "note_type": target_note.get("note_type"),
+                "image_count": len(target_note.get("image_list") or []) or len(target_note.get("local_images") or []),
+                "tags": target_note.get("tags") or [],
+            }),
+            "hermes_memory_context": memory_context or "无",
+        }
+        system_prompt = (
+            "你是小红书仿写任务提示词策划师，擅长把账号记忆、创作画像和参考文章压缩成清晰、可执行的仿写要求。"
+        )
+        user_prompt = (
+            "请根据输入数据生成或修改一段可以直接填入“仿写要求”窗口的中文提示词。"
+            "如果 current_prompt_in_window 已有内容，并且 user_generation_or_revision_instruction 不为空，"
+            "请把 current_prompt_in_window 当作上一轮提示词，按用户新增要求进行二次修改；"
+            "如果用户新增要求为空，则根据当前文章、创作画像和记忆生成一版更完整的提示词。"
+            "最终提示词要具体说明目标人群、选题角度、结构节奏、语气风格、转化目标和禁用边界；"
+            "只能学习参考文章的结构、钩子、节奏和选题方式，不要要求照抄原文，不要复用连续 8 个字以上。"
+            "如果长期记忆和当前文章冲突，以当前文章和当前默认要求为准；长期记忆只作为账号偏好和历史边界。"
+            "只输出最终可用提示词，不要解释修改过程，不要保留对话轮次。"
+            "输出必须是合法 JSON，不要使用 Markdown 代码块。JSON 结构为："
+            "{\"rewrite_prompt\":\"可直接使用的仿写提示词\"}。"
+            f"\n\n输入数据：{json.dumps(payload, ensure_ascii=False)}"
+        )
+        response = requests.post(
+            self._text_endpoint(),
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": self.text_model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": min(self.text_temperature, 0.55),
+                "response_format": {"type": "json_object"},
+            },
+            timeout=180,
+        )
+        response.raise_for_status()
+        self._check_cancel()
+        data = response.json()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        parsed = self._parse_model_json(self._message_content_to_text(content))
+        rewrite_prompt = str(parsed.get("rewrite_prompt") or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+        if not rewrite_prompt:
+            raise ValueError("模型未返回可用的仿写提示词")
+        return {
+            "rewrite_prompt": normalize_rewrite_requirements(rewrite_prompt),
+            "note": {
+                "note_id": target_note.get("note_id"),
+                "title": target_note.get("title"),
+            },
+            "memory_used": bool(memory_context),
+        }
+
     def _parse_model_json(self, content: str) -> Dict[str, Any]:
         text = str(content or "").strip()
         if text.startswith("```"):
@@ -2978,7 +3084,7 @@ class RewriteService:
                 lines.append(f"  - 点赞数：{liked}")
             if note_url:
                 lines.append(f"  - 原始链接：{note_url}")
-        text_prompts = self._last_text_model_prompts if isinstance(self._last_text_model_prompts, dict) else {}
+        text_prompts = self._text_prompts_payload()
         lines.extend([
             "",
             "## 文案模型提示词",
@@ -4131,6 +4237,7 @@ class JobManager:
                             "image_prompts_path": rewrite_result.get("image_prompts_path"),
                             "result_path": rewrite_result.get("result_path"),
                             "log_path": rewrite_result.get("log_path"),
+                            "text_prompts": rewrite_result.get("text_prompts") or {},
                         }
                 except JobCanceled:
                     raise
@@ -4257,6 +4364,7 @@ class JobManager:
                         "result_path": rewrite_result.get("result_path"),
                         "log_path": rewrite_result.get("log_path"),
                         "article_count": rewrite_result.get("article_count"),
+                        "text_prompts": rewrite_result.get("text_prompts") or {},
                     })
                     result["success_count"] += 1
                     result["items"].append(item)
@@ -4455,7 +4563,94 @@ class JobManager:
 
     def _prepare_job_for_response(self, job: Dict[str, Any]) -> None:
         job.setdefault("type", "collect")
+        self._enrich_job_rewrite_prompts(job)
         job["log_groups"] = self._job_log_groups(job)
+
+    def _normalize_text_prompts_payload(self, value: Any) -> Dict[str, str]:
+        if not isinstance(value, dict):
+            return {}
+        payload = {}
+        for key, alt_key in [("system_prompt", "systemPrompt"), ("user_prompt", "userPrompt")]:
+            text = str(value.get(key) or value.get(alt_key) or "").strip()
+            if text and text != "未记录。":
+                payload[key] = text
+        return payload
+
+    def _strip_markdown_code_block(self, text: str) -> str:
+        lines = str(text or "").strip().splitlines()
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        while lines and not lines[-1].strip():
+            lines.pop()
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+            if lines and lines[-1].strip().startswith("```"):
+                lines = lines[:-1]
+        return "\n".join(lines).strip()
+
+    def _markdown_section_between(self, text: str, start_marker: str, end_marker: str) -> str:
+        start = text.find(start_marker)
+        if start < 0:
+            return ""
+        start += len(start_marker)
+        end = text.find(end_marker, start) if end_marker else -1
+        section = text[start:end if end >= 0 else len(text)]
+        return self._strip_markdown_code_block(section)
+
+    def _text_prompts_from_rewrite_log(self, log_path: Path) -> Dict[str, str]:
+        if not log_path.exists() or not log_path.is_file():
+            return {}
+        try:
+            text = log_path.read_text(encoding="utf-8")
+        except OSError:
+            return {}
+        return self._normalize_text_prompts_payload({
+            "system_prompt": self._markdown_section_between(text, "### 系统提示词", "### 用户提示词"),
+            "user_prompt": self._markdown_section_between(text, "### 用户提示词", "## 输出文件"),
+        })
+
+    def _text_prompts_from_rewrite_output(self, result_info: Dict[str, Any]) -> Dict[str, str]:
+        prompts = self._normalize_text_prompts_payload(result_info.get("text_prompts"))
+        if prompts:
+            return prompts
+        try:
+            rewrite_root = resolve_rewrite_output_root(self.config_store.load())
+        except Exception:
+            rewrite_root = DEFAULT_REWRITE_ROOT
+        result_path_text = str(result_info.get("result_path") or "").strip()
+        if result_path_text:
+            result_path = safe_output_path(rewrite_root, result_path_text)
+            if result_path.exists() and result_path.is_file():
+                data = read_json(result_path, {})
+                prompts = self._normalize_text_prompts_payload(
+                    data.get("text_prompts") if isinstance(data, dict) else {}
+                )
+                if prompts:
+                    return prompts
+        log_path_text = str(result_info.get("log_path") or "").strip()
+        if log_path_text:
+            return self._text_prompts_from_rewrite_log(safe_output_path(rewrite_root, log_path_text))
+        return {}
+
+    def _enrich_rewrite_result_prompts(self, result_info: Any) -> None:
+        if not isinstance(result_info, dict):
+            return
+        if not self._normalize_text_prompts_payload(result_info.get("text_prompts")):
+            prompts = self._text_prompts_from_rewrite_output(result_info)
+            if prompts:
+                result_info["text_prompts"] = prompts
+
+    def _enrich_job_rewrite_prompts(self, job: Dict[str, Any]) -> None:
+        result = job.get("result")
+        if not isinstance(result, dict):
+            return
+        self._enrich_rewrite_result_prompts(result)
+        rewrite_result = result.get("rewrite")
+        self._enrich_rewrite_result_prompts(rewrite_result)
+        items = result.get("items")
+        if isinstance(items, list):
+            for item in items:
+                self._enrich_rewrite_result_prompts(item)
 
     def _normalize_job_log_type(self, job: Dict[str, Any], log_type: Optional[str] = None) -> str:
         raw = str(log_type or "").strip().lower()

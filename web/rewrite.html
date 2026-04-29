@@ -188,7 +188,9 @@
                     <span id="previewRewriteName">当前预览</span>
                   </div>
                   <textarea id="previewRewriteInput" class="preview-rewrite-input" rows="5" placeholder="请输入本次仿写要求"></textarea>
+                  <input id="previewRewriteAiInput" class="preview-rewrite-ai-input" type="text" placeholder="可选：写给 AI 的生成或修改要求，例如：更像口语、突出转化、少一点营销感">
                   <div class="preview-rewrite-actions">
+                    <button id="generatePreviewRewritePromptBtn" class="btn btn-ghost preview-rewrite-ai" type="button">AI生成/修改提示词</button>
                     <button id="cancelPreviewRewriteBtn" class="btn btn-ghost preview-rewrite-cancel" type="button">取消</button>
                     <button id="submitPreviewRewriteBtn" class="btn btn-secondary preview-rewrite-submit" type="button">开始仿写</button>
                   </div>
