@@ -102,6 +102,13 @@ MODEL_PROVIDER_PRESETS: Dict[str, Dict[str, str]] = {
         "vision_model": "openai/gpt-4.1-mini",
         "image_model": "",
     },
+    "deepseek": {
+        "label": "DeepSeek",
+        "base_url": "https://api.deepseek.com",
+        "text_model": "deepseek-v4-flash",
+        "vision_model": "",
+        "image_model": "",
+    },
     "custom": {
         "label": "Custom",
         "base_url": "",
@@ -912,7 +919,7 @@ def default_dashscope_task_base_url(region: Any = "cn-beijing") -> str:
 
 
 def env_model_api_key() -> Tuple[str, str]:
-    for name in ("DIARY_AI_API_KEY", "DASHSCOPE_API_KEY", "OPENAI_API_KEY"):
+    for name in ("DIARY_AI_API_KEY", "DASHSCOPE_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY"):
         value = os.getenv(name, "").strip()
         if value:
             return value, name
@@ -987,7 +994,7 @@ def infer_model_traits(model_id: str, name: str = "", description: str = "") -> 
         traits.add("video")
     if any(token in haystack for token in ["reasoning", "reasoner"]) or re.search(r"(^|[^a-z0-9])(o1|o3|o4|r1)([^a-z0-9]|$)", haystack):
         traits.add("reasoning")
-    if not traits or any(token in haystack for token in ["chat", "gpt", "qwen", "claude", "gemini", "llm", "text"]):
+    if not traits or any(token in haystack for token in ["chat", "gpt", "qwen", "claude", "gemini", "deepseek", "llm", "text"]):
         traits.add("text")
     return sorted(traits)
 

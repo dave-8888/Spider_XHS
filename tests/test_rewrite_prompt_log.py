@@ -99,6 +99,21 @@ class RewritePromptLogTests(unittest.TestCase):
             "https://api.example.com/v1/models",
         )
 
+    def test_deepseek_provider_resolves_openai_compatible_defaults(self) -> None:
+        rewrite = {
+            "provider_preset": "deepseek",
+            "api_key": "deepseek-key",
+        }
+
+        text = resolve_rewrite_model_config(rewrite, "text")
+
+        self.assertEqual(text["provider"], "deepseek")
+        self.assertEqual(text["provider_label"], "DeepSeek")
+        self.assertEqual(text["model"], "deepseek-v4-flash")
+        self.assertEqual(text["base_url"], "https://api.deepseek.com")
+        self.assertEqual(text["chat_endpoint"], "https://api.deepseek.com/chat/completions")
+        self.assertEqual(text["models_endpoint"], "https://api.deepseek.com/models")
+
     def test_missing_model_key_error_is_provider_neutral(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict("os.environ", {}, clear=True):

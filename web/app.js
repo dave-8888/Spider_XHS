@@ -1974,6 +1974,9 @@ function readSettingsDraft() {
   const runTimes = readRunTimes();
   const rewriteApiKeyValue = (settingsEls.rewriteApiKeyInput?.value || '').trim();
   const rewriteApiKeyChanged = Boolean(rewriteApiKeyValue && rewriteApiKeyValue !== state.savedRewriteApiKey);
+  const selectedProvider = settingsEls.rewriteProviderPresetInput?.value || 'dashscope';
+  const currentProvider = state.config?.rewrite?.provider_preset || 'dashscope';
+  const providerChanged = selectedProvider !== currentProvider;
   return {
     keywords: collectionDraft.keywords,
     collect: {
@@ -1995,12 +1998,18 @@ function readSettingsDraft() {
     },
     rewrite: {
       enabled: Boolean(settingsEls.rewriteEnabledInput?.checked),
-      provider_preset: settingsEls.rewriteProviderPresetInput?.value || 'dashscope',
+      provider_preset: selectedProvider,
       base_url: (settingsEls.rewriteBaseUrlInput?.value || '').trim(),
       api_key: rewriteApiKeyChanged ? rewriteApiKeyValue : '',
-      text_model: state.config?.rewrite?.text_model || 'qwen-plus',
-      vision_model: state.config?.rewrite?.vision_model || 'qwen3-vl-plus',
-      image_model: state.config?.rewrite?.image_model || 'wan2.6-image',
+      text_model: providerChanged
+        ? providerDefaultModel(selectedProvider, 'text')
+        : (state.config?.rewrite?.text_model || 'qwen-plus'),
+      vision_model: providerChanged
+        ? providerDefaultModel(selectedProvider, 'vision')
+        : (state.config?.rewrite?.vision_model || 'qwen3-vl-plus'),
+      image_model: providerChanged
+        ? providerDefaultModel(selectedProvider, 'image')
+        : (state.config?.rewrite?.image_model || 'wan2.6-image'),
       topic: (settingsEls.rewriteTopicSettingsInput?.value || '创业沙龙').trim() || '创业沙龙',
     },
     memory: readMemoryDraft(),
