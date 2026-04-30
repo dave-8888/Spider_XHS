@@ -30,6 +30,7 @@ from collector_service import (
     create_output_directory,
     delete_output_entries,
     detect_rewrite_requirement_conflicts,
+    fetch_model_catalog,
     list_recent_markdown_files,
     list_output_files,
     read_output_text_file,
@@ -833,6 +834,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 saved_config = config_store.save(payload)
                 sync_profile_memory(saved_config)
                 json_response(self, {"success": True, "config": config_store.public()})
+            elif path == "/api/model-catalog":
+                json_response(self, fetch_model_catalog(payload, config_store.load()))
             elif path == "/api/config/reset":
                 section = str(payload.get("section") or "").strip()
                 saved_config = config_store.reset_section(section)

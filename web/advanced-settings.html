@@ -157,26 +157,108 @@
       </summary>
       <div class="advanced-section-body">
       <div class="field-grid field-grid-2">
+        <div class="row spread switch-row full-width">
+          <div>
+            <strong>文本模型单独设置</strong>
+            <p class="muted">关闭时使用基础页的默认 Provider、Base URL 和 API Key。</p>
+          </div>
+          <label class="switch">
+            <input id="advancedTextOverrideInput" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+        <label class="field advanced-text-provider-field">
+          <span>文本 Provider</span>
+          <select id="advancedTextProviderPresetInput"></select>
+        </label>
+        <label class="field advanced-text-provider-field">
+          <span>文本 Base URL</span>
+          <input id="advancedTextBaseUrlInput" type="url" autocomplete="off">
+        </label>
+        <label class="field full-width advanced-text-provider-field">
+          <span>文本 API Key</span>
+          <input id="advancedTextApiKeyInput" type="password" autocomplete="off" placeholder="留空则使用默认 API Key">
+        </label>
         <label class="field">
           <span>文本模型</span>
           <input id="advancedTextModelInput" type="text" value="qwen-plus">
         </label>
+        <div class="button-pair">
+          <button id="advancedTextFetchModelsBtn" class="btn btn-secondary btn-icon-text" type="button">拉取文本模型</button>
+          <button id="advancedTextManualModelBtn" class="btn btn-ghost btn-icon-text" type="button">手动输入</button>
+        </div>
         <label class="field">
           <span>文本温度</span>
           <input id="advancedTextTemperatureInput" type="number" min="0" max="2" step="0.01" value="0.82">
+        </label>
+        <div class="row spread switch-row full-width">
+          <div>
+            <strong>视觉模型单独设置</strong>
+            <p class="muted">关闭时使用基础页的默认 Provider、Base URL 和 API Key。</p>
+          </div>
+          <label class="switch">
+            <input id="advancedVisionOverrideInput" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+        <label class="field advanced-vision-provider-field">
+          <span>视觉 Provider</span>
+          <select id="advancedVisionProviderPresetInput"></select>
+        </label>
+        <label class="field advanced-vision-provider-field">
+          <span>视觉 Base URL</span>
+          <input id="advancedVisionBaseUrlInput" type="url" autocomplete="off">
+        </label>
+        <label class="field full-width advanced-vision-provider-field">
+          <span>视觉 API Key</span>
+          <input id="advancedVisionApiKeyInput" type="password" autocomplete="off" placeholder="留空则使用默认 API Key">
         </label>
         <label class="field">
           <span>图片识别模型</span>
           <input id="advancedVisionModelInput" type="text" value="qwen3-vl-plus">
         </label>
+        <div class="button-pair">
+          <button id="advancedVisionFetchModelsBtn" class="btn btn-secondary btn-icon-text" type="button">拉取视觉模型</button>
+          <button id="advancedVisionManualModelBtn" class="btn btn-ghost btn-icon-text" type="button">手动输入</button>
+        </div>
         <label class="field">
           <span>视觉温度</span>
           <input id="advancedVisionTemperatureInput" type="number" min="0" max="2" step="0.01" value="0.2">
+        </label>
+        <div class="row spread switch-row full-width">
+          <div>
+            <strong>图片模型单独设置</strong>
+            <p class="muted">关闭时使用基础页的默认 Provider 和 API Key；DashScope 图片生成仍走异步任务接口。</p>
+          </div>
+          <label class="switch">
+            <input id="advancedImageOverrideInput" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+        <label class="field advanced-image-provider-field">
+          <span>图片 Provider</span>
+          <select id="advancedImageProviderPresetInput"></select>
+        </label>
+        <label class="field advanced-image-provider-field">
+          <span>图片生成 Base URL</span>
+          <input id="advancedImageBaseUrlInput" type="url" autocomplete="off">
+        </label>
+        <label class="field full-width advanced-image-provider-field">
+          <span>图片任务 Base URL</span>
+          <input id="advancedImageTaskBaseUrlInput" type="url" autocomplete="off" placeholder="可选，用于异步任务轮询">
+        </label>
+        <label class="field full-width advanced-image-provider-field">
+          <span>图片 API Key</span>
+          <input id="advancedImageApiKeyInput" type="password" autocomplete="off" placeholder="留空则使用默认 API Key">
         </label>
         <label class="field">
           <span>图片模型</span>
           <input id="advancedImageModelInput" type="text" value="wan2.6-image">
         </label>
+        <div class="button-pair">
+          <button id="advancedImageFetchModelsBtn" class="btn btn-secondary btn-icon-text" type="button">拉取图片模型</button>
+          <button id="advancedImageManualModelBtn" class="btn btn-ghost btn-icon-text" type="button">手动输入</button>
+        </div>
         <label class="field">
           <span>服务区域</span>
           <select id="advancedRegionInput">
