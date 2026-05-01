@@ -12,14 +12,11 @@ const sharedEls = {
 
 const homeEls = {
   keywordList: document.querySelector('#keywordList'),
-  addKeywordBtn: document.querySelector('#addKeywordBtn'),
   outputDirText: document.querySelector('#outputDirText'),
-  outputDirSummary: document.querySelector('#outputDirSummary'),
   openOutputDirBtn: document.querySelector('#openOutputDirBtn'),
   pickOutputDirBtn: document.querySelector('#pickOutputDirBtn'),
   resetOutputDirBtn: document.querySelector('#resetOutputDirBtn'),
   rewriteOutputDirText: document.querySelector('#rewriteOutputDirText'),
-  rewriteOutputDirSummary: document.querySelector('#rewriteOutputDirSummary'),
   openRewriteOutputDirBtn: document.querySelector('#openRewriteOutputDirBtn'),
   pickRewriteOutputDirBtn: document.querySelector('#pickRewriteOutputDirBtn'),
   resetRewriteOutputDirBtn: document.querySelector('#resetRewriteOutputDirBtn'),
@@ -134,7 +131,6 @@ const settingsEls = {
   rewriteFetchModelsBtn: document.querySelector('#rewriteFetchModelsBtn'),
   rewriteManualModelBtn: document.querySelector('#rewriteManualModelBtn'),
   rewriteTopicSettingsInput: document.querySelector('#rewriteTopicSettingsInput'),
-  rewriteRequirementSummary: document.querySelector('#rewriteRequirementSummary'),
   styleProfileUserUrlInput: document.querySelector('#styleProfileUserUrlInput'),
   styleProfileSampleLimitInput: document.querySelector('#styleProfileSampleLimitInput'),
   styleProfileImageOcrInput: document.querySelector('#styleProfileImageOcrInput'),
@@ -142,7 +138,6 @@ const settingsEls = {
   applyStyleProfileDraftBtn: document.querySelector('#applyStyleProfileDraftBtn'),
   styleProfileStatus: document.querySelector('#styleProfileStatus'),
   styleProfileDraftPreview: document.querySelector('#styleProfileDraftPreview'),
-  rewriteApiStatus: document.querySelector('#rewriteApiStatus'),
   memoryEnabledInput: document.querySelector('#memoryEnabledInput'),
   memoryStatus: document.querySelector('#memoryStatus'),
   memoryProjectSummary: document.querySelector('#memoryProjectSummary'),
@@ -589,18 +584,32 @@ function keywordValues() {
     .filter(Boolean);
 }
 
+function keywordInputWidth(value = '') {
+  const length = Array.from(String(value || '')).length;
+  return Math.max(4, Math.min(24, length + 2));
+}
+
 function renderKeywordList({ focusId = '' } = {}) {
   if (!homeEls.keywordList) return;
   ensureKeywordItems();
 
-  homeEls.keywordList.innerHTML = state.keywordItems.map((item, index) => `
+  const keywordChips = state.keywordItems.map((item, index) => `
     <div class="keyword-row" data-keyword-id="${item.id}" draggable="${state.collectBusy ? 'false' : 'true'}">
       <span class="keyword-drag" aria-hidden="true">⋮⋮</span>
       <span class="keyword-index">${String(index + 1).padStart(2, '0')}</span>
-      <input class="keyword-input" type="text" value="${escapeHtml(item.value)}" placeholder="输入关键词" ${state.collectBusy ? 'disabled' : ''}>
-      <button class="btn btn-ghost keyword-remove-btn" data-keyword-remove="${item.id}" type="button" ${state.collectBusy ? 'disabled' : ''}>删除</button>
+      <input class="keyword-input" type="text" value="${escapeHtml(item.value)}" placeholder="关键词" style="--keyword-input-ch: ${keywordInputWidth(item.value)}ch" ${state.collectBusy ? 'disabled' : ''}>
+      <button class="keyword-remove-btn" data-keyword-remove="${item.id}" type="button" title="删除关键词" aria-label="删除关键词" ${state.collectBusy ? 'disabled' : ''}>
+        <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
     </div>
   `).join('');
+
+  homeEls.keywordList.innerHTML = `${keywordChips}
+    <button class="keyword-add-btn" data-keyword-add type="button" title="新增关键词" aria-label="新增关键词" ${state.collectBusy ? 'disabled' : ''}>
+      <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+      <span class="keyword-add-label" aria-hidden="true">新增关键词</span>
+    </button>
+  `;
 
   homeEls.keywordList.querySelectorAll('.keyword-row').forEach((row) => {
     const keywordId = row.dataset.keywordId || '';
@@ -609,6 +618,7 @@ function renderKeywordList({ focusId = '' } = {}) {
     if (input) {
       input.addEventListener('input', (event) => {
         updateKeywordValue(keywordId, event.target.value);
+        event.target.style.setProperty('--keyword-input-ch', `${keywordInputWidth(event.target.value)}ch`);
       });
       input.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {
@@ -667,8 +677,13 @@ function renderKeywordList({ focusId = '' } = {}) {
     button.addEventListener('click', () => removeKeywordItem(button.dataset.keywordRemove || ''));
   });
 
-  if (homeEls.addKeywordBtn) {
-    homeEls.addKeywordBtn.disabled = state.collectBusy;
+  const addButton = homeEls.keywordList.querySelector('[data-keyword-add]');
+  if (addButton) {
+    addButton.addEventListener('click', () => {
+      const keyword = createKeywordItem('');
+      state.keywordItems.push(keyword);
+      renderKeywordList({ focusId: keyword.id });
+    });
   }
 
   if (focusId) {
@@ -686,9 +701,6 @@ function renderKeywordList({ focusId = '' } = {}) {
 function renderOutputDirSelection() {
   const displayPath = state.outputDirDisplay || state.defaultOutputRoot;
   const isDefaultPath = !state.selectedOutputDir;
-  if (homeEls.outputDirSummary) {
-    homeEls.outputDirSummary.textContent = isDefaultPath ? '默认目录' : '自定义目录';
-  }
   if (homeEls.outputDirText) {
     homeEls.outputDirText.textContent = displayPath;
     homeEls.outputDirText.classList.toggle('is-default', isDefaultPath);
@@ -700,14 +712,12 @@ function renderOutputDirSelection() {
     homeEls.pickOutputDirBtn.disabled = state.collectBusy;
   }
   if (homeEls.resetOutputDirBtn) {
-    homeEls.resetOutputDirBtn.disabled = state.collectBusy || !state.selectedOutputDir;
+    homeEls.resetOutputDirBtn.hidden = isDefaultPath;
+    homeEls.resetOutputDirBtn.disabled = state.collectBusy || isDefaultPath;
   }
 
   const rewriteDisplayPath = state.rewriteOutputDirDisplay || state.defaultRewriteOutputRoot;
   const isDefaultRewritePath = !state.selectedRewriteOutputDir;
-  if (homeEls.rewriteOutputDirSummary) {
-    homeEls.rewriteOutputDirSummary.textContent = isDefaultRewritePath ? '默认目录' : '自定义目录';
-  }
   if (homeEls.rewriteOutputDirText) {
     homeEls.rewriteOutputDirText.textContent = rewriteDisplayPath;
     homeEls.rewriteOutputDirText.classList.toggle('is-default', isDefaultRewritePath);
@@ -719,7 +729,8 @@ function renderOutputDirSelection() {
     homeEls.pickRewriteOutputDirBtn.disabled = state.collectBusy;
   }
   if (homeEls.resetRewriteOutputDirBtn) {
-    homeEls.resetRewriteOutputDirBtn.disabled = state.collectBusy || !state.selectedRewriteOutputDir;
+    homeEls.resetRewriteOutputDirBtn.hidden = isDefaultRewritePath;
+    homeEls.resetRewriteOutputDirBtn.disabled = state.collectBusy || isDefaultRewritePath;
   }
 }
 
@@ -1176,7 +1187,6 @@ function setSettingsProvider(provider, { resetModels = true } = {}) {
   }
   renderSettingsProviderPills(selected);
   updateModelCards();
-  applyRewriteSummary(state.config);
 }
 
 function setFieldVisibility(fields, visible) {
@@ -1708,23 +1718,6 @@ function applyLoginSummary(config) {
   setLoginStatus('未保存 Cookie，请打开浏览器登录', 'bad');
 }
 
-function applyRewriteSummary(config) {
-  if (!settingsEls.rewriteApiStatus) return;
-  const rewrite = config.rewrite || {};
-  const requirement = rewrite.topic || '创业沙龙';
-  const source = rewrite.api_key_source ? ` · 来源：${rewrite.api_key_source}` : '';
-  const preview = rewrite.api_key_preview ? ` · ${rewrite.api_key_preview}` : '';
-  const textModel = rewrite.text_model || 'qwen-plus';
-  const visionModel = rewrite.analyze_images === false ? '不识别图片' : (rewrite.vision_model || 'qwen3-vl-plus');
-  const imageModel = rewrite.image_model || 'wan2.6-image';
-  const provider = rewrite.resolved_models?.text?.provider_label || providerPresets()?.[rewrite.provider_preset]?.label || rewrite.provider_preset || 'DashScope';
-  const message = rewrite.api_key_present
-    ? `模型配置可用${source}${preview} · ${provider} · ${textModel} / ${visionModel} / ${imageModel} · 默认要求：${truncateText(requirement, 36)}`
-    : '未配置模型 API Key，仿写接口会等待模型密钥';
-  settingsEls.rewriteApiStatus.textContent = message;
-  settingsEls.rewriteApiStatus.className = `status-panel ${rewrite.api_key_present ? 'good' : 'muted'}`;
-}
-
 function updateSharedModelStatus(config = state.config || {}) {
   if (!settingsEls.rewriteSharedModelStatus) return;
   const rewrite = config.rewrite || {};
@@ -2069,12 +2062,6 @@ async function deleteMemoryProjectEntry(index) {
   toast('项目记忆已删除');
 }
 
-function updateRewriteRequirementSummary() {
-  if (!settingsEls.rewriteRequirementSummary) return;
-  const requirement = (settingsEls.rewriteTopicSettingsInput?.value || '').trim() || '创业沙龙';
-  settingsEls.rewriteRequirementSummary.textContent = truncateText(requirement.replace(/\s+/g, ' '), 34);
-}
-
 function applyStyleProfileConfig(styleProfile = {}) {
   if (settingsEls.styleProfileUserUrlInput) {
     settingsEls.styleProfileUserUrlInput.value = styleProfile.user_url || '';
@@ -2335,7 +2322,6 @@ function applySettingsConfig(config) {
 
   applyHomeConfig(config);
   applyLoginSummary(config);
-  applyRewriteSummary(config);
   applyMemoryConfig(config);
   settingsEls.requestMultiplierInput.value = collect.request_multiplier ?? 3;
   settingsEls.searchDelayMinInput.value = collect.search_delay_min_sec ?? 2;
@@ -2357,7 +2343,6 @@ function applySettingsConfig(config) {
   applyRewriteApiKeyField(rewrite);
   if (settingsEls.rewriteTopicSettingsInput) settingsEls.rewriteTopicSettingsInput.value = rewrite.topic || '创业沙龙';
   updateModelCards('settings');
-  updateRewriteRequirementSummary();
 
   renderSettingsWeekdays();
   updateScheduleView();
@@ -7023,13 +7008,6 @@ async function previewFile(path, root = state.currentFileRoot) {
 }
 
 function bindCollectionConfigEvents() {
-  if (homeEls.addKeywordBtn) {
-    homeEls.addKeywordBtn.addEventListener('click', () => {
-      const keyword = createKeywordItem('');
-      state.keywordItems.push(keyword);
-      renderKeywordList({ focusId: keyword.id });
-    });
-  }
   if (homeEls.pickOutputDirBtn) {
     homeEls.pickOutputDirBtn.addEventListener('click', () => {
       pickOutputFolder('crawl').catch((error) => toast(error.message));
@@ -7406,9 +7384,6 @@ function bindSettingsEvents() {
     settingsEls.rewriteApiKeyInput.addEventListener('input', () => {
       setRewriteApiKeyVisible(settingsEls.rewriteApiKeyInput.type === 'text');
     });
-  }
-  if (settingsEls.rewriteTopicSettingsInput) {
-    settingsEls.rewriteTopicSettingsInput.addEventListener('input', updateRewriteRequirementSummary);
   }
   if (settingsEls.memoryProjectAddBtn) {
     settingsEls.memoryProjectAddBtn.addEventListener('click', () => {

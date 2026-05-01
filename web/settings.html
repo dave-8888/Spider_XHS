@@ -132,23 +132,17 @@
       </aside>
     </section>
 
-    <section class="grid two-columns">
+    <section class="grid">
       <article class="surface reveal priority-card">
         <div class="section-title">
           <span class="section-index">01</span>
           <div>
-            <h2>关键词矩阵</h2>
-            <p class="muted">按业务优先级组织采集对象。</p>
+            <h2>关键词列表</h2>
           </div>
         </div>
         <div class="field">
-          <span>关键词列表</span>
           <div id="keywordList" class="keyword-list" aria-live="polite"></div>
         </div>
-        <button id="addKeywordBtn" class="btn btn-secondary btn-icon-text keyword-add-btn" type="button">
-          <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-          新增关键词
-        </button>
       </article>
 
       <article class="surface reveal">
@@ -159,17 +153,13 @@
             <p class="muted">数量、热度筛选与结果目录。</p>
           </div>
         </div>
-        <div class="field-grid field-grid-2">
+        <div class="field-grid field-grid-3">
           <div class="field full-width">
             <span>采集存放目录</span>
-            <div class="directory-picker">
-              <details class="directory-display">
-                <summary>
-                  <span class="directory-label">当前目录</span>
-                  <strong id="outputDirSummary" class="directory-summary">点击查看</strong>
-                </summary>
+            <div class="directory-picker directory-picker-inline">
+              <div class="directory-display directory-display-inline">
                 <div id="outputDirText" class="directory-path">加载中...</div>
-              </details>
+              </div>
               <div class="button-pair directory-actions">
                 <button id="openOutputDirBtn" class="btn btn-ghost btn-icon-text" type="button">
                   <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h8v8"/><path d="m8 16 8-8"/><path d="M5 5h5"/><path d="M5 5v14h14v-5"/></svg>
@@ -194,7 +184,7 @@
             <span>点赞 Top N</span>
             <input id="likeTopInput" type="number" min="1" max="200" value="10">
           </label>
-          <label class="field full-width">
+          <label class="field">
             <span>自定义发布时间天数</span>
             <input id="publishDaysInput" type="number" min="0" max="3650" value="7">
           </label>
@@ -340,19 +330,13 @@
         </label>
       </div>
 
-      <div id="rewriteApiStatus" class="status-panel muted">正在读取模型配置...</div>
-
       <div class="field-grid field-grid-2">
         <div class="field full-width">
           <span>AI 仿写存放目录</span>
-          <div class="directory-picker">
-            <details class="directory-display">
-              <summary>
-                <span class="directory-label">当前目录</span>
-                <strong id="rewriteOutputDirSummary" class="directory-summary">点击查看</strong>
-              </summary>
+          <div class="directory-picker directory-picker-inline">
+            <div class="directory-display directory-display-inline">
               <div id="rewriteOutputDirText" class="directory-path">加载中...</div>
-            </details>
+            </div>
             <div class="button-pair directory-actions">
               <button id="openRewriteOutputDirBtn" class="btn btn-ghost btn-icon-text" type="button">
                 <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h8v8"/><path d="m8 16 8-8"/><path d="M5 5h5"/><path d="M5 5v14h14v-5"/></svg>
@@ -443,7 +427,6 @@
         <details class="field full-width collapsible-field rewrite-requirements-panel" open>
           <summary>
             <span>默认仿写要求</span>
-            <strong id="rewriteRequirementSummary">创业沙龙</strong>
           </summary>
           <textarea id="rewriteTopicSettingsInput" rows="5" placeholder="创业沙龙">创业沙龙</textarea>
         </details>
