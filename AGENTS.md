@@ -1,7 +1,4 @@
 <claude-mem-context>
 # Memory Context
-
-# [Spider_XHS] recent context, 2026-04-30 4:55pm GMT+8
-
-No previous sessions found.
+#UI设计请参考”/Users/dave/projects/awesome-design-md/design-md/apple“ 路径下的skills
 </claude-mem-context>
