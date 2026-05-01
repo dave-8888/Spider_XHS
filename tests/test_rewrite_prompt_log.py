@@ -1,10 +1,14 @@
 import tempfile
 import unittest
 import json
+import threading
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import Mock, patch
+from urllib import request as urlrequest
 
 from collector_service import (
+    ConfigStore,
     DEFAULT_REWRITE_SAFETY_RULES,
     DEFAULT_REWRITE_TEXT_USER_PROMPT_TEMPLATE,
     JobManager,
@@ -15,6 +19,7 @@ from collector_service import (
     normalize_models_url,
     resolve_rewrite_model_config,
 )
+from web_app import AppHandler
 
 
 class RewritePromptLogTests(unittest.TestCase):
@@ -147,6 +152,82 @@ class RewritePromptLogTests(unittest.TestCase):
         self.assertEqual(get.call_args.args[0], "https://api.example.com/v1/models")
         self.assertEqual([item["id"] for item in result["models"]], ["gpt-test", "vision-test"])
         self.assertIn("multimodal", result["models"][1]["groups"])
+
+    def test_model_catalog_snapshot_is_sanitized_on_save(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ConfigStore(Path(tmp) / "collector_config.json")
+            saved = store.save({
+                "rewrite": {
+                    "model_catalog_snapshot": {
+                        "shared": {
+                            "provider": "custom",
+                            "provider_preset": "custom",
+                            "base_url": "https://api.example.com/v1/",
+                            "source": "remote",
+                            "fetched_at": "2026-04-30T12:00:00",
+                            "models": [
+                                {"id": "z-model", "description": "Text model"},
+                                {"name": "missing-id"},
+                                {"id": "a-model", "architecture": {"input_modalities": ["text", "image"]}},
+                            ],
+                        },
+                        "unknown": {"models": [{"id": "bad-model"}]},
+                    }
+                }
+            })
+
+        snapshot = saved["rewrite"]["model_catalog_snapshot"]
+        self.assertEqual(set(snapshot.keys()), {"shared"})
+        self.assertEqual([item["id"] for item in snapshot["shared"]["models"]], ["a-model", "z-model"])
+        self.assertIn("multimodal", snapshot["shared"]["models"][0]["groups"])
+
+    def test_model_catalog_api_saves_snapshot_without_api_key(self) -> None:
+        response = Mock()
+        response.json.return_value = {
+            "data": [
+                {"id": "gpt-test", "description": "A text model."},
+            ]
+        }
+        response.raise_for_status = Mock()
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), AppHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        save_mock = Mock(return_value={"rewrite": {}})
+        try:
+            with patch("collector_service.requests.get", return_value=response), patch(
+                "web_app.config_store.load",
+                return_value={"rewrite": {}},
+            ), patch("web_app.config_store.save", save_mock), patch(
+                "web_app.config_store.public",
+                return_value={"rewrite": {"model_catalog_snapshot": {}}},
+            ):
+                body = json.dumps({
+                    "scope": "shared",
+                    "provider_preset": "custom",
+                    "base_url": "https://api.example.com/v1/",
+                    "api_key": "secret-key",
+                }).encode("utf-8")
+                request = urlrequest.Request(
+                    f"http://127.0.0.1:{server.server_address[1]}/api/model-catalog",
+                    data=body,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urlrequest.urlopen(request, timeout=5) as api_response:
+                    payload = json.loads(api_response.read().decode("utf-8"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        self.assertTrue(payload["success"])
+        save_mock.assert_called_once()
+        saved_snapshot = save_mock.call_args.args[0]["rewrite"]["model_catalog_snapshot"]["shared"]
+        self.assertEqual(saved_snapshot["provider"], "custom")
+        self.assertEqual(saved_snapshot["base_url"], "https://api.example.com/v1/")
+        self.assertEqual([item["id"] for item in saved_snapshot["models"]], ["gpt-test"])
+        self.assertNotIn("api_key", json.dumps(saved_snapshot))
 
     def test_rewrite_log_includes_text_model_prompts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

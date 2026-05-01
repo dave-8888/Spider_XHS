@@ -320,12 +320,12 @@
       </article>
     </section>
 
-    <section id="modelConfig" class="surface reveal model-config-section">
+    <section id="modelConfig" class="surface reveal model-config-section model-config-panel">
       <div class="section-title">
         <span class="section-index">06</span>
         <div>
           <h2>AI 创作基础配置</h2>
-          <p class="muted">管理模型 Provider、Base URL、API Key、自动仿写、默认要求与输出目录。</p>
+          <p class="muted">优先支持 OpenAI 兼容的聊天补全接口，OpenAI、Qwen、Gemini 兼容层、Claude 兼容层、OpenRouter 以及自定义提供商都可以接入。</p>
         </div>
       </div>
 
@@ -341,13 +341,6 @@
       </div>
 
       <div id="rewriteApiStatus" class="status-panel muted">正在读取模型配置...</div>
-
-      <div class="button-pair settings-advanced-link">
-        <a class="btn btn-secondary btn-icon-text" href="/advanced-settings">
-          <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10"/><path d="M18 7h2"/><path d="M16 5v4"/><path d="M4 17h2"/><path d="M10 17h10"/><path d="M8 15v4"/></svg>
-          打开高级设置
-        </a>
-      </div>
 
       <div class="field-grid field-grid-2">
         <div class="field full-width">
@@ -376,17 +369,18 @@
             </div>
           </div>
         </div>
-        <label class="field">
-          <span>默认 Provider</span>
-          <select id="rewriteProviderPresetInput"></select>
-        </label>
-        <label class="field">
-          <span>默认 Base URL</span>
+        <div class="field full-width model-provider-field">
+          <span>服务商</span>
+          <select id="rewriteProviderPresetInput" class="model-provider-hidden-select" aria-hidden="true" tabindex="-1"></select>
+          <div id="rewriteProviderPresetChoices" class="model-provider-pills" role="group" aria-label="模型服务商"></div>
+        </div>
+        <label class="field full-width model-large-field">
+          <span>Base URL / Endpoint</span>
           <input id="rewriteBaseUrlInput" type="url" autocomplete="off" placeholder="https://.../v1/">
         </label>
-        <label class="field full-width">
-          <span>模型 API Key</span>
-          <div class="secret-input-wrap">
+        <label class="field full-width model-large-field model-api-key-field">
+          <span>Diary AI API Key</span>
+          <div class="secret-input-wrap model-secret-input-wrap">
             <input id="rewriteApiKeyInput" type="password" autocomplete="off" placeholder="粘贴模型 API Key 后保存">
             <button id="rewriteApiKeyToggleBtn" class="secret-toggle-btn" type="button" title="显示 API Key" aria-label="显示模型 API Key" aria-pressed="false" disabled>
               <svg class="btn-icon secret-toggle-icon secret-toggle-icon-show" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"/><path d="M12 14.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/></svg>
@@ -394,18 +388,56 @@
             </button>
           </div>
         </label>
-        <div class="field full-width">
-          <span>当前模型摘要</span>
-          <div id="rewriteSharedModelStatus" class="status-panel muted">正在读取模型摘要...</div>
-          <div class="button-pair">
-            <button id="rewriteFetchModelsBtn" class="btn btn-secondary btn-icon-text" type="button">
-              <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v6h6"/><path d="M20 20v-6h-6"/><path d="M20 9a8 8 0 0 0-13.5-3.5L4 8"/><path d="M4 15a8 8 0 0 0 13.5 3.5L20 16"/></svg>
-              拉取模型列表
-            </button>
-            <button id="rewriteManualModelBtn" class="btn btn-ghost btn-icon-text" type="button">
-              <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-              手动输入模型
-            </button>
+        <div class="field full-width model-selection-field">
+          <div class="model-selection-head">
+            <span>选择模型</span>
+            <div class="model-selection-meta">
+              <span id="rewriteModelCatalogCount" class="model-catalog-badge">尚未获取模型</span>
+            </div>
+          </div>
+          <div class="model-card-grid">
+            <article class="model-selected-card" data-model-card="text">
+              <input id="rewriteTextModelInput" type="hidden" value="qwen-plus">
+              <div class="model-selected-copy">
+                <span class="model-card-kicker">当前已选模型：</span>
+                <div class="model-card-title-row">
+                  <strong id="rewriteTextModelName">qwen-plus</strong>
+                  <span class="model-type-pill">文本</span>
+                </div>
+                <span class="model-id-line">模型 ID：<span id="rewriteTextModelId">qwen-plus</span></span>
+              </div>
+              <button id="rewriteTextChooseModelBtn" class="btn btn-primary model-card-action" type="button">选择模型</button>
+            </article>
+            <article class="model-selected-card" data-model-card="vision">
+              <input id="rewriteVisionModelInput" type="hidden" value="qwen3-vl-plus">
+              <div class="model-selected-copy">
+                <span class="model-card-kicker">当前已选模型：</span>
+                <div class="model-card-title-row">
+                  <strong id="rewriteVisionModelName">qwen3-vl-plus</strong>
+                  <span class="model-type-pill">视觉</span>
+                </div>
+                <span class="model-id-line">模型 ID：<span id="rewriteVisionModelId">qwen3-vl-plus</span></span>
+              </div>
+              <button id="rewriteVisionChooseModelBtn" class="btn btn-primary model-card-action" type="button">选择模型</button>
+            </article>
+            <article class="model-selected-card" data-model-card="image">
+              <input id="rewriteImageModelInput" type="hidden" value="wan2.6-image">
+              <div class="model-selected-copy">
+                <span class="model-card-kicker">当前已选模型：</span>
+                <div class="model-card-title-row">
+                  <strong id="rewriteImageModelName">wan2.6-image</strong>
+                  <span class="model-type-pill">图片</span>
+                </div>
+                <span class="model-id-line">模型 ID：<span id="rewriteImageModelId">wan2.6-image</span></span>
+              </div>
+              <button id="rewriteImageChooseModelBtn" class="btn btn-primary model-card-action" type="button">选择模型</button>
+            </article>
+          </div>
+          <div class="button-pair model-selection-actions">
+            <a class="btn btn-secondary btn-icon-text" href="/advanced-settings">
+              <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10"/><path d="M18 7h2"/><path d="M16 5v4"/><path d="M4 17h2"/><path d="M10 17h10"/><path d="M8 15v4"/></svg>
+              打开高级设置
+            </a>
           </div>
         </div>
         <details class="field full-width collapsible-field rewrite-requirements-panel" open>

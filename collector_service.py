@@ -118,6 +118,7 @@ MODEL_PROVIDER_PRESETS: Dict[str, Dict[str, str]] = {
     },
 }
 MODEL_SCOPES = ("shared", "text", "vision", "image")
+MAX_MODEL_CATALOG_SNAPSHOT_MODELS = 500
 MODEL_CATALOG_GROUP_LABELS = {
     "multimodal": "多模态",
     "text": "文本",
@@ -1086,6 +1087,57 @@ def builtin_dashscope_image_models() -> List[Dict[str, Any]]:
     ]
 
 
+def sanitize_model_catalog_snapshot(value: Any) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(value, dict):
+        return {}
+    sanitized: Dict[str, Dict[str, Any]] = {}
+    for scope in MODEL_SCOPES:
+        raw_entry = value.get(scope)
+        if not isinstance(raw_entry, dict):
+            continue
+        models: List[Dict[str, Any]] = []
+        seen = set()
+        for raw_model in raw_entry.get("models", []):
+            model = normalize_model_catalog_entry(raw_model)
+            if not model or model["id"] in seen:
+                continue
+            seen.add(model["id"])
+            models.append(model)
+            if len(models) >= MAX_MODEL_CATALOG_SNAPSHOT_MODELS:
+                break
+        if not models:
+            continue
+        models.sort(key=lambda item: item["id"])
+        provider = normalize_model_provider(raw_entry.get("provider") or raw_entry.get("provider_preset") or "custom")
+        source = str(raw_entry.get("source") or "").strip().lower()
+        sanitized[scope] = {
+            "provider": provider,
+            "provider_preset": normalize_model_provider(raw_entry.get("provider_preset") or provider),
+            "base_url": str(raw_entry.get("base_url") or "").strip().strip("'").strip('"')[:300],
+            "source": source if source in {"remote", "preset"} else "remote",
+            "fetched_at": str(raw_entry.get("fetched_at") or "").strip()[:40],
+            "models": models,
+        }
+    return sanitized
+
+
+def build_model_catalog_snapshot_entry(payload: Dict[str, Any], catalog: Dict[str, Any]) -> Dict[str, Any]:
+    scope = str(catalog.get("scope") or payload.get("scope") or "shared").strip().lower()
+    if scope not in MODEL_SCOPES:
+        scope = "shared"
+    provider = normalize_model_provider(catalog.get("provider") or payload.get("provider_preset") or "custom")
+    provider_preset = normalize_model_provider(payload.get("provider_preset") or provider)
+    entry = {
+        "provider": provider,
+        "provider_preset": provider_preset,
+        "base_url": str(payload.get("base_url") or "").strip().strip("'").strip('"')[:300],
+        "source": str(catalog.get("source") or "remote").strip().lower(),
+        "fetched_at": datetime.now().replace(microsecond=0).isoformat(),
+        "models": catalog.get("models") if isinstance(catalog.get("models"), list) else [],
+    }
+    return sanitize_model_catalog_snapshot({scope: entry}).get(scope, {})
+
+
 def fetch_model_catalog(payload: Dict[str, Any], config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     scope = str(payload.get("scope") or "shared").strip().lower()
     if scope not in MODEL_SCOPES:
@@ -1942,8 +1994,7 @@ class ConfigStore:
         rewrite["image_model"] = str(rewrite.get("image_model") or "wan2.6-image").strip()[:80] or "wan2.6-image"
         rewrite["image_base_url"] = str(rewrite.get("image_base_url") or "").strip().strip("'").strip('"')[:300]
         rewrite["image_task_base_url"] = str(rewrite.get("image_task_base_url") or "").strip().strip("'").strip('"')[:300]
-        if not isinstance(rewrite.get("model_catalog_snapshot"), dict):
-            rewrite["model_catalog_snapshot"] = {}
+        rewrite["model_catalog_snapshot"] = sanitize_model_catalog_snapshot(rewrite.get("model_catalog_snapshot"))
         rewrite["analyze_images"] = bool(rewrite.get("analyze_images", True))
         rewrite["vision_image_limit"] = to_int(rewrite.get("vision_image_limit"), 4, 1, MAX_REWRITE_VISION_IMAGES)
         rewrite["generate_image_prompts"] = bool(rewrite.get("generate_image_prompts", True))

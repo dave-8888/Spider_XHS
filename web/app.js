@@ -113,10 +113,24 @@ const settingsEls = {
   weekdaySection: document.querySelector('#weekdaySection'),
   rewriteEnabledInput: document.querySelector('#rewriteEnabledInput'),
   rewriteProviderPresetInput: document.querySelector('#rewriteProviderPresetInput'),
+  rewriteProviderPresetChoices: document.querySelector('#rewriteProviderPresetChoices'),
   rewriteBaseUrlInput: document.querySelector('#rewriteBaseUrlInput'),
   rewriteApiKeyInput: document.querySelector('#rewriteApiKeyInput'),
   rewriteApiKeyToggleBtn: document.querySelector('#rewriteApiKeyToggleBtn'),
   rewriteSharedModelStatus: document.querySelector('#rewriteSharedModelStatus'),
+  rewriteModelCatalogCount: document.querySelector('#rewriteModelCatalogCount'),
+  rewriteTextModelInput: document.querySelector('#rewriteTextModelInput'),
+  rewriteTextModelName: document.querySelector('#rewriteTextModelName'),
+  rewriteTextModelId: document.querySelector('#rewriteTextModelId'),
+  rewriteTextChooseModelBtn: document.querySelector('#rewriteTextChooseModelBtn'),
+  rewriteVisionModelInput: document.querySelector('#rewriteVisionModelInput'),
+  rewriteVisionModelName: document.querySelector('#rewriteVisionModelName'),
+  rewriteVisionModelId: document.querySelector('#rewriteVisionModelId'),
+  rewriteVisionChooseModelBtn: document.querySelector('#rewriteVisionChooseModelBtn'),
+  rewriteImageModelInput: document.querySelector('#rewriteImageModelInput'),
+  rewriteImageModelName: document.querySelector('#rewriteImageModelName'),
+  rewriteImageModelId: document.querySelector('#rewriteImageModelId'),
+  rewriteImageChooseModelBtn: document.querySelector('#rewriteImageChooseModelBtn'),
   rewriteFetchModelsBtn: document.querySelector('#rewriteFetchModelsBtn'),
   rewriteManualModelBtn: document.querySelector('#rewriteManualModelBtn'),
   rewriteTopicSettingsInput: document.querySelector('#rewriteTopicSettingsInput'),
@@ -159,6 +173,9 @@ const advancedEls = {
   textBaseUrlInput: document.querySelector('#advancedTextBaseUrlInput'),
   textApiKeyInput: document.querySelector('#advancedTextApiKeyInput'),
   textModelInput: document.querySelector('#advancedTextModelInput'),
+  textModelName: document.querySelector('#advancedTextModelName'),
+  textModelId: document.querySelector('#advancedTextModelId'),
+  textChooseModelBtn: document.querySelector('#advancedTextChooseModelBtn'),
   textFetchModelsBtn: document.querySelector('#advancedTextFetchModelsBtn'),
   textManualModelBtn: document.querySelector('#advancedTextManualModelBtn'),
   visionOverrideInput: document.querySelector('#advancedVisionOverrideInput'),
@@ -166,6 +183,9 @@ const advancedEls = {
   visionBaseUrlInput: document.querySelector('#advancedVisionBaseUrlInput'),
   visionApiKeyInput: document.querySelector('#advancedVisionApiKeyInput'),
   visionModelInput: document.querySelector('#advancedVisionModelInput'),
+  visionModelName: document.querySelector('#advancedVisionModelName'),
+  visionModelId: document.querySelector('#advancedVisionModelId'),
+  visionChooseModelBtn: document.querySelector('#advancedVisionChooseModelBtn'),
   visionFetchModelsBtn: document.querySelector('#advancedVisionFetchModelsBtn'),
   visionManualModelBtn: document.querySelector('#advancedVisionManualModelBtn'),
   imageOverrideInput: document.querySelector('#advancedImageOverrideInput'),
@@ -174,6 +194,9 @@ const advancedEls = {
   imageTaskBaseUrlInput: document.querySelector('#advancedImageTaskBaseUrlInput'),
   imageApiKeyInput: document.querySelector('#advancedImageApiKeyInput'),
   imageModelInput: document.querySelector('#advancedImageModelInput'),
+  imageModelName: document.querySelector('#advancedImageModelName'),
+  imageModelId: document.querySelector('#advancedImageModelId'),
+  imageChooseModelBtn: document.querySelector('#advancedImageChooseModelBtn'),
   imageFetchModelsBtn: document.querySelector('#advancedImageFetchModelsBtn'),
   imageManualModelBtn: document.querySelector('#advancedImageManualModelBtn'),
   regionInput: document.querySelector('#advancedRegionInput'),
@@ -298,6 +321,19 @@ const state = {
     vision: '',
     image: '',
   },
+  modelPicker: {
+    scope: 'text',
+    source: 'settings',
+    models: [],
+    activeGroup: 'all',
+    query: '',
+    loading: false,
+    error: '',
+    fetchedAt: '',
+    manualOpen: false,
+    previousFocus: null,
+    fetchToken: 0,
+  },
   collectOverlayState: {
     status: 'idle',
     title: '',
@@ -318,6 +354,14 @@ const state = {
 
 const JOB_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 const DEFAULT_JOB_PAGE_SIZE = 10;
+const PRIMARY_MODEL_PROVIDER_KEYS = ['dashscope', 'openai', 'anthropic', 'gemini', 'openrouter', 'custom'];
+const MODEL_GROUP_ORDER = ['all', 'multimodal', 'text', 'image', 'audio', 'video', 'reasoning', 'vector', 'moderation', 'realtime', 'other'];
+const MODEL_SCOPE_LABELS = {
+  text: '文本',
+  vision: '视觉',
+  image: '图片',
+  shared: '默认',
+};
 const FILE_LAYOUT_DEFAULT_LIST_PERCENT = 20;
 const FILE_LAYOUT_MIN_LIST_PERCENT = 16;
 const FILE_LAYOUT_MAX_LIST_PERCENT = 55;
@@ -1073,6 +1117,10 @@ function providerPresets() {
   return state.choices.model_provider_presets || {};
 }
 
+function providerLabel(provider) {
+  return providerPresets()?.[provider]?.label || provider || 'Custom';
+}
+
 function providerDefaultBaseUrl(provider) {
   return providerPresets()?.[provider]?.base_url || '';
 }
@@ -1091,6 +1139,44 @@ function renderProviderPresetSelect(select, value = 'dashscope') {
     `<option value="${escapeHtml(key)}">${escapeHtml(preset.label || key)}</option>`
   )).join('');
   select.value = value && providerPresets()[value] ? value : 'custom';
+}
+
+function renderSettingsProviderPills(value = 'dashscope') {
+  const container = settingsEls.rewriteProviderPresetChoices;
+  if (!container) return;
+  const presets = providerPresets();
+  const keys = PRIMARY_MODEL_PROVIDER_KEYS.filter((key) => presets[key]);
+  const active = keys.includes(value) ? value : 'custom';
+  container.innerHTML = keys.map((key) => (
+    `<button class="model-provider-pill ${key === active ? 'is-active' : ''}" data-provider="${escapeHtml(key)}" type="button" aria-pressed="${key === active ? 'true' : 'false'}">${escapeHtml(presets[key]?.label || key)}</button>`
+  )).join('');
+  container.querySelectorAll('.model-provider-pill').forEach((button) => {
+    button.addEventListener('click', () => {
+      setSettingsProvider(button.dataset.provider || 'custom');
+    });
+  });
+}
+
+function setSettingsProvider(provider, { resetModels = true } = {}) {
+  const selected = providerPresets()[provider] ? provider : 'custom';
+  if (settingsEls.rewriteProviderPresetInput) {
+    settingsEls.rewriteProviderPresetInput.value = selected;
+  }
+  if (settingsEls.rewriteBaseUrlInput) {
+    settingsEls.rewriteBaseUrlInput.value = providerDefaultBaseUrl(selected);
+  }
+  state.config = state.config || {};
+  state.config.rewrite = state.config.rewrite || {};
+  state.config.rewrite.provider_preset = selected;
+  state.config.rewrite.base_url = settingsEls.rewriteBaseUrlInput?.value || '';
+  if (resetModels) {
+    ['text', 'vision', 'image'].forEach((scope) => {
+      setModelValue(scope, providerDefaultModel(selected, scope), 'settings');
+    });
+  }
+  renderSettingsProviderPills(selected);
+  updateModelCards();
+  applyRewriteSummary(state.config);
 }
 
 function setFieldVisibility(fields, visible) {
@@ -1112,8 +1198,86 @@ function updateAllAdvancedOverrideFields() {
   ['text', 'vision', 'image'].forEach(updateAdvancedOverrideFields);
 }
 
-function currentModelCatalogPayload(scope) {
-  if (scope === 'shared') {
+function modelScopeLabel(scope) {
+  return MODEL_SCOPE_LABELS[scope] || scope || '模型';
+}
+
+function modelConfigKey(scope) {
+  return `${scope}_model`;
+}
+
+function capitalize(value) {
+  const text = String(value || '');
+  return text ? `${text.charAt(0).toUpperCase()}${text.slice(1)}` : '';
+}
+
+function modelInputFor(scope, source = '') {
+  const normalizedSource = source || state.modelPicker.source || (page === 'advanced-settings' ? 'advanced' : 'settings');
+  if (normalizedSource === 'advanced') {
+    return advancedEls[`${scope}ModelInput`];
+  }
+  return settingsEls[`rewrite${capitalize(scope)}ModelInput`];
+}
+
+function modelNameElementFor(scope, source = '') {
+  const normalizedSource = source || state.modelPicker.source || (page === 'advanced-settings' ? 'advanced' : 'settings');
+  if (normalizedSource === 'advanced') {
+    return advancedEls[`${scope}ModelName`];
+  }
+  return settingsEls[`rewrite${capitalize(scope)}ModelName`];
+}
+
+function modelIdElementFor(scope, source = '') {
+  const normalizedSource = source || state.modelPicker.source || (page === 'advanced-settings' ? 'advanced' : 'settings');
+  if (normalizedSource === 'advanced') {
+    return advancedEls[`${scope}ModelId`];
+  }
+  return settingsEls[`rewrite${capitalize(scope)}ModelId`];
+}
+
+function currentModelValue(scope, source = '') {
+  const inputValue = (modelInputFor(scope, source)?.value || '').trim();
+  if (inputValue) return inputValue;
+  const rewrite = state.config?.rewrite || {};
+  return (rewrite[modelConfigKey(scope)] || providerDefaultModel(rewrite.provider_preset || 'dashscope', scope)).trim();
+}
+
+function setModelValue(scope, model, source = '') {
+  const value = String(model || '').trim();
+  state.config = state.config || {};
+  state.config.rewrite = state.config.rewrite || {};
+  state.config.rewrite[modelConfigKey(scope)] = value;
+  const input = modelInputFor(scope, source);
+  if (input) input.value = value;
+  const nameEl = modelNameElementFor(scope, source);
+  const idEl = modelIdElementFor(scope, source);
+  if (nameEl) nameEl.textContent = value || '未选择';
+  if (idEl) idEl.textContent = value || '未选择';
+  updateSharedModelStatus(state.config);
+  return value;
+}
+
+function updateModelCard(scope, source = 'settings') {
+  const value = currentModelValue(scope, source) || providerDefaultModel(state.config?.rewrite?.provider_preset || 'dashscope', scope);
+  const input = modelInputFor(scope, source);
+  const nameEl = modelNameElementFor(scope, source);
+  const idEl = modelIdElementFor(scope, source);
+  if (input) input.value = value;
+  if (nameEl) nameEl.textContent = value || '未选择';
+  if (idEl) idEl.textContent = value || '未选择';
+}
+
+function updateModelCards(source = '') {
+  const sources = source ? [source] : ['settings', 'advanced'];
+  sources.forEach((item) => {
+    ['text', 'vision', 'image'].forEach((scope) => updateModelCard(scope, item));
+  });
+  updateModelCatalogCountBadge();
+}
+
+function currentModelCatalogPayload(scope, source = '') {
+  const normalizedSource = source || state.modelPicker.source || 'settings';
+  if (normalizedSource === 'settings') {
     const apiKeyValue = (settingsEls.rewriteApiKeyInput?.value || '').trim();
     return {
       scope,
@@ -1122,76 +1286,343 @@ function currentModelCatalogPayload(scope) {
       api_key: apiKeyValue || state.savedModelApiKeys.shared || '',
     };
   }
-  const prefix = scope;
-  const apiKeyValue = (advancedEls[`${prefix}ApiKeyInput`]?.value || '').trim();
+  const overrideEnabled = Boolean(advancedEls[`${scope}OverrideInput`]?.checked);
+  const apiKeyValue = overrideEnabled ? (advancedEls[`${scope}ApiKeyInput`]?.value || '').trim() : '';
   return {
     scope,
-    provider_preset: advancedEls[`${prefix}ProviderPresetInput`]?.value || state.config?.rewrite?.[`${scope}_provider_preset`] || state.config?.rewrite?.provider_preset || 'dashscope',
-    base_url: (advancedEls[`${prefix}BaseUrlInput`]?.value || '').trim(),
-    api_key: apiKeyValue || state.savedModelApiKeys[scope] || state.savedModelApiKeys.shared || '',
+    provider_preset: overrideEnabled
+      ? (advancedEls[`${scope}ProviderPresetInput`]?.value || state.config?.rewrite?.provider_preset || 'dashscope')
+      : (state.config?.rewrite?.provider_preset || 'dashscope'),
+    base_url: overrideEnabled
+      ? (advancedEls[`${scope}BaseUrlInput`]?.value || '').trim()
+      : (state.config?.rewrite?.base_url || providerDefaultBaseUrl(state.config?.rewrite?.provider_preset || 'dashscope')),
+    api_key: apiKeyValue || (overrideEnabled ? state.savedModelApiKeys[scope] : '') || state.savedModelApiKeys.shared || '',
   };
 }
 
-function modelOptionLabel(model) {
-  const groups = Array.isArray(model.groups) && model.groups.length ? ` · ${model.groups.join('/')}` : '';
-  const desc = model.description ? ` · ${truncateText(model.description, 42)}` : '';
-  return `${model.id}${groups}${desc}`;
-}
-
-function chooseModelFromCatalog(models, scope) {
-  if (!Array.isArray(models) || models.length === 0) {
-    toast('模型列表为空，可以手动输入模型名称');
-    return '';
-  }
-  const visible = models.slice(0, 30);
-  const promptText = [
-    `选择${scope === 'shared' ? '默认' : scope}模型，输入序号：`,
-    ...visible.map((model, index) => `${index + 1}. ${modelOptionLabel(model)}`),
-  ].join('\n');
-  const raw = window.prompt(promptText, '1');
-  if (raw == null) return '';
-  const index = Number(raw.trim()) - 1;
-  return visible[index]?.id || '';
-}
-
-function applySelectedModel(scope, model) {
-  const value = String(model || '').trim();
-  if (!value) return;
+function updateModelCatalogSnapshot(data) {
+  if (!data?.config?.rewrite?.model_catalog_snapshot) return;
   state.config = state.config || {};
   state.config.rewrite = state.config.rewrite || {};
-  if (scope === 'shared') {
-    state.config.rewrite.text_model = value;
-    state.config.rewrite.vision_model = value;
-    if (advancedEls.textModelInput) advancedEls.textModelInput.value = value;
-    if (advancedEls.visionModelInput) advancedEls.visionModelInput.value = value;
-    updateSharedModelStatus(state.config);
-    return;
-  }
-  state.config.rewrite[`${scope}_model`] = value;
-  const input = advancedEls[`${scope}ModelInput`];
-  if (input) input.value = value;
+  state.config.rewrite.model_catalog_snapshot = data.config.rewrite.model_catalog_snapshot;
+  updateModelCatalogCountBadge();
 }
 
-async function fetchAndChooseModel(scope) {
-  const payload = currentModelCatalogPayload(scope);
+function updateModelCatalogCountBadge() {
+  if (!settingsEls.rewriteModelCatalogCount) return;
+  const snapshots = state.config?.rewrite?.model_catalog_snapshot || {};
+  const counts = ['text', 'vision', 'image'].map((scope) => snapshots[scope]?.models?.length || 0);
+  const total = counts.reduce((sum, item) => sum + item, 0);
+  if (total) {
+    settingsEls.rewriteModelCatalogCount.textContent = `已缓存 ${total} 个模型`;
+    settingsEls.rewriteModelCatalogCount.classList.add('is-ready');
+    return;
+  }
+  settingsEls.rewriteModelCatalogCount.textContent = '打开时实时获取模型';
+  settingsEls.rewriteModelCatalogCount.classList.remove('is-ready');
+}
+
+async function fetchModelCatalogForPicker(scope = state.modelPicker.scope, source = state.modelPicker.source) {
+  const token = state.modelPicker.fetchToken + 1;
+  state.modelPicker.fetchToken = token;
+  state.modelPicker.loading = true;
+  state.modelPicker.error = '';
+  state.modelPicker.models = [];
+  state.modelPicker.activeGroup = 'all';
+  renderModelPicker();
+  const payload = currentModelCatalogPayload(scope, source);
   const data = await api('/api/model-catalog', {
     method: 'POST',
     body: JSON.stringify(payload),
   });
-  const model = chooseModelFromCatalog(data.models || [], scope);
-  if (model) {
-    applySelectedModel(scope, model);
-    toast(`已选择模型：${model}`);
+  if (token !== state.modelPicker.fetchToken) return;
+  if (data.config?.choices) state.choices = data.config.choices;
+  updateModelCatalogSnapshot(data);
+  state.modelPicker.loading = false;
+  state.modelPicker.models = Array.isArray(data.models) ? data.models : [];
+  state.modelPicker.fetchedAt = new Date().toLocaleString('zh-CN', { hour12: false });
+  renderModelPicker();
+}
+
+async function openModelPicker(scope = 'text', source = 'settings', { manual = false } = {}) {
+  state.modelPicker.scope = scope;
+  state.modelPicker.source = source;
+  state.modelPicker.query = '';
+  state.modelPicker.activeGroup = 'all';
+  state.modelPicker.manualOpen = Boolean(manual);
+  state.modelPicker.previousFocus = document.activeElement;
+  ensureModelPickerModal();
+  const modal = document.querySelector('#modelPickerModal');
+  if (modal) {
+    modal.hidden = false;
+    modal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('model-picker-open');
+  }
+  const manualInput = document.querySelector('#modelPickerManualInput');
+  if (manualInput) manualInput.value = currentModelValue(scope, source);
+  renderModelPicker();
+  window.setTimeout(() => {
+    const focusTarget = manual ? document.querySelector('#modelPickerManualInput') : document.querySelector('#modelPickerSearchInput');
+    focusTarget?.focus();
+  }, 0);
+  try {
+    await fetchModelCatalogForPicker(scope, source);
+  } catch (error) {
+    state.modelPicker.loading = false;
+    state.modelPicker.error = error.message || '模型列表获取失败';
+    renderModelPicker();
   }
 }
 
-function manualModelInput(scope) {
-  const current = scope === 'shared'
-    ? (state.config?.rewrite?.text_model || '')
-    : (advancedEls[`${scope}ModelInput`]?.value || state.config?.rewrite?.[`${scope}_model`] || '');
-  const model = window.prompt('请输入完整模型名称', current);
-  if (model == null) return;
-  applySelectedModel(scope, model);
+function closeModelPicker({ restoreFocus = true } = {}) {
+  const modal = document.querySelector('#modelPickerModal');
+  if (modal) {
+    modal.hidden = true;
+    modal.setAttribute('aria-hidden', 'true');
+  }
+  document.body.classList.remove('model-picker-open');
+  if (restoreFocus && state.modelPicker.previousFocus && typeof state.modelPicker.previousFocus.focus === 'function') {
+    state.modelPicker.previousFocus.focus();
+  }
+}
+
+function manualModelInput(scope, source = page === 'advanced-settings' ? 'advanced' : 'settings') {
+  openModelPicker(scope, source, { manual: true }).catch((error) => toast(error.message));
+}
+
+function ensureModelPickerModal() {
+  if (document.querySelector('#modelPickerModal')) return;
+  const modal = document.createElement('div');
+  modal.id = 'modelPickerModal';
+  modal.className = 'model-picker-modal';
+  modal.hidden = true;
+  modal.setAttribute('aria-hidden', 'true');
+  modal.innerHTML = `
+    <div class="model-picker-backdrop" data-model-picker-close></div>
+    <section class="model-picker-panel" role="dialog" aria-modal="true" aria-labelledby="modelPickerTitle">
+      <div class="model-picker-topline">
+        <button id="modelPickerCancelTopBtn" class="model-picker-cancel-link" type="button">取消</button>
+        <h2 id="modelPickerTitle">选择模型</h2>
+        <span class="model-picker-spacer" aria-hidden="true"></span>
+      </div>
+      <label class="model-picker-search">
+        <svg class="model-picker-search-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.3-4.3"/><circle cx="11" cy="11" r="7"/></svg>
+        <input id="modelPickerSearchInput" type="search" autocomplete="off" placeholder="检索模型名称 / ID / 类型">
+      </label>
+      <div class="model-picker-manual" id="modelPickerManualWrap" hidden>
+        <input id="modelPickerManualInput" type="text" autocomplete="off" placeholder="输入完整模型名称">
+        <button id="modelPickerManualApplyBtn" class="btn btn-primary" type="button">应用</button>
+      </div>
+      <div class="model-picker-toolbar">
+        <div id="modelPickerMeta" class="model-picker-meta">正在准备模型列表...</div>
+        <div class="button-pair model-picker-toolbar-actions">
+          <button id="modelPickerRefreshBtn" class="btn btn-secondary btn-icon-text" type="button">
+            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v6h6"/><path d="M20 20v-6h-6"/><path d="M20 9a8 8 0 0 0-13.5-3.5L4 8"/><path d="M4 15a8 8 0 0 0 13.5 3.5L20 16"/></svg>
+            重新获取模型
+          </button>
+          <button id="modelPickerManualToggleBtn" class="btn btn-ghost btn-icon-text" type="button">
+            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+            手动输入模型名称
+          </button>
+        </div>
+      </div>
+      <div class="model-picker-body">
+        <aside id="modelPickerGroups" class="model-picker-groups" aria-label="模型类型"></aside>
+        <div id="modelPickerModels" class="model-picker-models" aria-live="polite"></div>
+      </div>
+    </section>
+  `;
+  document.body.appendChild(modal);
+  modal.querySelectorAll('[data-model-picker-close], #modelPickerCancelTopBtn').forEach((item) => {
+    item.addEventListener('click', () => closeModelPicker());
+  });
+  modal.querySelector('#modelPickerSearchInput')?.addEventListener('input', (event) => {
+    state.modelPicker.query = event.target.value || '';
+    renderModelPicker();
+  });
+  modal.querySelector('#modelPickerRefreshBtn')?.addEventListener('click', () => {
+    fetchModelCatalogForPicker().catch((error) => {
+      state.modelPicker.loading = false;
+      state.modelPicker.error = error.message || '模型列表获取失败';
+      renderModelPicker();
+    });
+  });
+  modal.querySelector('#modelPickerManualToggleBtn')?.addEventListener('click', () => {
+    state.modelPicker.manualOpen = !state.modelPicker.manualOpen;
+    const manualInput = modal.querySelector('#modelPickerManualInput');
+    if (state.modelPicker.manualOpen && manualInput) {
+      manualInput.value = currentModelValue(state.modelPicker.scope, state.modelPicker.source);
+    }
+    renderModelPicker();
+    if (state.modelPicker.manualOpen) {
+      window.setTimeout(() => modal.querySelector('#modelPickerManualInput')?.focus(), 0);
+    }
+  });
+  const applyManualModel = () => {
+    const input = modal.querySelector('#modelPickerManualInput');
+    const value = (input?.value || '').trim();
+    if (!value) {
+      toast('请输入模型名称');
+      input?.focus();
+      return;
+    }
+    setModelValue(state.modelPicker.scope, value, state.modelPicker.source);
+    closeModelPicker();
+    toast(`已选择${modelScopeLabel(state.modelPicker.scope)}模型：${value}`);
+  };
+  modal.querySelector('#modelPickerManualApplyBtn')?.addEventListener('click', applyManualModel);
+  modal.querySelector('#modelPickerManualInput')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      applyManualModel();
+    }
+  });
+  modal.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeModelPicker();
+    }
+  });
+}
+
+function modelGroupLabels() {
+  return {
+    all: '全部',
+    ...(state.choices.model_catalog_groups || {}),
+  };
+}
+
+function modelMatchesScope(model, scope) {
+  const groups = Array.isArray(model?.groups) ? model.groups : [];
+  if (scope === 'image') return groups.includes('image') || model?.traits?.includes('image_output');
+  if (scope === 'vision') return groups.includes('multimodal') || model?.traits?.includes('image_input') || groups.includes('text');
+  return groups.includes('text') || groups.includes('multimodal') || !groups.length;
+}
+
+function modelSearchHaystack(model) {
+  return [
+    model?.id,
+    model?.name,
+    model?.description,
+    ...(Array.isArray(model?.groups) ? model.groups : []),
+    ...(Array.isArray(model?.traits) ? model.traits : []),
+  ].join(' ').toLowerCase();
+}
+
+function modelPickerFilteredModels() {
+  const query = state.modelPicker.query.trim().toLowerCase();
+  const activeGroup = state.modelPicker.activeGroup;
+  return (state.modelPicker.models || [])
+    .filter((model) => modelMatchesScope(model, state.modelPicker.scope))
+    .filter((model) => activeGroup === 'all' || (Array.isArray(model.groups) && model.groups.includes(activeGroup)))
+    .filter((model) => !query || modelSearchHaystack(model).includes(query));
+}
+
+function modelPickerGroupCounts() {
+  const counts = { all: 0 };
+  (state.modelPicker.models || [])
+    .filter((model) => modelMatchesScope(model, state.modelPicker.scope))
+    .forEach((model) => {
+      counts.all += 1;
+      const groups = Array.isArray(model.groups) && model.groups.length ? model.groups : ['other'];
+      groups.forEach((group) => {
+        counts[group] = (counts[group] || 0) + 1;
+      });
+    });
+  return counts;
+}
+
+function renderModelPickerGroups() {
+  const container = document.querySelector('#modelPickerGroups');
+  if (!container) return;
+  const labels = modelGroupLabels();
+  const counts = modelPickerGroupCounts();
+  const groups = MODEL_GROUP_ORDER.filter((group) => counts[group] || group === 'all');
+  container.innerHTML = groups.map((group) => (
+    `<button class="model-picker-group ${state.modelPicker.activeGroup === group ? 'is-active' : ''}" data-group="${escapeHtml(group)}" type="button">
+      <span>${escapeHtml(labels[group] || group)}</span>
+      <strong>${counts[group] || 0}</strong>
+    </button>`
+  )).join('');
+  container.querySelectorAll('.model-picker-group').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.modelPicker.activeGroup = button.dataset.group || 'all';
+      renderModelPicker();
+    });
+  });
+}
+
+function renderModelPickerModels() {
+  const container = document.querySelector('#modelPickerModels');
+  if (!container) return;
+  if (state.modelPicker.loading) {
+    container.innerHTML = '<div class="model-picker-empty">正在获取模型列表...</div>';
+    return;
+  }
+  if (state.modelPicker.error) {
+    container.innerHTML = `<div class="model-picker-empty is-error">${escapeHtml(state.modelPicker.error)}<span>可以重新获取，或手动输入模型名称。</span></div>`;
+    return;
+  }
+  const models = modelPickerFilteredModels();
+  if (!models.length) {
+    container.innerHTML = '<div class="model-picker-empty">没有匹配的模型，可以调整搜索或手动输入模型名称。</div>';
+    return;
+  }
+  const labels = modelGroupLabels();
+  container.innerHTML = models.map((model) => {
+    const groups = Array.isArray(model.groups) && model.groups.length ? model.groups : ['other'];
+    const tags = groups.map((group) => `<span>${escapeHtml(labels[group] || group)}</span>`).join('');
+    const description = model.description ? `<small>${escapeHtml(truncateText(model.description, 92))}</small>` : '';
+    return `
+      <button class="model-picker-chip" data-model="${escapeHtml(model.id)}" type="button" title="${escapeHtml(model.id)}">
+        <strong>${escapeHtml(model.id)}</strong>
+        ${description}
+        <span class="model-picker-chip-tags">${tags}</span>
+      </button>
+    `;
+  }).join('');
+  container.querySelectorAll('.model-picker-chip').forEach((button) => {
+    button.addEventListener('click', () => {
+      const model = button.dataset.model || '';
+      setModelValue(state.modelPicker.scope, model, state.modelPicker.source);
+      closeModelPicker();
+      toast(`已选择${modelScopeLabel(state.modelPicker.scope)}模型：${model}`);
+    });
+  });
+}
+
+function renderModelPicker() {
+  const modal = document.querySelector('#modelPickerModal');
+  if (!modal) return;
+  const title = modal.querySelector('#modelPickerTitle');
+  const search = modal.querySelector('#modelPickerSearchInput');
+  const manualWrap = modal.querySelector('#modelPickerManualWrap');
+  const manualInput = modal.querySelector('#modelPickerManualInput');
+  const meta = modal.querySelector('#modelPickerMeta');
+  const refresh = modal.querySelector('#modelPickerRefreshBtn');
+  const manualToggle = modal.querySelector('#modelPickerManualToggleBtn');
+  if (title) title.textContent = `选择${modelScopeLabel(state.modelPicker.scope)}模型`;
+  if (search && search.value !== state.modelPicker.query) search.value = state.modelPicker.query;
+  if (manualWrap) manualWrap.hidden = !state.modelPicker.manualOpen;
+  if (manualInput && state.modelPicker.manualOpen && !manualInput.value) {
+    manualInput.value = currentModelValue(state.modelPicker.scope, state.modelPicker.source);
+  }
+  if (refresh) refresh.disabled = state.modelPicker.loading;
+  if (manualToggle) manualToggle.classList.toggle('is-active', state.modelPicker.manualOpen);
+  const visibleCount = modelPickerFilteredModels().length;
+  if (meta) {
+    const provider = currentModelCatalogPayload(state.modelPicker.scope, state.modelPicker.source).provider_preset;
+    if (state.modelPicker.loading) {
+      meta.textContent = `${providerLabel(provider)} · 正在获取模型...`;
+    } else if (state.modelPicker.error) {
+      meta.textContent = `${providerLabel(provider)} · 获取失败`;
+    } else {
+      const fetched = state.modelPicker.fetchedAt ? ` · 获取时间 ${state.modelPicker.fetchedAt}` : '';
+      meta.textContent = `${providerLabel(provider)} · ${visibleCount} 个可选模型${fetched}`;
+    }
+  }
+  renderModelPickerGroups();
+  renderModelPickerModels();
 }
 
 function renderHomeChoices() {
@@ -1918,10 +2349,14 @@ function applySettingsConfig(config) {
   state.settingsWeekdays = (schedule.weekdays || [1, 2, 3, 4, 5, 6, 7]).map(Number);
   if (settingsEls.rewriteEnabledInput) settingsEls.rewriteEnabledInput.checked = Boolean(rewrite.enabled);
   renderProviderPresetSelect(settingsEls.rewriteProviderPresetInput, rewrite.provider_preset || 'dashscope');
+  renderSettingsProviderPills(rewrite.provider_preset || 'dashscope');
   if (settingsEls.rewriteBaseUrlInput) settingsEls.rewriteBaseUrlInput.value = rewrite.base_url || providerDefaultBaseUrl(rewrite.provider_preset || 'dashscope');
+  setModelValue('text', rewrite.text_model || providerDefaultModel(rewrite.provider_preset || 'dashscope', 'text'), 'settings');
+  setModelValue('vision', rewrite.vision_model || providerDefaultModel(rewrite.provider_preset || 'dashscope', 'vision'), 'settings');
+  setModelValue('image', rewrite.image_model || providerDefaultModel(rewrite.provider_preset || 'dashscope', 'image'), 'settings');
   applyRewriteApiKeyField(rewrite);
   if (settingsEls.rewriteTopicSettingsInput) settingsEls.rewriteTopicSettingsInput.value = rewrite.topic || '创业沙龙';
-  updateSharedModelStatus(config);
+  updateModelCards('settings');
   updateRewriteRequirementSummary();
 
   renderSettingsWeekdays();
@@ -1975,8 +2410,6 @@ function readSettingsDraft() {
   const rewriteApiKeyValue = (settingsEls.rewriteApiKeyInput?.value || '').trim();
   const rewriteApiKeyChanged = Boolean(rewriteApiKeyValue && rewriteApiKeyValue !== state.savedRewriteApiKey);
   const selectedProvider = settingsEls.rewriteProviderPresetInput?.value || 'dashscope';
-  const currentProvider = state.config?.rewrite?.provider_preset || 'dashscope';
-  const providerChanged = selectedProvider !== currentProvider;
   return {
     keywords: collectionDraft.keywords,
     collect: {
@@ -2001,15 +2434,9 @@ function readSettingsDraft() {
       provider_preset: selectedProvider,
       base_url: (settingsEls.rewriteBaseUrlInput?.value || '').trim(),
       api_key: rewriteApiKeyChanged ? rewriteApiKeyValue : '',
-      text_model: providerChanged
-        ? providerDefaultModel(selectedProvider, 'text')
-        : (state.config?.rewrite?.text_model || 'qwen-plus'),
-      vision_model: providerChanged
-        ? providerDefaultModel(selectedProvider, 'vision')
-        : (state.config?.rewrite?.vision_model || 'qwen3-vl-plus'),
-      image_model: providerChanged
-        ? providerDefaultModel(selectedProvider, 'image')
-        : (state.config?.rewrite?.image_model || 'wan2.6-image'),
+      text_model: currentModelValue('text', 'settings') || providerDefaultModel(selectedProvider, 'text'),
+      vision_model: currentModelValue('vision', 'settings') || providerDefaultModel(selectedProvider, 'vision'),
+      image_model: currentModelValue('image', 'settings') || providerDefaultModel(selectedProvider, 'image'),
       topic: (settingsEls.rewriteTopicSettingsInput?.value || '创业沙龙').trim() || '创业沙龙',
     },
     memory: readMemoryDraft(),
@@ -2193,6 +2620,7 @@ function applyAdvancedConfig(config) {
   if (advancedEls.textModelInput) advancedEls.textModelInput.value = rewrite.text_model || 'qwen-plus';
   if (advancedEls.visionModelInput) advancedEls.visionModelInput.value = rewrite.vision_model || 'qwen3-vl-plus';
   if (advancedEls.imageModelInput) advancedEls.imageModelInput.value = rewrite.image_model || 'wan2.6-image';
+  updateModelCards('advanced');
   if (advancedEls.regionInput) advancedEls.regionInput.value = rewrite.region || 'cn-beijing';
   if (advancedEls.analyzeImagesInput) advancedEls.analyzeImagesInput.checked = rewrite.analyze_images !== false;
   if (advancedEls.generateImagePromptsInput) advancedEls.generateImagePromptsInput.checked = rewrite.generate_image_prompts !== false;
@@ -2216,45 +2644,101 @@ function applyAdvancedConfig(config) {
 }
 
 function readAdvancedRewriteDraft() {
-  const generateImages = Boolean(advancedEls.generateImagesInput?.checked);
-  const generateImagePrompts = Boolean(advancedEls.generateImagePromptsInput?.checked) || generateImages;
-  return {
-    text_provider_preset: advancedEls.textOverrideInput?.checked ? (advancedEls.textProviderPresetInput?.value || '') : '',
-    text_base_url: advancedEls.textOverrideInput?.checked ? ((advancedEls.textBaseUrlInput?.value || '').trim()) : '',
-    text_api_key: advancedEls.textOverrideInput?.checked && (advancedEls.textApiKeyInput?.value || '').trim() !== state.savedModelApiKeys.text
-      ? (advancedEls.textApiKeyInput?.value || '').trim()
-      : '',
-    text_model: (advancedEls.textModelInput?.value || 'qwen-plus').trim() || 'qwen-plus',
-    vision_provider_preset: advancedEls.visionOverrideInput?.checked ? (advancedEls.visionProviderPresetInput?.value || '') : '',
-    vision_base_url: advancedEls.visionOverrideInput?.checked ? ((advancedEls.visionBaseUrlInput?.value || '').trim()) : '',
-    vision_api_key: advancedEls.visionOverrideInput?.checked && (advancedEls.visionApiKeyInput?.value || '').trim() !== state.savedModelApiKeys.vision
-      ? (advancedEls.visionApiKeyInput?.value || '').trim()
-      : '',
-    vision_model: (advancedEls.visionModelInput?.value || 'qwen3-vl-plus').trim() || 'qwen3-vl-plus',
-    image_provider_preset: advancedEls.imageOverrideInput?.checked ? (advancedEls.imageProviderPresetInput?.value || '') : '',
-    image_base_url: advancedEls.imageOverrideInput?.checked ? ((advancedEls.imageBaseUrlInput?.value || '').trim()) : '',
-    image_task_base_url: advancedEls.imageOverrideInput?.checked ? ((advancedEls.imageTaskBaseUrlInput?.value || '').trim()) : '',
-    image_api_key: advancedEls.imageOverrideInput?.checked && (advancedEls.imageApiKeyInput?.value || '').trim() !== state.savedModelApiKeys.image
-      ? (advancedEls.imageApiKeyInput?.value || '').trim()
-      : '',
-    image_model: (advancedEls.imageModelInput?.value || 'wan2.6-image').trim() || 'wan2.6-image',
-    region: advancedEls.regionInput?.value || 'cn-beijing',
-    analyze_images: advancedEls.analyzeImagesInput?.checked !== false,
-    vision_image_limit: clampNumber(toNumber(advancedEls.visionImageLimitInput?.value, 4), 1, 6),
-    generate_image_prompts: generateImagePrompts,
-    generate_images: generateImages,
-    text_temperature: clampNumber(toNumber(advancedEls.textTemperatureInput?.value, 0.82), 0, 2),
-    vision_temperature: clampNumber(toNumber(advancedEls.visionTemperatureInput?.value, 0.2), 0, 2),
-    image_prompt_extend: advancedEls.imagePromptExtendInput?.checked !== false,
-    image_watermark: Boolean(advancedEls.imageWatermarkInput?.checked),
-    image_size: advancedEls.imageSizeInput?.value || '1K',
-    text_system_prompt: (advancedEls.textSystemPromptInput?.value || '').trim(),
-    safety_rules: (advancedEls.safetyRulesInput?.value || '').trim(),
-    text_user_prompt_template: (advancedEls.textUserPromptInput?.value || '').trim(),
-    vision_system_prompt: (advancedEls.visionSystemPromptInput?.value || '').trim(),
-    vision_user_prompt_template: (advancedEls.visionUserPromptInput?.value || '').trim(),
-    creator_profile: readAdvancedProfileDraft(),
-  };
+  const draft = {};
+
+  ['text', 'vision', 'image'].forEach((scope) => {
+    const overrideInput = advancedEls[`${scope}OverrideInput`];
+    const providerInput = advancedEls[`${scope}ProviderPresetInput`];
+    const baseInput = advancedEls[`${scope}BaseUrlInput`];
+    const apiInput = advancedEls[`${scope}ApiKeyInput`];
+    const modelInput = advancedEls[`${scope}ModelInput`];
+    if (!overrideInput && !providerInput && !baseInput && !apiInput && !modelInput) return;
+
+    const overrideEnabled = Boolean(overrideInput?.checked);
+    draft[`${scope}_provider_preset`] = overrideEnabled ? (providerInput?.value || '') : '';
+    draft[`${scope}_base_url`] = overrideEnabled ? ((baseInput?.value || '').trim()) : '';
+    draft[`${scope}_api_key`] = overrideEnabled && (apiInput?.value || '').trim() !== state.savedModelApiKeys[scope]
+      ? (apiInput?.value || '').trim()
+      : '';
+    draft[`${scope}_model`] = (modelInput?.value || providerDefaultModel(draft[`${scope}_provider_preset`] || 'dashscope', scope)).trim()
+      || providerDefaultModel(draft[`${scope}_provider_preset`] || 'dashscope', scope);
+  });
+
+  if (advancedEls.imageTaskBaseUrlInput) {
+    draft.image_task_base_url = advancedEls.imageOverrideInput?.checked
+      ? ((advancedEls.imageTaskBaseUrlInput.value || '').trim())
+      : '';
+  }
+
+  const hasGenerationControls = Boolean(
+    advancedEls.regionInput
+    || advancedEls.analyzeImagesInput
+    || advancedEls.visionImageLimitInput
+    || advancedEls.generateImagePromptsInput
+    || advancedEls.generateImagesInput
+    || advancedEls.textTemperatureInput
+    || advancedEls.visionTemperatureInput
+    || advancedEls.imagePromptExtendInput
+    || advancedEls.imageWatermarkInput
+    || advancedEls.imageSizeInput
+  );
+  if (hasGenerationControls) {
+    const generateImages = Boolean(advancedEls.generateImagesInput?.checked);
+    draft.region = advancedEls.regionInput?.value || 'cn-beijing';
+    draft.analyze_images = advancedEls.analyzeImagesInput?.checked !== false;
+    draft.vision_image_limit = clampNumber(toNumber(advancedEls.visionImageLimitInput?.value, 4), 1, 6);
+    draft.generate_image_prompts = Boolean(advancedEls.generateImagePromptsInput?.checked) || generateImages;
+    draft.generate_images = generateImages;
+    draft.text_temperature = clampNumber(toNumber(advancedEls.textTemperatureInput?.value, 0.82), 0, 2);
+    draft.vision_temperature = clampNumber(toNumber(advancedEls.visionTemperatureInput?.value, 0.2), 0, 2);
+    draft.image_prompt_extend = advancedEls.imagePromptExtendInput?.checked !== false;
+    draft.image_watermark = Boolean(advancedEls.imageWatermarkInput?.checked);
+    draft.image_size = advancedEls.imageSizeInput?.value || '1K';
+  }
+
+  if (advancedEls.textSystemPromptInput) draft.text_system_prompt = (advancedEls.textSystemPromptInput.value || '').trim();
+  if (advancedEls.safetyRulesInput) draft.safety_rules = (advancedEls.safetyRulesInput.value || '').trim();
+  if (advancedEls.textUserPromptInput) draft.text_user_prompt_template = (advancedEls.textUserPromptInput.value || '').trim();
+  if (advancedEls.visionSystemPromptInput) draft.vision_system_prompt = (advancedEls.visionSystemPromptInput.value || '').trim();
+  if (advancedEls.visionUserPromptInput) draft.vision_user_prompt_template = (advancedEls.visionUserPromptInput.value || '').trim();
+  if (advancedEls.profileEnabledInput) draft.creator_profile = readAdvancedProfileDraft();
+
+  return draft;
+}
+
+const ADVANCED_PRESERVED_REWRITE_KEYS = [
+  'provider_preset',
+  'base_url',
+  'text_provider_preset',
+  'text_base_url',
+  'text_model',
+  'vision_provider_preset',
+  'vision_base_url',
+  'vision_model',
+  'image_provider_preset',
+  'image_base_url',
+  'image_task_base_url',
+  'image_model',
+  'model_catalog_snapshot',
+  'region',
+  'analyze_images',
+  'vision_image_limit',
+  'generate_image_prompts',
+  'generate_images',
+  'text_temperature',
+  'vision_temperature',
+  'image_prompt_extend',
+  'image_watermark',
+  'image_size',
+];
+
+function pickAdvancedPreservedRewriteConfig(rewrite = {}) {
+  return ADVANCED_PRESERVED_REWRITE_KEYS.reduce((draft, key) => {
+    if (Object.prototype.hasOwnProperty.call(rewrite, key)) {
+      draft[key] = rewrite[key];
+    }
+    return draft;
+  }, {});
 }
 
 async function loadAdvancedConfig() {
@@ -2292,13 +2776,22 @@ async function resetAdvancedRewriteSettings() {
   if (advancedEls.saveBtn) advancedEls.saveBtn.disabled = true;
   if (advancedEls.resetBtn) advancedEls.resetBtn.disabled = true;
   try {
+    const preservedRewrite = pickAdvancedPreservedRewriteConfig(state.config?.rewrite || {});
     const data = await api('/api/config/reset', {
       method: 'POST',
       body: JSON.stringify({ section: 'rewrite' }),
     });
-    state.config = data.config;
-    state.choices = data.config?.choices || state.choices;
-    applyAdvancedConfig(data.config);
+    let nextConfig = data.config;
+    if (Object.keys(preservedRewrite).length) {
+      const restored = await api('/api/config', {
+        method: 'POST',
+        body: JSON.stringify({ rewrite: preservedRewrite }),
+      });
+      nextConfig = restored.config;
+    }
+    state.config = nextConfig;
+    state.choices = nextConfig?.choices || state.choices;
+    applyAdvancedConfig(nextConfig);
     toast('AI 仿写高级设置已恢复默认');
   } finally {
     if (advancedEls.saveBtn) advancedEls.saveBtn.disabled = false;
@@ -2322,18 +2815,19 @@ function bindAdvancedSettingsEvents() {
         const modelInput = advancedEls[`${scope}ModelInput`];
         if (modelInput && !modelInput.value.trim()) {
           modelInput.value = providerDefaultModel(providerInput.value, scope);
+          updateModelCard(scope, 'advanced');
         }
       });
     }
-    const fetchButton = advancedEls[`${scope}FetchModelsBtn`];
-    if (fetchButton) {
-      fetchButton.addEventListener('click', () => {
-        fetchAndChooseModel(scope).catch((error) => toast(error.message));
+    const chooseButton = advancedEls[`${scope}ChooseModelBtn`] || advancedEls[`${scope}FetchModelsBtn`];
+    if (chooseButton) {
+      chooseButton.addEventListener('click', () => {
+        openModelPicker(scope, 'advanced').catch((error) => toast(error.message));
       });
     }
     const manualButton = advancedEls[`${scope}ManualModelBtn`];
     if (manualButton) {
-      manualButton.addEventListener('click', () => manualModelInput(scope));
+      manualButton.addEventListener('click', () => manualModelInput(scope, 'advanced'));
     }
   });
   if (advancedEls.saveBtn) {
@@ -6872,18 +7366,31 @@ function bindSettingsEvents() {
   bindCollectionConfigEvents();
   if (settingsEls.rewriteProviderPresetInput) {
     settingsEls.rewriteProviderPresetInput.addEventListener('change', () => {
-      if (settingsEls.rewriteBaseUrlInput) {
-        settingsEls.rewriteBaseUrlInput.value = providerDefaultBaseUrl(settingsEls.rewriteProviderPresetInput.value);
-      }
+      setSettingsProvider(settingsEls.rewriteProviderPresetInput.value);
     });
   }
+  if (settingsEls.rewriteBaseUrlInput) {
+    settingsEls.rewriteBaseUrlInput.addEventListener('input', () => {
+      state.config = state.config || {};
+      state.config.rewrite = state.config.rewrite || {};
+      state.config.rewrite.base_url = (settingsEls.rewriteBaseUrlInput.value || '').trim();
+    });
+  }
+  ['text', 'vision', 'image'].forEach((scope) => {
+    const button = settingsEls[`rewrite${capitalize(scope)}ChooseModelBtn`];
+    if (button) {
+      button.addEventListener('click', () => {
+        openModelPicker(scope, 'settings').catch((error) => toast(error.message));
+      });
+    }
+  });
   if (settingsEls.rewriteFetchModelsBtn) {
     settingsEls.rewriteFetchModelsBtn.addEventListener('click', () => {
-      fetchAndChooseModel('shared').catch((error) => toast(error.message));
+      openModelPicker('text', 'settings').catch((error) => toast(error.message));
     });
   }
   if (settingsEls.rewriteManualModelBtn) {
-    settingsEls.rewriteManualModelBtn.addEventListener('click', () => manualModelInput('shared'));
+    settingsEls.rewriteManualModelBtn.addEventListener('click', () => manualModelInput('text', 'settings'));
   }
   if (settingsEls.saveConfigBtn) {
     settingsEls.saveConfigBtn.addEventListener('click', () => {

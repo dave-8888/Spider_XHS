@@ -27,6 +27,7 @@ from collector_service import (
     REWRITE_PREVIEW_TOPIC_SOURCE,
     RewriteService,
     SimpleScheduler,
+    build_model_catalog_snapshot_entry,
     create_output_directory,
     delete_output_entries,
     detect_rewrite_requirement_conflicts,
@@ -835,7 +836,16 @@ class AppHandler(BaseHTTPRequestHandler):
                 sync_profile_memory(saved_config)
                 json_response(self, {"success": True, "config": config_store.public()})
             elif path == "/api/model-catalog":
-                json_response(self, fetch_model_catalog(payload, config_store.load()))
+                catalog = fetch_model_catalog(payload, config_store.load())
+                snapshot_entry = build_model_catalog_snapshot_entry(payload, catalog)
+                if snapshot_entry:
+                    scope = str(catalog.get("scope") or payload.get("scope") or "shared").strip().lower()
+                    if scope not in {"shared", "text", "vision", "image"}:
+                        scope = "shared"
+                    config_store.save({"rewrite": {"model_catalog_snapshot": {scope: snapshot_entry}}})
+                response = dict(catalog)
+                response["config"] = config_store.public()
+                json_response(self, response)
             elif path == "/api/config/reset":
                 section = str(payload.get("section") or "").strip()
                 saved_config = config_store.reset_section(section)
